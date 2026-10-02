@@ -84,6 +84,7 @@ def facts_findings(data: dict):
                 f"{t['name']} (owner {t['owner']}): ACL is an empty array, so even the "
                 f"owner has no privileges. Recover with an explicit "
                 f"GRANT ALL ON {t['name']} TO \"{t['owner']}\";",
+                entities=(t['name'], t['owner']),
             )
 
 

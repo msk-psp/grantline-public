@@ -12,6 +12,7 @@
   --rule:rgba(21,26,33,.10);
   --shadow:0 8px 32px rgba(21,26,33,.10), 0 2px 8px rgba(21,26,33,.06);
   --radius:22px;
+  --log-warning:#8a4b08;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -23,11 +24,15 @@
     --edge:rgba(255,255,255,.14);
     --rule:rgba(255,255,255,.10);
     --shadow:0 8px 32px rgba(0,0,0,.38), 0 2px 8px rgba(0,0,0,.24);
+    --log-warning:#e0a45c;
   }
 }
 
 * { box-sizing:border-box; }
 html { color-scheme:light dark; }
+a { color:var(--accent); text-underline-offset:.2em; }
+a:where(:visited) { color:var(--accent); }
+a:hover { color:var(--ink); }
 body {
   margin:0; min-height:100vh; color:var(--ink);
   font:14px/1.65 -apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',system-ui,sans-serif;
@@ -55,7 +60,7 @@ body::before {
   }
 }
 
-.page { max-width:1140px; margin:0 auto; padding:3.5rem 1.25rem 5rem;
+.page { max-width:1140px; margin:0 auto; padding:1.5rem 1.25rem 4rem;
         display:flex; flex-direction:column; gap:1.5rem; }
 
 /* 유리 판 공통. `backdrop-filter` 를 못 쓰는 브라우저에서는 --glass 불투명도만으로도
@@ -75,25 +80,38 @@ body::before {
 
 header.glass { padding:2rem 1.9rem 1.7rem; }
 h1 { font-size:1.75rem; margin:0 0 .45rem; letter-spacing:-.025em; font-weight:640; }
+h1 .cnt { font-size:.65em; max-width:100%; overflow-wrap:anywhere; }
 .lede { color:var(--muted); margin:0; max-width:74ch; font-size:13.5px; }
-h2 { font-size:.68rem; letter-spacing:.16em; text-transform:uppercase; color:var(--muted);
+h2 { font-size:1rem; letter-spacing:.02em; color:var(--ink);
      margin:0 0 1rem; font-weight:620; }
 
 .scroll { overflow-x:auto; margin:-.4rem -.5rem; padding:.4rem .5rem; }
 table { border-collapse:separate; border-spacing:0; min-width:100%; font-size:13px; }
 th,td { padding:.55rem .8rem; text-align:left; white-space:nowrap;
         border-bottom:1px solid var(--rule); }
-thead th { font-size:9.5px; letter-spacing:.13em; text-transform:uppercase;
-           color:var(--muted); font-weight:620; padding-bottom:.7rem; }
-thead tr:first-child th { border-bottom:none; padding-bottom:.15rem; }
+thead th { font-size:12px; letter-spacing:.02em;
+           color:var(--ink); font-weight:620; padding:.7rem .8rem; background:var(--node); }
+thead tr:not(:last-child) th { border-bottom:none; }
 tbody th { font-family:ui-monospace,'SF Mono',Menlo,monospace; font-weight:600;
            font-size:12.5px; position:sticky; left:0;
-           background:linear-gradient(90deg,var(--glass-2) 82%,transparent); }
+           background:var(--node); z-index:1; }
 tbody tr:last-child th, tbody tr:last-child td { border-bottom:none; }
 tbody tr { transition:background .18s ease; }
 tbody tr:hover { background:rgba(255,255,255,.30); }
 @media (prefers-color-scheme: dark) { tbody tr:hover { background:rgba(255,255,255,.05); } }
-td { font-family:ui-monospace,'SF Mono',Menlo,monospace; font-size:12px; }
+td { font-family:ui-monospace,'SF Mono',Menlo,monospace; font-size:13px; vertical-align:top; }
+td.accounts { white-space:normal; min-width:16rem; }
+td.resource-name { white-space:normal; min-width:16rem; overflow-wrap:anywhere; }
+.run-times { margin:.6rem 0 1rem; color:var(--muted); font-size:12px; }
+.run-times dl { display:grid; grid-template-columns:auto 1fr; gap:.3rem 1rem; }
+.run-times dd { margin:0; overflow-wrap:anywhere; }
+.matrix .scroll { max-height:65vh; margin:0; padding:0; }
+.matrix thead { position:sticky; top:0; z-index:2; }
+.matrix th { border-right:1px solid var(--rule); }
+.matrix thead th:first-child { position:sticky; left:0; z-index:3; }
+.matrix td { text-align:center; }
+.access-grade { display:inline-block; padding:.1rem .5rem; border:1px solid currentColor;
+                border-radius:6px; background:color-mix(in srgb,currentColor 8%,var(--node)); }
 td.read  { color:var(--read);  }
 td.list  { color:var(--muted); }
 td.blind { color:var(--muted); font-style:italic; }
@@ -114,7 +132,7 @@ td.unobs { color:var(--muted); font-weight:640; }
 .d-add { color:var(--add); } .d-rm { color:var(--rm); }
 
 .cmd { display:flex; flex-direction:column; gap:.35rem; }
-.cmd code {
+.cmd code, header pre {
   font-family:ui-monospace,'SF Mono',Menlo,monospace; font-size:12px;
   padding:.5rem .75rem; border-radius:12px; border:1px solid var(--rule);
   background:rgba(255,255,255,.30); overflow-x:auto; white-space:pre;
@@ -128,13 +146,45 @@ td.unobs { color:var(--muted); font-weight:640; }
 .note:last-child { border-bottom:none; padding-bottom:0; }
 .note b { font-size:12.5px; font-weight:640; }
 .note p { margin:.25rem 0 0; color:var(--muted); font-size:12.5px; max-width:78ch; }
+.note details { margin-top:.5rem; color:var(--muted); font-size:13px; }
 .ok { color:var(--muted); margin:0; font-size:13px; }
 
 /* ── authorization paths ── */
-.nav { display:flex; gap:.9rem; align-items:baseline; margin-bottom:1.4rem;
+.nav { display:flex; flex-wrap:wrap; gap:.75rem; align-items:center; margin-bottom:.25rem;
        font-family:ui-monospace,'SF Mono',Menlo,monospace; font-size:11px; }
 .nav a { color:var(--muted); text-decoration:none; border-bottom:1px solid transparent; }
 .nav a:hover, .nav a.on { color:var(--ink); border-bottom-color:var(--accent); }
+.nav a { padding:.4rem 0; }
+.nav .brand { font:650 17px -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; color:var(--ink); margin-right:auto; }
+.nav .refresh { margin-left:auto; }
+.nav .identity { max-width:24ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.language { align-self:flex-end; display:flex; flex-wrap:wrap; align-items:center; gap:.5rem; font-size:12px; }
+.language select { font:inherit; border:1px solid var(--rule); border-radius:8px; padding:.35rem .5rem; }
+.language button { font-size:12px; }
+.login { max-width:640px; width:100%; align-self:center; margin:5vh 0 0; }
+.login .brand { display:block; margin-bottom:1.5rem; color:var(--ink); text-decoration:none; font-weight:650; }
+.login h1 { font-size:2.2rem; }
+.login-state { margin:1.5rem 0; overflow-wrap:anywhere; }
+.primary { display:inline-block; padding:.7rem 1.2rem; border-radius:10px; background:var(--accent); color:var(--node); font-weight:600; text-decoration:none; }
+.login .hint { margin-top:1.5rem; }
+.back { display:inline-block; margin-bottom:.7rem; color:var(--muted); font-size:12px; }
+.explain { margin-top:.8rem; color:var(--muted); font-size:12.5px; }
+summary { cursor:pointer; }
+.more-chips { display:inline; }
+.more-chips[open] { display:inline-block; }
+.more-chips summary { display:inline-block; }
+.more-chips[open] summary { margin-bottom:.4rem; }
+.table-tools { display:flex; flex-wrap:wrap; gap:.6rem; align-items:end; margin-bottom:1rem; }
+.table-tools label { display:flex; flex-direction:column; gap:.35rem; flex:1; min-width:180px; font-size:12px; color:var(--muted); }
+.table-tools input { width:100%; min-height:40px; padding:.5rem .7rem; border:1px solid var(--rule); border-radius:10px; background:var(--node); color:var(--ink); font:inherit; }
+.table-tools [role="status"] { color:var(--muted); font-size:11px; padding-bottom:.65rem; }
+.command-tools { display:flex; align-items:center; flex-wrap:wrap; gap:.7rem; color:var(--muted); font-size:11px; margin:.25rem 0 .7rem; }
+.command-tools button { border-color:var(--rule); }
+.scroll:focus-visible { outline-offset:3px; }
+:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.skip-link { position:fixed; z-index:10; left:1rem; top:-100px; padding:.6rem 1rem; background:var(--node); color:var(--ink); }
+.skip-link:focus { top:1rem; }
+[hidden] { display:none !important; }
 .page.wide { max-width:min(1960px, 97vw); }
 .map { position:relative; height:82vh; min-height:520px; overflow:hidden; border-radius:16px; contain:strict;
        background:var(--glass-2); border:1px solid var(--rule); cursor:grab; user-select:none; }
@@ -288,19 +338,23 @@ footer { color:var(--muted); font-size:11px; text-align:center;
    같은 줄에 얹혀 privilege 입력과 겹쳤다. 열은 화면에 맞춰 늘고 버튼은 자기 줄을 갖는다. */
 form.act { display:grid; grid-template-columns:repeat(auto-fit, minmax(12rem, 1fr));
            gap:.7rem 1rem; align-items:end; }
+form.act .field { display:flex; flex-direction:column; gap:.25rem; min-width:0; }
 form.act label { display:flex; flex-direction:column; gap:.25rem; font-size:9.5px;
   letter-spacing:.13em; text-transform:uppercase; color:var(--muted); font-weight:620;
   min-width:0; }
 form.act button { grid-column:1 / -1; justify-self:start; }
 form.act input, form.act select {
   font-family:ui-monospace,'SF Mono',Menlo,monospace; font-size:12.5px; color:var(--ink);
-  padding:.4rem .6rem; border:1px solid var(--rule); border-radius:10px;
+  padding:.55rem .6rem; min-height:40px; border:1px solid var(--rule); border-radius:10px;
   background:rgba(255,255,255,.34); min-width:0; width:100%; }
+select, option, optgroup { background-color:var(--node); color:var(--ink); }
+form.act select { background:var(--node); }
 @media (prefers-color-scheme: dark) {
-  form.act input, form.act select { background:rgba(255,255,255,.06); } }
+  form.act input { background:rgba(255,255,255,.06); } }
 button { font:inherit; font-size:12.5px; font-weight:620; cursor:pointer;
   padding:.45rem 1rem; border-radius:999px; border:1px solid var(--edge);
   background:rgba(255,255,255,.42); color:var(--ink); }
+button:disabled, button[aria-disabled="true"] { opacity:.55; cursor:default; }
 @media (prefers-color-scheme: dark) { button { background:rgba(255,255,255,.10); } }
 button.run { border-color:var(--rm); color:var(--rm); }
 button.run.grant { border-color:var(--add); color:var(--add); }
@@ -345,3 +399,43 @@ body:has(.page.wide)::before { animation:none !important; filter:none; }
 .st-executed { color:var(--add); }
 .st-denied   { color:var(--muted); }
 .st-failed   { color:var(--admin); }
+
+@media (max-width:640px) {
+  .page, .page.wide { padding:1rem .75rem 2rem; max-width:100%; gap:1rem; }
+  .glass, header.glass { padding:1.1rem; border-radius:16px; min-width:0; }
+  h1 { font-size:1.4rem; overflow-wrap:anywhere; }
+  .nav { gap:.5rem .9rem; font-size:12px; }
+  .nav .brand { flex-basis:100%; }
+  .nav .refresh { margin-left:0; }
+  .table-tools label { flex-basis:100%; }
+  .table-tools [role="status"] { padding-bottom:.45rem; }
+  form.act { grid-template-columns:1fr; }
+  form.act button { width:100%; }
+  .req code, .req-m, .warn { overflow-wrap:anywhere; }
+  .via { white-space:normal; overflow-wrap:anywhere; }
+  .dests .res, .hint, .note p { overflow-wrap:anywhere; }
+  .tools { gap:1rem; }
+  .tools .grp.view { margin-left:0; }
+  .map { min-height:420px; height:65vh; }
+  .legend { gap:.7rem; }
+}
+@media (prefers-reduced-motion:reduce) {
+  tbody tr { transition:none; }
+}
+
+/* Log levels describe diagnostic severity; grant/revoke colors describe direction. */
+.log-info { --log-color:var(--accent); }
+.log-warning { --log-color:var(--log-warning); }
+.log-error { --log-color:var(--rm); }
+.log-level { display:inline-block; color:var(--log-color); font:650 11px/1.5 ui-monospace,Menlo,monospace;
+             border:1px solid currentColor; border-radius:5px; padding:.1rem .4rem; white-space:nowrap; margin-right:.4rem; }
+.log-entry { border-left:3px solid var(--log-color); border-bottom:0; border-radius:10px;
+             background:color-mix(in srgb,var(--log-color) 6%,var(--node)); padding:.8rem 1rem; margin:.6rem 0; }
+.note.log-entry { padding:.8rem 1rem; }
+.note.log-entry b { color:var(--log-color); }
+.note.log-entry p { color:var(--ink); }
+
+/* Entity blocks retain identifier spelling, including long resource paths. */
+.log-entity { display:inline-block; max-width:100%; color:var(--ink); background:var(--node); border:1px solid var(--rule);
+              border-radius:5px; padding:.08rem .35rem; font:500 .9em/1.6 ui-monospace,Menlo,monospace;
+              overflow-wrap:anywhere; white-space:break-spaces; vertical-align:baseline; }

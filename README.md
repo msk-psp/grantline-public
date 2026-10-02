@@ -1,5 +1,7 @@
 # Grantline
 
+[English](README.md) · [한국어](docs/README.ko.md) · [日本語](docs/README.ja.md) · [简体中文](docs/README.zh-CN.md)
+
 **Untangle access. Follow the grants.**
 
 An open-source **permission management and access control dashboard** for
@@ -27,6 +29,11 @@ grantline -c examples/demo/grantline.toml serve
 Open **http://127.0.0.1:8420/**. The map is the first page; **Services** lists
 resources by service, **Matrix** compares permissions, and **Changes** previews
 explicit grants and revokes. Selecting a subject shows their access and routes.
+
+The console supports **English, 한국어, 日本語 and 简体中文**. Select a language
+at the top of any page; your choice is saved in a cookie. On your first visit,
+Grantline uses your browser language. Account names, resource paths and native
+commands retain their original spelling.
 
 ## Common commands
 

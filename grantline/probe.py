@@ -60,11 +60,13 @@ def compare(probes: list[Probe], observed: set[Grant]) -> list[Finding]:
             out.append(Finding(p.system, "granted on paper, denied on the path",
                                f"{p.subject} holds {p.priv} on {p.resource} in the grant table, "
                                f"but the probe was refused ({p.how}). The table is wrong or the "
-                               f"path consults something the table does not show."))
+                               f"path consults something the table does not show.",
+                               entities=(p.subject, p.priv, p.resource)))
         elif p.verdict == "allow" and key not in on_paper:
             out.append(Finding(p.system, "reachable, but no grant explains it",
                                f"{p.subject} can {p.priv} on {p.resource} ({p.how}) and no observed "
-                               f"grant says so. Something outside the table confers it."))
+                               f"grant says so. Something outside the table confers it.",
+                               entities=(p.subject, p.priv, p.resource)))
     return out
 
 

@@ -6,10 +6,16 @@ The current default branch is the supported version.
 
 ## Trust boundaries
 
-- Grantline is an operator tool. The HTTP server binds to loopback and has no login
-  system. Before sharing it, put an authenticated reverse proxy in front of it, restrict
+- Grantline is an operator tool. The HTTP server binds to loopback. Before sharing
+  it, put an authenticated reverse proxy in front of it, restrict
   network access, and set `[web] trusted_hosts = ["console.example.com"]` in the external
   configuration. This allowlist and same-origin POST checks do not authenticate users.
+- Optional `[web.auth] mode = "proxy"` requires one validated proxy identity header
+  for console data and writes. Grantline does not validate OIDC sessions itself.
+  Strip untrusted client identity headers at the proxy and keep the backend reachable
+  only by that proxy. A header from a directly reachable backend can be forged.
+  Without this configuration the local console remains unauthenticated. See
+  [console sign-in setup](docs/usage.md#console-sign-in).
 - Reading and writing use separate configured credentials. Keep write credentials out
   of observation-only deployments. The CLI, config, process environment, and local files
   belong to trusted operators; approval rules govern the web console, not operator CLI

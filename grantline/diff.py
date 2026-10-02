@@ -54,6 +54,7 @@ def plan(intent: Intent, observed: set[Grant], adapters: dict,
             f"{', '.join(u.subjects) + ': ' if u.subjects else ''}{', '.join(u.prefixes)} could not be read ({u.note}). "
             f"{n} intent grant(s) there are unverified — shown as '?', not planned. "
             f"'no access' and 'could not check' are different facts.",
+            entities=(*u.subjects, *u.prefixes),
         ))
 
     missing = visible_intent - visible_observed
@@ -79,6 +80,7 @@ def plan(intent: Intent, observed: set[Grant], adapters: dict,
                 f"{g.subject}: {g.priv} on {g.resource} is declared, and "
                 f"{wider.priv} on {wider.resource} already covers it. No grant planned; "
                 f"the held privilege is wider than the declared one.",
+                entities=(g.subject, g.priv, g.resource, wider.priv, wider.resource),
             ))
             continue
         changes.append(Change("grant", g, adapters[g.system].grant_cmd(g)))
@@ -125,6 +127,7 @@ def plan(intent: Intent, observed: set[Grant], adapters: dict,
             f"{_where(gs)} in '{system}', but the intent declares nothing for them there. "
             f"Silence is not a mandate to revoke — declare it, or list '{system}' in "
             f"managed_systems to say the system is fully described.",
+            entities=(subject, system, level({g.priv for g in gs}), *sorted({g.resource for g in gs})[:3]),
         ))
 
     for (system, subject), gs in sorted(unmanaged.items()):
@@ -134,6 +137,7 @@ def plan(intent: Intent, observed: set[Grant], adapters: dict,
             f"{_where(gs)}; the "
             f"subject is not in managed_subjects so nothing is planned. Add it to manage "
             f"it, or accept that this tool does not speak for it.",
+            entities=(subject, level({g.priv for g in gs}), *sorted({g.resource for g in gs})[:3]),
         ))
 
     # 어댑터가 여러 grant 를 한 명령으로 처리할 수 있으면 여기서 묶는다. 묶지 않으면
@@ -170,6 +174,7 @@ def _lint_default_privs(intent: Intent, observed: set[Grant]) -> list[Finding]:
                     f"{g.resource}: creator role '{creator}' has members, so its members' "
                     f"objects are NOT covered (owner is the member, not the group). "
                     f"Declare default privileges per creating role instead.",
+                    entities=(g.resource, creator),
                 ))
     return out
 
@@ -191,5 +196,6 @@ def _lint_naming(intent: Intent, observed: set[Grant]) -> list[Finding]:
                     "*", "naming drift",
                     f"role stem '{stem}' uses synonymous suffixes {sorted(hit)} — "
                     f"same concept, two names. Pick one and rename the other.",
+                    entities=(stem, *sorted(hit)),
                 ))
     return out

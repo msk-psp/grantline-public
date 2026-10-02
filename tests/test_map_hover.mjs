@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
+const tr = (message, ...values) => message.replace(/\{(\d+)\}/g, (_, i) => values[i]);
 const classList = () => {
   const classes = new Set();
   const changes = [];
@@ -30,7 +31,7 @@ const unrelated = { classList: classList(), dataset: { id: 'bob' } };
 const member = { classList: classList(), dataset: { src: 'alice', dst: 'group:product' } };
 const connector = { classList: classList(), dataset: { src: 'group:product', row: 'projects' } };
 const otherConnector = { classList: classList(), dataset: { src: 'bob', row: 'projects' } };
-const context = vm.createContext({ svg, map, document: { createElement: () => tip },
+const context = vm.createContext({ tr, svg, map, document: { createElement: () => tip },
   nodes: [account, holder, unrelated], edges: [member], nodeById: new Map(), drag: null,
   resCol: { layer: { querySelectorAll: () => [connector, otherConnector] } },
   setTimeout, clearTimeout,
@@ -100,3 +101,63 @@ unhover();
 svg.classList.remove('focus');
 
 console.log('PASS: repeated resource hover highlights holders and inherited routes within the selection');
+
+// API failures must not turn into empty access or a JSON exception from an SSO page.
+const apiSource = source.slice(source.indexOf('  async function readData('), source.indexOf('  let data;'));
+let response, redirected = '';
+const apiContext = vm.createContext({ tr, fetch: async () => response,
+  location: { pathname: '/', search: '?focus=alice', assign: url => { redirected = url; } } });
+const readData = vm.runInContext(apiSource + '\nreadData', apiContext);
+response = { status: 401 };
+await assert.rejects(readData('/api/graph.json'), /Sign in/);
+assert.equal(redirected, '/login?next=%2F%3Ffocus%3Dalice');
+response = { status: 503, ok: false };
+await assert.rejects(readData('/api/resources.json'), /Service request failed/);
+response = { status: 200, ok: true, headers: { get: () => 'text/html' } };
+await assert.rejects(readData('/api/graph.json'), /gateway returned a sign-in page/);
+response = { status: 200, ok: true, headers: { get: () => 'application/json' }, json: () => ({ items: [] }) };
+assert.deepEqual(await readData('/api/resources.json'), { items: [] });
+console.log('PASS: expired sign-in, unavailable services and gateway HTML stay distinct from empty access');
+
+// Run the actual enhancement script: focus is harmless; changing a proposal retires its preview.
+const control = value => ({ value, attrs: {}, listeners: {},
+  setAttribute(k, v) { this.attrs[k] = v; }, removeAttribute(k) { delete this.attrs[k]; },
+  getAttribute(k) { return this.attrs[k]; }, addEventListener(k, fn) { this.listeners[k] = fn; } });
+const fields = { system: control('s3'), subject: control('alice'), resource: control('bucket:demo'), priv: control('Read') };
+fields.system.options = [{ value: '' }, { value: 'postgres' }, { value: 's3' }];
+const proposalForm = control(''); proposalForm.elements = fields;
+const preview = { hidden: false }, button = control('approve');
+button.name = 'decision'; button.style = {};
+const postForm = control(''); postForm.querySelectorAll = () => [button];
+const windowEvents = {};
+vm.runInNewContext(readFileSync(new URL('../grantline/static/console.js', import.meta.url), 'utf8'), {
+  document: {
+    querySelector: selector => selector === '.language select' ? null : selector === '#propose' ? proposalForm : preview,
+    querySelectorAll: selector => ['form[method="post"]', 'form[aria-busy]'].includes(selector) ? [postForm] : [],
+  }, addEventListener: (name, fn) => { windowEvents[name] = fn; },
+});
+assert.equal(fields.resource.value, 'bucket:demo');
+assert.equal(fields.resource.attrs.list, 's1-resource');
+assert.equal(fields.resource.listeners.focus, undefined, 'focus must not reset input');
+fields.system.value = 'postgres'; fields.system.listeners.change(); proposalForm.listeners.change();
+assert.equal(fields.subject.value, 'alice'); assert.equal(fields.resource.value, '');
+assert.equal(fields.priv.value, ''); assert.equal(fields.resource.attrs.list, 's0-resource');
+assert.equal(preview.hidden, true, 'the old command must disappear when the proposal changes');
+let blocked = 0;
+const submit = { preventDefault: () => { blocked++; } };
+postForm.listeners.submit(submit); postForm.listeners.submit(submit);
+assert.equal(blocked, 1); assert.equal(button.disabled, undefined);
+assert.equal(button.name, 'decision'); assert.equal(button.value, 'approve');
+windowEvents.pageshow(); assert.equal(postForm.attrs['aria-busy'], undefined);
+console.log('PASS: form values, service suggestions, stale previews and duplicate-submit guard');
+
+// Client placeholders and Unicode must survive the same catalogs used by the server.
+for (const locale of ['en', 'ko', 'ja', 'zh-CN']) {
+  const messages = locale === 'en' ? {} : JSON.parse(readFileSync(new URL(`../grantline/locales/${locale}.json`, import.meta.url), 'utf8'));
+  const context = vm.createContext({ document: { querySelector: () => ({ textContent: JSON.stringify(messages) }) } });
+  vm.runInContext(readFileSync(new URL('../grantline/static/i18n.js', import.meta.url), 'utf8'), context);
+  const translated = context.GrantlineI18n('{0} of {1} rows', 2, 10);
+  assert.equal(translated, (messages['{0} of {1} rows'] || '{0} of {1} rows').replace('{0}', 2).replace('{1}', 10));
+  assert.equal(context.GrantlineI18n('via {0}', '<script>Read</script>'), (messages['via {0}'] || 'via {0}').replace('{0}', '<script>Read</script>'));
+}
+console.log('PASS: four client catalogs preserve Unicode and placeholder values');
