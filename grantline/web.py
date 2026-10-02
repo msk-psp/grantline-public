@@ -97,9 +97,9 @@ def render(observed: set[Grant], changes: list[Change], findings: list[Finding],
     sys_span: dict[str, int] = {}
     for sysname, _ in col_list:
         sys_span[sysname] = sys_span.get(sysname, 0) + 1
-    head1 = "".join(f'<th colspan="{n}">{e(s)}</th>' for s, n in sys_span.items())
+    head1 = "".join(f'<th scope="colgroup" colspan="{n}">{e(s)}</th>' for s, n in sys_span.items())
     head2 = "".join(
-        f'<th><a href="/g/{quote(s, safe="")}/{quote(g, safe="")}">{e(g)}</a>'
+        f'<th scope="col"><a href="/g/{quote(s, safe="")}/{quote(g, safe="")}">{e(g)}</a>'
         f'<span class="cnt">{len(cols[(s, g)])}</span></th>' for s, g in col_list)
 
     rows = []
@@ -124,9 +124,9 @@ def render(observed: set[Grant], changes: list[Change], findings: list[Finding],
                 badge += f'<span class="drift d-add">+{c["add"]}</span>'
             if c["rm"]:
                 badge += f'<span class="drift d-rm">−{c["rm"]}</span>'
-            label = _strength(c["privs"]).upper()[:2] + ("" if n == 1 else f"·{n}")
+            label = klass.capitalize() + ("" if n == 1 else f" · {n}")
             tds.append(f'<td class="{klass}" title="{e(", ".join(sorted(c["res"]))[:400])}">'
-                       f'{e(label)}{badge}</td>')
+                       f'<span class="access-grade">{e(label)}</span>{badge}</td>')
         rows.append(f'<tr><th scope="row"><a href="/s/{quote(subj, safe="")}">{e(subj)}</a></th>{"".join(tds)}</tr>')
 
     if changes:
@@ -149,7 +149,8 @@ def render(observed: set[Grant], changes: list[Change], findings: list[Finding],
         f'<div class="note"><b>[{e(sysname)}] {e(title)}</b>'
         + (f'<span class="cnt">{len(fs)}</span>' if len(fs) > 1 else "")
         + "".join(f"<p>{e(f.detail)}</p>" for f in fs[:2])
-        + (f'<p class="ok">… {len(fs) - 2} more</p>' if len(fs) > 2 else "")
+        + (f'<details><summary>{len(fs) - 2} more findings</summary>'
+           + "".join(f"<p>{e(f.detail)}</p>" for f in fs[2:]) + '</details>' if len(fs) > 2 else "")
         + "</div>"
         for (sysname, title), fs in sorted(groups.items(), key=lambda kv: -len(kv[1]))
     ) or '<p class="ok">No findings.</p>'
@@ -169,8 +170,10 @@ count of distinct resources behind each. Hover a cell for the list.
 <span class="drift d-rm">−n</span> present but absent from intent,
 <span class="blind">?</span> could not be checked (not the same as "no access").</p>
 </header>
-<section class="glass">
+<section class="glass matrix">
 <h2>Observed</h2>
+<p class="hint">Read / Write / Admin / List shows the strongest observed access; · n is the resource count.
+— means no observed grant; ? means unknown. Scroll across for all services.</p>
 <div class="scroll"><table>
 <thead><tr><th></th>{head1}</tr><tr><th>subject</th>{head2}</tr></thead>
 <tbody>{"".join(rows)}</tbody></table></div>

@@ -155,15 +155,16 @@ def _since_run(rec) -> str:
                 'comparison will cover however long it happens to be until you run '
                 'this again.</p></section>')
 
-    lines = "".join(
-        f'<code class="add">+ [{e(g.system)}] {e(g.subject)} {e(g.priv)} '
-        f"on {e(g.resource)}</code>" for g in cmp.added)
-    lines += "".join(
-        f'<code class="rm">&minus; [{e(g.system)}] {e(g.subject)} {e(g.priv)} '
-        f"on {e(g.resource)}</code>" for g in cmp.removed)
-    body = (f'<div class="cmd">{lines}</div>' if lines else
-            '<p class="ok">Nothing changed. Every grant seen then was seen now, and no '
-            'new one appeared &mdash; unchanged access is not listed here at all.</p>')
+    rows = "".join(
+        f'<tr><td><span class="drift d-{kind}">{label}</span></td>'
+        f'<td>{e(g.system)}</td><td>{_chips([g.subject])}</td>'
+        f'<td class="resource-name">{e(g.resource)}</td><td>{e(g.priv)}</td></tr>'
+        for kind, label, grants in (("add", "+ Added", cmp.added), ("rm", "− Removed", cmp.removed))
+        for g in grants)
+    body = (f'<div class="scroll"><table class="change-log"><thead><tr>'
+            '<th>Change</th><th>Service</th><th>Account</th><th>Resource</th><th>Privilege</th>'
+            f'</tr></thead><tbody>{rows}</tbody></table></div>' if rows else
+            '<p class="ok">Nothing changed. Unchanged access is omitted.</p>')
 
     # A scope that moved in or out of view is not access that moved. Kept out of the
     # list above and counted separately, because in set arithmetic they are
@@ -180,10 +181,11 @@ def _since_run(rec) -> str:
 
     return f"""<section class="glass"><h2>Since your previous run
 <span class="cnt">{cmp.moved} changed</span></h2>
-<p class="lede">Compared with your previous run, {e(cmp.ago())} &mdash;
-<span class="via">{e(cmp.prev.ts.isoformat())} &rarr; {e(cmp.cur.ts.isoformat())}</span>.
-There is no schedule behind that interval; it is however long it was between the two
-times you ran this. Only what differs appears below.</p>
+<p class="lede">Compared with the previous run, {e(cmp.ago())}.
+There is no schedule; only changed access is listed.</p>
+<details class="run-times"><summary>Comparison timestamps</summary>
+<dl><dt>Previous</dt><dd><time datetime="{e(cmp.prev.ts.isoformat())}">{e(cmp.prev.ts.isoformat())}</time></dd>
+<dt>Current</dt><dd><time datetime="{e(cmp.cur.ts.isoformat())}">{e(cmp.cur.ts.isoformat())}</time></dd></dl></details>
 {body}{blind}</section>"""
 
 
@@ -213,7 +215,7 @@ def render_inventory(observed: set[Grant], recorder=None, unobserved=()) -> str:
             f'<td class="num">{len(c["res"])}</td>'
             f'<td class="num">{len(c["subj"])}</td>'
             f'<td class="lvl {_strength(c["privs"])}">{_strength(c["privs"])}</td>'
-            f"<td>{_chips(c['subj'])}</td></tr>"
+            f"<td class=\"accounts\">{_chips(c['subj'])}</td></tr>"
             for grp, c in sorted(groups.items(), key=lambda kv: -len(kv[1]["res"])))
         total_r = len({r for c in groups.values() for r in c["res"]})
         total_s = len({s for c in groups.values() for s in c["subj"]})

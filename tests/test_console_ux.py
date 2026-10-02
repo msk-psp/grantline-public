@@ -2,6 +2,7 @@
 
 HTTP writes below use a spy and temporary approval files; no service or Slack calls.
 """
+import datetime
 import sys
 import tempfile
 import threading
@@ -14,12 +15,15 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from types import SimpleNamespace
+
 from grantline import pages, web
 from grantline.act import propose
 from grantline.adapters import Adapter
 from grantline.approvals import Approvals
 from grantline.graph import build
-from grantline.model import Grant, Unobserved
+from grantline.model import Finding, Grant, Unobserved
+from grantline.snapshot import Snapshot, compare
 
 grants = {Grant("s3", f"account{i}", "bucket:demo", "Read") for i in range(12)}
 inventory = pages.render_inventory(grants)
@@ -37,6 +41,19 @@ assert "No grants were observed for this account" in pages.render_subject(set(),
 assert "<img" not in pages.render_error(404, '<img src=x onerror="alert(1)">')
 assert 'name="subject" value="alice" autocomplete="off" required' in pages.render_act(
     {"subject": "alice"}, set(), {})
+
+# Readable logs still include each change, escape service data, and retain unknown scopes.
+before = Snapshot(Path("before"), datetime.datetime(2026, 10, 1, tzinfo=datetime.UTC), "demo",
+                  frozenset({"s3"}), frozenset({Grant("s3", "old", "bucket:demo", "Read")}), ())
+after = Snapshot(Path("after"), datetime.datetime(2026, 10, 2, tzinfo=datetime.UTC), "demo",
+                 frozenset({"s3"}), frozenset({Grant("s3", "<new>", "bucket:demo/path", "Write")}), ())
+log = pages._since_run(SimpleNamespace(comparison=compare(before, after)))
+assert "+ Added" in log and "− Removed" in log and "bucket:demo/path" in log
+assert "&lt;new&gt;" in log and "<new>" not in log and before.ts.isoformat() in log
+findings = [Finding("s3", "drift", f"account{i} <review>") for i in range(5)]
+details = web.render(grants, [], findings)
+assert all(f"account{i} &lt;review&gt;" in details for i in range(5)), "collapsed findings must remain reachable"
+assert "<review>" not in details
 
 
 class Spy(Adapter):

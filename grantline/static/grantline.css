@@ -28,6 +28,9 @@
 
 * { box-sizing:border-box; }
 html { color-scheme:light dark; }
+a { color:var(--accent); text-underline-offset:.2em; }
+a:where(:visited) { color:var(--accent); }
+a:hover { color:var(--ink); }
 body {
   margin:0; min-height:100vh; color:var(--ink);
   font:14px/1.65 -apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',system-ui,sans-serif;
@@ -77,24 +80,36 @@ header.glass { padding:2rem 1.9rem 1.7rem; }
 h1 { font-size:1.75rem; margin:0 0 .45rem; letter-spacing:-.025em; font-weight:640; }
 h1 .cnt { font-size:.65em; max-width:100%; overflow-wrap:anywhere; }
 .lede { color:var(--muted); margin:0; max-width:74ch; font-size:13.5px; }
-h2 { font-size:.85rem; letter-spacing:.04em; color:var(--muted);
+h2 { font-size:1rem; letter-spacing:.02em; color:var(--ink);
      margin:0 0 1rem; font-weight:620; }
 
 .scroll { overflow-x:auto; margin:-.4rem -.5rem; padding:.4rem .5rem; }
 table { border-collapse:separate; border-spacing:0; min-width:100%; font-size:13px; }
 th,td { padding:.55rem .8rem; text-align:left; white-space:nowrap;
         border-bottom:1px solid var(--rule); }
-thead th { font-size:9.5px; letter-spacing:.13em; text-transform:uppercase;
-           color:var(--muted); font-weight:620; padding-bottom:.7rem; }
-thead tr:first-child th { border-bottom:none; padding-bottom:.15rem; }
+thead th { font-size:12px; letter-spacing:.02em;
+           color:var(--ink); font-weight:620; padding:.7rem .8rem; background:var(--node); }
+thead tr:not(:last-child) th { border-bottom:none; }
 tbody th { font-family:ui-monospace,'SF Mono',Menlo,monospace; font-weight:600;
            font-size:12.5px; position:sticky; left:0;
-           background:linear-gradient(90deg,var(--glass-2) 82%,transparent); }
+           background:var(--node); z-index:1; }
 tbody tr:last-child th, tbody tr:last-child td { border-bottom:none; }
 tbody tr { transition:background .18s ease; }
 tbody tr:hover { background:rgba(255,255,255,.30); }
 @media (prefers-color-scheme: dark) { tbody tr:hover { background:rgba(255,255,255,.05); } }
-td { font-family:ui-monospace,'SF Mono',Menlo,monospace; font-size:12px; }
+td { font-family:ui-monospace,'SF Mono',Menlo,monospace; font-size:13px; vertical-align:top; }
+td.accounts { white-space:normal; min-width:16rem; }
+td.resource-name { white-space:normal; min-width:16rem; overflow-wrap:anywhere; }
+.run-times { margin:.6rem 0 1rem; color:var(--muted); font-size:12px; }
+.run-times dl { display:grid; grid-template-columns:auto 1fr; gap:.3rem 1rem; }
+.run-times dd { margin:0; overflow-wrap:anywhere; }
+.matrix .scroll { max-height:65vh; }
+.matrix thead { position:sticky; top:0; z-index:2; }
+.matrix th { border-right:1px solid var(--rule); }
+.matrix thead th:first-child { position:sticky; left:0; z-index:3; }
+.matrix td { text-align:center; }
+.access-grade { display:inline-block; padding:.1rem .5rem; border:1px solid currentColor;
+                border-radius:6px; background:color-mix(in srgb,currentColor 8%,var(--node)); }
 td.read  { color:var(--read);  }
 td.list  { color:var(--muted); }
 td.blind { color:var(--muted); font-style:italic; }
@@ -129,6 +144,7 @@ td.unobs { color:var(--muted); font-weight:640; }
 .note:last-child { border-bottom:none; padding-bottom:0; }
 .note b { font-size:12.5px; font-weight:640; }
 .note p { margin:.25rem 0 0; color:var(--muted); font-size:12.5px; max-width:78ch; }
+.note details { margin-top:.5rem; color:var(--muted); font-size:13px; }
 .ok { color:var(--muted); margin:0; font-size:13px; }
 
 /* ── authorization paths ── */
@@ -326,8 +342,10 @@ form.act input, form.act select {
   font-family:ui-monospace,'SF Mono',Menlo,monospace; font-size:12.5px; color:var(--ink);
   padding:.55rem .6rem; min-height:40px; border:1px solid var(--rule); border-radius:10px;
   background:rgba(255,255,255,.34); min-width:0; width:100%; }
+select, option, optgroup { background-color:var(--node); color:var(--ink); }
+form.act select { background:var(--node); }
 @media (prefers-color-scheme: dark) {
-  form.act input, form.act select { background:rgba(255,255,255,.06); } }
+  form.act input { background:rgba(255,255,255,.06); } }
 button { font:inherit; font-size:12.5px; font-weight:620; cursor:pointer;
   padding:.45rem 1rem; border-radius:999px; border:1px solid var(--edge);
   background:rgba(255,255,255,.42); color:var(--ink); }
