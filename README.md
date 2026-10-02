@@ -12,8 +12,8 @@ Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/). The demo needs no se
 or credentials.
 
 ```bash
-git clone https://github.com/msk-psp/grantline-public-v2.git
-cd grantline-public-v2
+git clone https://github.com/msk-psp/grantline-public.git
+cd grantline-public
 uv venv
 uv pip install -e .
 source .venv/bin/activate

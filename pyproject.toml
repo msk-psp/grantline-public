@@ -11,8 +11,8 @@ license = "Apache-2.0"
 requires-python = ">=3.11"
 
 [project.urls]
-Homepage = "https://github.com/msk-psp/grantline-public-v2"
-Changelog = "https://github.com/msk-psp/grantline-public-v2/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/msk-psp/grantline-public"
+Changelog = "https://github.com/msk-psp/grantline-public/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 postgres = ["psycopg[binary]>=3.1"]
