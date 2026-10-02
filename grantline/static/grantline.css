@@ -103,7 +103,7 @@ td.resource-name { white-space:normal; min-width:16rem; overflow-wrap:anywhere; 
 .run-times { margin:.6rem 0 1rem; color:var(--muted); font-size:12px; }
 .run-times dl { display:grid; grid-template-columns:auto 1fr; gap:.3rem 1rem; }
 .run-times dd { margin:0; overflow-wrap:anywhere; }
-.matrix .scroll { max-height:65vh; }
+.matrix .scroll { max-height:65vh; margin:0; padding:0; }
 .matrix thead { position:sticky; top:0; z-index:2; }
 .matrix th { border-right:1px solid var(--rule); }
 .matrix thead th:first-child { position:sticky; left:0; z-index:3; }
