@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "grantline"
 version = "0.1.0"
-description = "See and converge access across PostgreSQL, ClickHouse, and S3-compatible storage using each system's native permission commands."
+description = "Untangle access. Follow the grants. Open-source permission management and access visualization for PostgreSQL, ClickHouse and S3."
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.11"

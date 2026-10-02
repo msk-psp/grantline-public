@@ -1,8 +1,12 @@
 # Grantline
 
-See who can access what across PostgreSQL, ClickHouse and S3-compatible storage,
-and how that access arrives through roles, groups and policies. Grantline reads
-native permissions; enforcement stays in each service.
+**Untangle access. Follow the grants.**
+
+An open-source **permission management and access control dashboard** for
+**PostgreSQL, ClickHouse and S3-compatible storage**, including SeaweedFS.
+Visualize role-based access control (RBAC), trace access through roles, groups
+and IAM policies, and review permission drift before changing native grants.
+Enforcement stays in each service.
 
 ![Grantline access map](docs/images/routes-map.png)
 
