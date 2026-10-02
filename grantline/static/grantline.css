@@ -164,7 +164,6 @@ td.unobs { color:var(--muted); font-weight:640; }
 .gr .ed.hot, .gr .bridge.hot { opacity:1; stroke-width:3; }
 .gr .nd.hot rect { stroke-width:2.6; }
 .gr.hovering .nd:not(.hot) { opacity:.32; }
-.gr .rs.hot rect { stroke:var(--accent); stroke-width:2.4; }
 .gr.hovering .ed:not(.hot), .gr.hovering .bridge:not(.hot), .gr.hovering .bl:not(.hot) { opacity:.05; }
 .gr.focus.hovering .nd:not(.on) { opacity:.04; }
 .gr.focus.hovering .ed:not(.on), .gr.focus.hovering .bridge:not(.on) { opacity:0; }
@@ -217,6 +216,9 @@ td.unobs { color:var(--muted); font-weight:640; }
 .gr .ic { color:var(--ink); opacity:.9; }
 /* resources column: derived from the selection, so never faded by it */
 .gr .rs rect { stroke:var(--muted); }
+@media (prefers-reduced-motion: no-preference) {
+  .gr .rs rect { transition:fill .18s ease, stroke .18s ease, stroke-width .18s ease; }
+}
 .gr .rs.d1 rect, .gr .rs.d2 rect { stroke-dasharray:3 3; }
 .gr .rs.deeper { cursor:pointer; }
 .gr .rs.deeper rect { stroke:var(--ink); }
@@ -245,6 +247,8 @@ td.unobs { color:var(--muted); font-weight:640; }
    of a drag, and the glow is what the eye read as flicker */
 .gr .nd.sel rect { stroke-width:3.5; }
 .gr .nd.on rect { stroke-width:2.2; fill:color-mix(in srgb, currentColor 10%, var(--glass)); }
+/* Resource hover wins over the selected route's base fill and stroke width. */
+.gr .rs.hot rect { fill:color-mix(in srgb, var(--accent) 18%, var(--node)); stroke:var(--accent); stroke-width:2.4; }
 .gr .human.on   { color:var(--read); }  .gr .service.on, .gr .svc-account.on { color:var(--add); }
 .gr .role.on    { color:var(--write); } .gr .group.on, .gr .policy.on { color:var(--grp); }
 .legend { display:flex; gap:1.4rem; flex-wrap:wrap; font-size:11.5px; color:var(--muted);

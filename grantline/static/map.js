@@ -226,15 +226,16 @@ async function main() {
   function unhover() {
     if (!hot) return;
     for (const el of hot.els) el.classList.remove('hot');
-    svg.classList.remove('hovering');
+    if (svg.classList.contains('hovering')) svg.classList.remove('hovering');
     hot = null; tip.hidden = true;
   }
   function light(key, els, text, ev) {
     const r = map.getBoundingClientRect();
     const place = () => { tip.style.left = (ev.clientX - r.left + 12) + 'px'; tip.style.top = (ev.clientY - r.top + 12) + 'px'; };
     if (hot?.key === key) return place();
-    unhover();
-    for (const el of els) el.classList.add('hot');
+    // Keep shared highlights in place; resetting the whole SVG retriggers its transitions.
+    for (const el of hot?.els || []) if (!els.includes(el)) el.classList.remove('hot');
+    for (const el of els) if (!el.classList.contains('hot')) el.classList.add('hot');
     // Resource rows describe the selected routes; keep that context bright on enter/leave.
     svg.classList.toggle('hovering', !key.startsWith('row:'));
     hot = { key, els };
