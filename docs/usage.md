@@ -268,3 +268,17 @@ Probe implementation references: [PostgreSQL privilege inquiry functions](https:
 and [ClickHouse SHOW GRANTS](https://clickhouse.com/docs/reference/statements/show#show-grants).
 ClickHouse login identity checks return one row and bound execution time, following
 `clickhouse-best-practices/agent-query-safety`; they do not scan data tables.
+
+## Console language
+
+The console and README support English (`en`), Korean (`ko`), Japanese (`ja`) and
+Simplified Chinese (`zh-CN`). Select a language at the top of any console page.
+The selection is saved in the `grantline_lang` cookie. On a first visit, the
+`Accept-Language` header determines the language; unsupported languages fall back
+to English. A supported `?lang=` value overrides the cookie for that request.
+
+Only interface text is translated. Account names, resource identifiers, SQL,
+CLI commands and native service diagnostics retain their original spelling.
+The CLI and detailed operational documentation are in their original language.
+Translation catalogs live in `grantline/locales/`; English source text is the
+fallback. Templates are translated before service data is interpolated.

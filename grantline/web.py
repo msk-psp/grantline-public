@@ -9,9 +9,10 @@ import html
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from urllib.parse import quote, urlencode, urlsplit
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit
 
 from .diff import Change
+from .i18n import LANGUAGES, h, language, negotiate, t
 from .model import Finding, Grant, level
 
 _STATIC = Path(__file__).parent / "static"
@@ -97,10 +98,9 @@ def render(observed: set[Grant], changes: list[Change], findings: list[Finding],
     sys_span: dict[str, int] = {}
     for sysname, _ in col_list:
         sys_span[sysname] = sys_span.get(sysname, 0) + 1
-    head1 = "".join(f'<th scope="colgroup" colspan="{n}">{e(s)}</th>' for s, n in sys_span.items())
+    head1 = "".join(h('<th scope="colgroup" colspan="{0}">{1}</th>', n, e(s)) for s, n in sys_span.items())
     head2 = "".join(
-        f'<th scope="col"><a href="/g/{quote(s, safe="")}/{quote(g, safe="")}">{e(g)}</a>'
-        f'<span class="cnt">{len(cols[(s, g)])}</span></th>' for s, g in col_list)
+        h('<th scope="col"><a href="/g/{0}/{1}">{2}</a><span class="cnt">{3}</span></th>', quote(s, safe=""), quote(g, safe=""), e(g), len(cols[(s, g)])) for s, g in col_list)
 
     rows = []
     for subj in subjects:
@@ -109,58 +109,56 @@ def render(observed: set[Grant], changes: list[Change], findings: list[Finding],
             c = cell.get((subj, col))
             if any(u.covers(Grant(col[0], subj, res, ""))
                    for u in unobserved for res in cols[col]):
-                tds.append('<td class="blind" title="could not check">?</td>')
+                tds.append(h('<td class="blind" title="could not check">?</td>'))
                 continue
             if not c:
-                tds.append('<td class="none">—</td>')
+                tds.append(h('<td class="none">—</td>'))
                 continue
             if c["src"] == {"blind"}:
-                tds.append('<td class="blind" title="could not check">?</td>')
+                tds.append(h('<td class="blind" title="could not check">?</td>'))
                 continue
             klass = _strength(c["privs"])
             n = len(c["res"])
             badge = ""
             if c["add"]:
-                badge += f'<span class="drift d-add">+{c["add"]}</span>'
+                badge += h('<span class="drift d-add">+{0}</span>', c["add"])
             if c["rm"]:
-                badge += f'<span class="drift d-rm">−{c["rm"]}</span>'
-            label = klass.capitalize() + ("" if n == 1 else f" · {n}")
-            tds.append(f'<td class="{klass}" title="{e(", ".join(sorted(c["res"]))[:400])}">'
-                       f'<span class="access-grade">{e(label)}</span>{badge}</td>')
-        rows.append(f'<tr><th scope="row"><a href="/s/{quote(subj, safe="")}">{e(subj)}</a></th>{"".join(tds)}</tr>')
+                badge += h('<span class="drift d-rm">−{0}</span>', c["rm"])
+            label = t(klass.capitalize()) + ("" if n == 1 else f" · {n}")
+            tds.append(h('<td class="{0}" title="{1}"><span class="access-grade">{2}</span>{3}</td>', klass, e(", ".join(sorted(c["res"]))[:400]), e(label), badge))
+        rows.append(h('<tr><th scope="row"><a href="/s/{0}">{1}</a></th>{2}</tr>', quote(subj, safe=""), e(subj), "".join(tds)))
 
     if changes:
         lines = "".join(
-            f'<code class="{ "add" if c.action == "grant" else "rm" }">'
-            f'{"+" if c.action == "grant" else "−"} [{e(c.grant.system)}] {e(c.cmd)}</code>'
+            h('<code class="{0}">{1} [{2}] {3}</code>', "add" if c.action == "grant" else "rm", "+" if c.action == "grant" else "−", e(c.grant.system), e(c.cmd))
             for c in changes[:200])
-        more = (f'<p class="ok">… {len(changes) - 200} more</p>'
+        more = (h('<p class="ok">… {0} more</p>', len(changes) - 200)
                 if len(changes) > 200 else "")
-        plan_html = f'<div class="cmd">{lines}</div>{more}'
+        plan_html = h('<div class="cmd">{0}</div>{1}', lines, more)
     elif unobserved:
-        plan_html = '<p class="ok">No changes planned. Some scopes could not be observed; convergence is unknown.</p>'
+        plan_html = h('<p class="ok">No changes planned. Some scopes could not be observed; convergence is unknown.</p>')
     else:
-        plan_html = '<p class="ok">Converged — observed state matches intent.</p>'
+        plan_html = h('<p class="ok">Converged — observed state matches intent.</p>')
 
     groups: dict[tuple[str, str], list] = {}
     for f in findings:
         groups.setdefault((f.system, f.title), []).append(f)
     notes = "".join(
-        f'<div class="note"><b>[{e(sysname)}] {e(title)}</b>'
-        + (f'<span class="cnt">{len(fs)}</span>' if len(fs) > 1 else "")
-        + "".join(f"<p>{e(f.detail)}</p>" for f in fs[:2])
-        + (f'<details><summary>{len(fs) - 2} more findings</summary>'
-           + "".join(f"<p>{e(f.detail)}</p>" for f in fs[2:]) + '</details>' if len(fs) > 2 else "")
-        + "</div>"
+        h('<div class="note"><b>[{0}] {1}</b>', e(sysname), e(title))
+        + (h('<span class="cnt">{0}</span>', len(fs)) if len(fs) > 1 else "")
+        + "".join(h('<p>{0}</p>', e(f.detail)) for f in fs[:2])
+        + (h('<details><summary>{0} more findings</summary>', len(fs) - 2)
+           + "".join(h('<p>{0}</p>', e(f.detail)) for f in fs[2:]) + h('</details>') if len(fs) > 2 else "")
+        + h('</div>')
         for (sysname, title), fs in sorted(groups.items(), key=lambda kv: -len(kv[1]))
-    ) or '<p class="ok">No findings.</p>'
+    ) or h('<p class="ok">No findings.</p>')
 
     # 이 페이지만 nav 가 없어서 매트릭스에 들어가면 다른 탭으로 못 나갔다 —
     # 브라우저 뒤로가기 말고는 길이 없었다. pages._shell 을 안 거치는 두 페이지
     # (여기와 routes) 가 같은 이유로 빠졌고, routes 는 앞서 고쳤다.
     from .pages import _nav, _shell
-    return _shell("Access matrix", f"""
-{_nav("/matrix")}
+    return _shell(t("Access matrix"), h("""
+{0}
 <header class="glass">
 <h1>Access matrix</h1>
 <p class="lede">Subjects &times; resource groups, read live with read-only credentials.
@@ -175,17 +173,17 @@ count of distinct resources behind each. Hover a cell for the list.
 <p class="hint">Read / Write / Admin / List shows the strongest observed access; · n is the resource count.
 — means no observed grant; ? means unknown. Scroll across for all services.</p>
 <div class="scroll"><table>
-<thead><tr><th></th>{head1}</tr><tr><th>subject</th>{head2}</tr></thead>
-<tbody>{"".join(rows)}</tbody></table></div>
-{'<p class="ok">No accounts or grants were observed. Check service read errors and refresh before interpreting this as no access.</p>' if not rows else ''}
+<thead><tr><th></th>{1}</tr><tr><th>subject</th>{2}</tr></thead>
+<tbody>{3}</tbody></table></div>
+{4}
 </section>
 <section class="glass">
-<h2>Plan &middot; native commands, nothing applied</h2>{plan_html}
+<h2>Plan &middot; native commands, nothing applied</h2>{5}
 </section>
 <section class="glass">
-<h2>Findings</h2>{notes}
+<h2>Findings</h2>{6}
 </section>
-""")
+""", _nav("/matrix"), head1, head2, "".join(rows), h('<p class="ok">No accounts or grants were observed. Check service read errors and refresh before interpreting this as no access.</p>') if not rows else '', plan_html, notes))
 
 
 def _form(raw: str) -> dict[str, str]:
@@ -285,6 +283,7 @@ def serve(observe_fn, port: int, bridges_fn=lambda: [], adapters: dict | None = 
             body = html_.encode()
             self.send_response(status)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Language", language.get())
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
             # Native form POSTs need Origin; no-referrer turns it into null.
@@ -319,7 +318,11 @@ def serve(observe_fn, port: int, bridges_fn=lambda: [], adapters: dict | None = 
 
         def do_GET(self):
             user = proxy_user(self.headers, auth_cfg)
+            locale_token = language.set(negotiate(_form(urlsplit(self.path).query).get("lang", ""),
+                                                 self.headers.get("Cookie", ""),
+                                                 self.headers.get("Accept-Language", "")))
             token = current.set({"enabled": auth_cfg is not None, "user": user,
+                                 "path": local_path(self.path),
                                  "logout": proxy_target(auth_cfg["logout_url"], "/login") if auth_cfg else ""})
             try:
                 self._get()
@@ -327,12 +330,29 @@ def serve(observe_fn, port: int, bridges_fn=lambda: [], adapters: dict | None = 
                 self.send_error(503, "Unable to load access data. Refresh or check the configured service connections.")
             finally:
                 current.reset(token)
+                language.reset(locale_token)
 
         def _get(self):
             if not self._trusted():
                 return
             from .pages import parse_path, render_act, render_group, render_inventory, render_subject
             path, _, query = self.path.partition("?")
+            if path == "/language":
+                params = _form(query)
+                if params.get("lang") not in LANGUAGES:
+                    self.send_error(400, "Unsupported language"); return
+                self.send_response(303)
+                destination = urlsplit(local_path(params.get("next", "/")))
+                query = urlencode([(k, v) for k, v in parse_qsl(destination.query, keep_blank_values=True)
+                                   if k not in ("lang", "refresh")])
+                self.send_header("Location", destination.path + ("?" + query if query else "") +
+                                 ("#" + destination.fragment if destination.fragment else ""))
+                self.send_header("Set-Cookie", f'grantline_lang={params["lang"]}; Path=/; Max-Age=31536000; SameSite=Lax; HttpOnly')
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Referrer-Policy", "no-referrer")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             if path.startswith("/static/"):
                 name = path.removeprefix("/static/")
                 f = _STATIC / name
@@ -419,7 +439,10 @@ def serve(observe_fn, port: int, bridges_fn=lambda: [], adapters: dict | None = 
 
         def do_POST(self):
             user = proxy_user(self.headers, auth_cfg)
+            locale_token = language.set(negotiate("", self.headers.get("Cookie", ""),
+                                                 self.headers.get("Accept-Language", "")))
             token = current.set({"enabled": auth_cfg is not None, "user": user,
+                                 "path": local_path(self.path),
                                  "logout": proxy_target(auth_cfg["logout_url"], "/login") if auth_cfg else ""})
             try:
                 with cache.lock:
@@ -428,6 +451,7 @@ def serve(observe_fn, port: int, bridges_fn=lambda: [], adapters: dict | None = 
                 self.send_error(503, "Unable to finish this request. Check its status in Changes before retrying.")
             finally:
                 current.reset(token)
+                language.reset(locale_token)
 
         def _post(self):
             if not self._trusted(write=True):
@@ -695,8 +719,8 @@ def graph_data(graph, unobserved=()) -> dict:
 
 def render_graph_page() -> str:
     from .pages import _nav, _shell
-    return _shell("Authorization paths", f"""
-{_nav("/")}
+    return _shell(t("Authorization paths"), h("""
+{0}
 <header class="glass">
 <h1>Authorization paths</h1>
 <p class="lede">How authority <em>reaches</em> a resource. The matrix shows who holds
@@ -737,4 +761,4 @@ server holds, never theirs.</p>
   <span style="color:var(--admin)"><b>→</b> admin &middot; <b>- -</b> bridge, declared not discovered</span>
 </div>
 </section>
-<script type="module" src="{asset("map.js")}"></script>""", wide=True)
+<script type="module" src="{1}"></script>""", _nav("/"), asset("map.js")), wide=True)

@@ -1,3 +1,5 @@
+const tr = globalThis.GrantlineI18n || ((message, ...values) => message.replace(/\{(\d+)\}/g, (_, i) => values[i]));
+document.querySelector('.language select')?.addEventListener('change', event => event.target.form.requestSubmit());
 // Progressive enhancements: ordinary links and forms still work without JavaScript.
 for (const link of document.querySelectorAll('.refresh')) {
   const url = new URL(location.href);
@@ -8,19 +10,19 @@ for (const link of document.querySelectorAll('.refresh')) {
 for (const [i, table] of [...document.querySelectorAll('table')].entries()) {
   const rows = [...table.tBodies].flatMap(body => [...body.rows]);
   if (!rows.length) continue;
-  const name = table.closest('section')?.querySelector('h2')?.textContent.trim() || 'Rows';
+  const name = table.closest('section')?.querySelector('h2')?.textContent.trim() || tr('Rows');
   const bar = document.createElement('div'); bar.className = 'table-tools';
-  const label = document.createElement('label'); label.textContent = 'Search ' + name;
+  const label = document.createElement('label'); label.textContent = tr('Search {0}', name);
   const input = document.createElement('input'); input.type = 'search';
-  input.placeholder = 'Account, resource or privilege';
+  input.placeholder = tr('Account, resource or privilege');
   label.append(input);
   const status = document.createElement('span'); status.id = 'filter-status-' + i;
   status.setAttribute('role', 'status'); input.setAttribute('aria-describedby', status.id);
-  const clear = document.createElement('button'); clear.type = 'button'; clear.textContent = 'Clear';
+  const clear = document.createElement('button'); clear.type = 'button'; clear.textContent = tr('Clear');
   clear.addEventListener('click', () => { input.value = ''; filter(); input.focus(); });
   bar.append(label, clear, status); table.closest('.scroll').before(bar);
   const scroll = table.closest('.scroll');
-  scroll.tabIndex = 0; scroll.setAttribute('role', 'region'); scroll.setAttribute('aria-label', name + ' table');
+  scroll.tabIndex = 0; scroll.setAttribute('role', 'region'); scroll.setAttribute('aria-label', tr('{0} table', name));
   function filter() {
     const query = input.value.trim().toLocaleLowerCase();
     let count = 0;
@@ -29,7 +31,7 @@ for (const [i, table] of [...document.querySelectorAll('table')].entries()) {
       if (!row.hidden) count++;
       for (const details of row.querySelectorAll('.more-chips')) details.open = !!query && !row.hidden;
     }
-    status.textContent = count ? `${count} of ${rows.length} rows` : 'No matching rows. Try another search.';
+    status.textContent = count ? tr('{0} of {1} rows', count, rows.length) : tr('No matching rows. Try another search.');
     clear.disabled = !query;
   }
   input.addEventListener('input', filter); filter();
@@ -70,11 +72,11 @@ for (const post of document.querySelectorAll('form[method="post"]')) {
 
 for (const code of document.querySelectorAll('.cmd code, .req pre, header pre')) {
   const button = document.createElement('button'); button.type = 'button';
-  button.className = 'copy-command'; button.textContent = 'Copy command';
+  button.className = 'copy-command'; button.textContent = tr('Copy command');
   const status = document.createElement('span'); status.setAttribute('role', 'status');
   button.addEventListener('click', async () => {
-    try { await navigator.clipboard.writeText(code.textContent); status.textContent = 'Copied'; }
-    catch { status.textContent = 'Copy unavailable. Select the command text instead.'; }
+    try { await navigator.clipboard.writeText(code.textContent); status.textContent = tr('Copied'); }
+    catch { status.textContent = tr('Copy unavailable. Select the command text instead.'); }
   });
   const tools = document.createElement('div'); tools.className = 'command-tools';
   tools.append(button, status); code.after(tools);

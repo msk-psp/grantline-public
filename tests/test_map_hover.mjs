@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
+const tr = (message, ...values) => message.replace(/\{(\d+)\}/g, (_, i) => values[i]);
 const classList = () => {
   const classes = new Set();
   const changes = [];
@@ -30,7 +31,7 @@ const unrelated = { classList: classList(), dataset: { id: 'bob' } };
 const member = { classList: classList(), dataset: { src: 'alice', dst: 'group:product' } };
 const connector = { classList: classList(), dataset: { src: 'group:product', row: 'projects' } };
 const otherConnector = { classList: classList(), dataset: { src: 'bob', row: 'projects' } };
-const context = vm.createContext({ svg, map, document: { createElement: () => tip },
+const context = vm.createContext({ tr, svg, map, document: { createElement: () => tip },
   nodes: [account, holder, unrelated], edges: [member], nodeById: new Map(), drag: null,
   resCol: { layer: { querySelectorAll: () => [connector, otherConnector] } },
   setTimeout, clearTimeout,
@@ -104,7 +105,7 @@ console.log('PASS: repeated resource hover highlights holders and inherited rout
 // API failures must not turn into empty access or a JSON exception from an SSO page.
 const apiSource = source.slice(source.indexOf('  async function readData('), source.indexOf('  let data;'));
 let response, redirected = '';
-const apiContext = vm.createContext({ fetch: async () => response,
+const apiContext = vm.createContext({ tr, fetch: async () => response,
   location: { pathname: '/', search: '?focus=alice', assign: url => { redirected = url; } } });
 const readData = vm.runInContext(apiSource + '\nreadData', apiContext);
 response = { status: 401 };
@@ -131,7 +132,7 @@ const postForm = control(''); postForm.querySelectorAll = () => [button];
 const windowEvents = {};
 vm.runInNewContext(readFileSync(new URL('../grantline/static/console.js', import.meta.url), 'utf8'), {
   document: {
-    querySelector: selector => selector === '#propose' ? proposalForm : preview,
+    querySelector: selector => selector === '.language select' ? null : selector === '#propose' ? proposalForm : preview,
     querySelectorAll: selector => ['form[method="post"]', 'form[aria-busy]'].includes(selector) ? [postForm] : [],
   }, addEventListener: (name, fn) => { windowEvents[name] = fn; },
 });
@@ -149,3 +150,14 @@ assert.equal(blocked, 1); assert.equal(button.disabled, undefined);
 assert.equal(button.name, 'decision'); assert.equal(button.value, 'approve');
 windowEvents.pageshow(); assert.equal(postForm.attrs['aria-busy'], undefined);
 console.log('PASS: form values, service suggestions, stale previews and duplicate-submit guard');
+
+// Client placeholders and Unicode must survive the same catalogs used by the server.
+for (const locale of ['en', 'ko', 'ja', 'zh-CN']) {
+  const messages = locale === 'en' ? {} : JSON.parse(readFileSync(new URL(`../grantline/locales/${locale}.json`, import.meta.url), 'utf8'));
+  const context = vm.createContext({ document: { querySelector: () => ({ textContent: JSON.stringify(messages) }) } });
+  vm.runInContext(readFileSync(new URL('../grantline/static/i18n.js', import.meta.url), 'utf8'), context);
+  const translated = context.GrantlineI18n('{0} of {1} rows', 2, 10);
+  assert.equal(translated, (messages['{0} of {1} rows'] || '{0} of {1} rows').replace('{0}', 2).replace('{1}', 10));
+  assert.equal(context.GrantlineI18n('via {0}', '<script>Read</script>'), (messages['via {0}'] || 'via {0}').replace('{0}', '<script>Read</script>'));
+}
+console.log('PASS: four client catalogs preserve Unicode and placeholder values');

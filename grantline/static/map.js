@@ -7,6 +7,7 @@
 //   focus    click a node → its routes stay, everything else fades, camera glides
 //   env      prod / staging toggles hide edges, then nodes nothing reaches
 
+const tr = globalThis.GrantlineI18n || ((message, ...values) => message.replace(/\{(\d+)\}/g, (_, i) => values[i]));
 const COL = 350, ROW = 48, W = 270, H = 32, TOP = 150, ARR = 7;  // W fits `clinical-researcher  prod·stg 🌿`
 const LANE = 40;            // y of the bus above the columns that long edges travel on
 const SVC_ORDER = ['postgres', 'clickhouse', 's3'];
@@ -32,28 +33,27 @@ async function main() {
     const res = await fetch(path);
     if (res.status === 401) {
       location.assign('/login?next=' + encodeURIComponent(location.pathname + location.search));
-      throw new Error('Sign in to continue.');
+      throw new Error(tr('Sign in to continue.'));
     }
-    if (!res.ok) throw new Error(`Service request failed (${res.status}). Try refreshing.`);
+    if (!res.ok) throw new Error(tr('Service request failed ({0}). Try refreshing.', res.status));
     if (!res.headers.get('Content-Type')?.includes('application/json'))
-      throw new Error('The gateway returned a sign-in page or an unexpected response. Check sign-in and refresh.');
+      throw new Error(tr('The gateway returned a sign-in page or an unexpected response. Check sign-in and refresh.'));
     return res.json();
   }
   let data;
   try { data = await readData('/api/graph.json' + location.search); }
-  catch (err) { stop(`could not read the services: ${err}`); return; }
+  catch (err) { stop(tr('could not read the services: {0}', err)); return; }
   done();
   // F6 on the map. A system that could not be read draws no lines, and a map with no
   // lines into it looks exactly like a system nobody can reach. Say which, and why,
   // before the picture — the picture is incomplete and the reader must know it.
   const note = document.querySelector('.blind');
   if (note && data.blind && data.blind.length) {
-    note.innerHTML = '<div class="warn stop"><b>the map is incomplete</b>'
-      + data.blind.map(b => `${esc(b.system)} could not be read (${esc(b.note)})`).join('; ')
-      + '. Nothing below shows a route into it. That is not "nobody reaches it" — it is '
-      + 'unknown, and the two must not be read as the same thing.</div>';
+    note.innerHTML = '<div class="warn stop"><b>' + esc(tr('the map is incomplete')) + '</b>'
+      + data.blind.map(b => esc(tr('{0} could not be read ({1})', b.system, b.note))).join('; ')
+      + esc(tr('. No route into unread services is shown. This means unknown access, not no access.')) + '</div>';
   }
-  if (!data.nodes.length) { map.innerHTML = '<p class=ok>No multi-hop authority — every grant is direct.</p>'; return; }
+  if (!data.nodes.length) { map.innerHTML = '<p class=ok>' + esc(tr('No multi-hop authority — every grant is direct.')) + '</p>'; return; }
 
   // ── layout ───────────────────────────────────────────────────────────
   // Humans and declared services both *consume* authority — one column, with a
@@ -126,16 +126,16 @@ async function main() {
   frag.append(defs);
   cols.forEach((k, i) => {
     const x = 60 + COL * i;
-    frag.append(el('text', { class: 'ch', x, y: TOP - 30 }, TITLE[k] || data.titles[k] || k));
+    frag.append(el('text', { class: 'ch', x, y: TOP - 30 }, tr(TITLE[k] || data.titles[k] || k)));
     frag.append(el('text', { class: 'cs', x, y: TOP - 14 },
-      `${byCol.get(k).length} · ${GROUPED.has(k) ? 'by service, a–z'
-        : k === 'human' ? (teamNames.length ? 'by team, then services' : 'humans, then services, a–z') : 'a–z'}`));
+      `${byCol.get(k).length} · ${GROUPED.has(k) ? tr('by service, a–z')
+        : k === 'human' ? (teamNames.length ? tr('by team, then services') : tr('humans, then services, a–z')) : 'a–z'}`));
   });
   for (const [x, y, name, icon] of heads) {
     const g = el('g', { class: `gh i-${icon}`, transform: `translate(${x},${y + 8})` });
     const ic = el('g', { class: 'ic', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.4, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' });
     ic.innerHTML = data.icons[icon] || data.icons.generic; g.append(ic);
-    g.append(el('text', { class: 'cs', x: 22, y: 12 }, name || 'other'));
+    g.append(el('text', { class: 'cs', x: 22, y: 12 }, name === 'human' || name === 'service' || !name ? tr(name || 'other') : name));
     frag.append(g);
   }
   // An edge that skips a column would run straight through the boxes in between and
@@ -180,7 +180,7 @@ async function main() {
     }
     const nameEl = el('text', { x: x + (n.icon ? 34 : 12), y: y + 20 }, n.label);
     g.append(nameEl);
-    if (n.tag) g.append(el('text', { class: 'fo', x: x + W - 12, y: y + 20, 'text-anchor': 'end' }, n.tag));
+    if (n.tag) g.append(el('text', { class: 'fo', x: x + W - 12, y: y + 20, 'text-anchor': 'end' }, n.tag.replace(/^(\d+) res ›$/, (_, count) => tr('{0} res ›', count))));
     else if (n.homes?.length) {
       const { kinds, tag } = homeIcons(n);
       // strip, right to left: where it lives (service kinds), then who uses it
@@ -199,7 +199,7 @@ async function main() {
       const room = (tag ? tagX - 6.6 * tag.length - 8 : tagX) - (+nameEl.getAttribute('x'));
       const fits = Math.floor(room / 7.1);
       if (fits > 3 && n.label.length > fits) { nameEl.textContent = n.label.slice(0, fits - 1) + '…'; g.append(el('title', {}, n.label)); }
-      g.append(el('title', {}, `in: ${n.homes.join(', ')}` + (users.length ? `\nused by: ${users.map(u => u.slice(8)).join(', ')}` : '')));
+      g.append(el('title', {}, tr('in: {0}', n.homes.join(', ')) + (users.length ? '\n' + tr('used by: {0}', users.map(u => u.slice(8)).join(', ')) : '')));
     }
     nodes.push(g); frag.append(g);
   }
@@ -261,7 +261,7 @@ async function main() {
       const id = g.dataset.id;
       if (!id) {   // a row in the resources column: say who reaches it, and how
         const name = g.querySelector('text').textContent.replace(/^[▸▾]\s*/, '');
-        const via = g.dataset.via ? `  ·  via ${g.dataset.via}` : '';
+        const via = g.dataset.via ? '  ·  ' + tr('via {0}', g.dataset.via) : '';
         const srcs = new Set((g.dataset.srcs || '').split('\u0000').filter(Boolean));
         const ns = new Set(), es = new Set();
         for (const src of srcs) {
@@ -283,8 +283,8 @@ async function main() {
       // arrive through somebody else's key, and the column must say so
       const rows = [...resCol.layer.querySelectorAll('.rs')].filter(r => (r.dataset.srcs || '').split('\u0000').includes(id));
       return light('nd:' + id, [g, ...mine, ...nodes.filter(n => ends.has(n.dataset.id)), ...rows],
-                   `${nameOf(id)}  ·  ${inn_} in, ${mine.length - inn_} out` +
-                   (rows.length ? `  ·  ${rows.length} resource row(s)` : ''), ev);
+                   tr('{0} · {1} in, {2} out', nameOf(id), inn_, mine.length - inn_) +
+                   (rows.length ? '  ·  ' + tr('{0} resource row(s)', rows.length) : ''), ev);
     }
     const r = map.getBoundingClientRect(), u = r.width / fitW * cam.k;
     const ux = (ev.clientX - r.left - cam.x) / u, uy = (ev.clientY - r.top - cam.y) / u;
@@ -401,7 +401,7 @@ async function main() {
   const kinds = [...new Set(Object.values(data.instances).map(i => i.kind))].sort();
   for (const k of kinds) {
     const b = document.createElement('button');
-    b.type = 'button'; b.className = 'on'; b.dataset.kind = k; b.title = `show what reaches ${k}`;
+    b.type = 'button'; b.className = 'on'; b.dataset.kind = k; b.title = tr('show what reaches {0}', k);
     b.innerHTML = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" class="ic i-${k}">${data.icons[k] || data.icons.generic}</svg>${k}`;
     svcBox.append(b);
   }
@@ -526,7 +526,7 @@ async function main() {
         } catch (err) {
           if (this.instance !== instance) return;
           this.close(); note.querySelector('.resource-error')?.remove();
-          note.insertAdjacentHTML('beforeend', `<div class="warn stop resource-error" role="alert"><b>Resources unavailable</b>${esc(String(err))} <a href="?refresh=1">Refresh</a></div>`);
+          note.insertAdjacentHTML('beforeend', `<div class="warn stop resource-error" role="alert"><b>${esc(tr('Resources unavailable'))}</b>${esc(String(err))} <a href="?refresh=1">${esc(tr('Refresh'))}</a></div>`);
           return;
         }
       }
@@ -570,17 +570,17 @@ async function main() {
       const head = el('text', { class: 'ch', x, y: TOP - 30 }, this.instance + '  ');
       const allKeys = []; (function collect(n) { for (const k of n.kids.values()) { if (k.kids.size && k.depth >= 1) allKeys.push(k.key); collect(k); } })(root);
       const allOpen = allKeys.length && allKeys.every(k => this.open_.has(k));
-      const ex = el('tspan', { class: 'crumb' }, allOpen ? '⊟ fold' : '⊞ expand all');
+      const ex = el('tspan', { class: 'crumb' }, allOpen ? tr('⊟ fold') : tr('⊞ expand all'));
       ex.addEventListener('pointerup', ev => { ev.stopPropagation(); this.open_ = allOpen ? new Set() : new Set(allKeys); this.render(); });
       head.append(ex, el('tspan', {}, '   '));
-      const close = el('tspan', { class: 'crumb' }, '× close'); close.addEventListener('pointerup', ev => { ev.stopPropagation(); this.close(); });
+      const close = el('tspan', { class: 'crumb' }, tr('× close')); close.addEventListener('pointerup', ev => { ev.stopPropagation(); this.close(); });
       head.append(close);
       this.layer.append(head);
-      this.layer.append(el('text', { class: 'cs', x, y: TOP - 14 }, `${here.length} res · ${rows.length} rows${rows.length > CAP ? ` · showing ${CAP}` : ''}`));
+      this.layer.append(el('text', { class: 'cs', x, y: TOP - 14 }, tr('{0} res · {1} rows', here.length, rows.length) + (rows.length > CAP ? tr(' · showing {0}', CAP) : '')));
       if (!here.length) {
         const who = sel.filter(id => !id.startsWith('@')).map(id => id.replace(/^[a-z]+:/, '')).join(' + ');
         this.layer.append(el('text', { class: 'cs', x, y: TOP + 20 },
-          who ? `${who} reaches nothing in ${this.instance} — step back (Esc) to see all of it` : 'nothing collapsed here'));
+          who ? tr('{0} reaches nothing in {1} — step back (Esc) to see all of it', who, this.instance) : tr('nothing collapsed here')));
       }
       const from = id => { const [nx, ny] = pos.get(id) || [x - COL, TOP]; return [nx + W, ny + H / 2]; };
       // lines land on top-level rows only; deeper rows say their grade in the tag
@@ -599,16 +599,16 @@ async function main() {
         const worst = [...k.bySrc.values()].reduce(worse, 'none');
         const folded = k.kids.size && k.depth >= 1 && !this.open_.has(k.key);
         const openable = k.kids.size && k.depth >= 1;
-        const via = [...k.bySrc].map(([src, lv]) => `${src} (${lv})`).join(', ');
+        const via = [...k.bySrc].map(([src, lv]) => `${src} (${tr(lv)})`).join(', ');
         const node = el('g', { class: `nd on rs d${k.depth} ${openable ? 'deeper' : ''}`, 'data-key': openable ? k.key : null,
                                'data-row': k.key, 'data-srcs': [...k.bySrc.keys()].join('\u0000'), 'data-via': via },
                         el('rect', { x: x + ind, y, width: W - ind, height: H, rx: 9 }),
                         el('text', { x: x + ind + 12, y: y + 20 }, (k.depth ? (folded ? '▸ ' : openable ? '▾ ' : '') : '') + k.name),
-                        el('text', { class: `fo e-${worst}`, x: x + W - 12, y: y + 20, 'text-anchor': 'end' },
-                           `${k.kids.size ? k.kids.size + ' · ' : ''}${worst}`));
+                        el('text', { class: `fo e-${tr(worst)}`, x: x + W - 12, y: y + 20, 'text-anchor': 'end' },
+                           `${k.kids.size ? k.kids.size + ' · ' : ''}${tr(worst)}`));
         this.layer.append(node);
       });
-      if (rows.length > CAP) this.layer.append(el('text', { class: 'cs', x, y: TOP + ROW * CAP + 20 }, `+${rows.length - CAP} more — see the subject page`));
+      if (rows.length > CAP) this.layer.append(el('text', { class: 'cs', x, y: TOP + ROW * CAP + 20 }, tr('+{0} more — see the subject page', rows.length - CAP)));
     },
   };
   svg.append(resCol.layer);
