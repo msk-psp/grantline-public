@@ -226,15 +226,16 @@ async function main() {
   function unhover() {
     if (!hot) return;
     for (const el of hot.els) el.classList.remove('hot');
-    svg.classList.remove('hovering');
+    if (svg.classList.contains('hovering')) svg.classList.remove('hovering');
     hot = null; tip.hidden = true;
   }
   function light(key, els, text, ev) {
     const r = map.getBoundingClientRect();
     const place = () => { tip.style.left = (ev.clientX - r.left + 12) + 'px'; tip.style.top = (ev.clientY - r.top + 12) + 'px'; };
     if (hot?.key === key) return place();
-    unhover();
-    for (const el of els) el.classList.add('hot');
+    // Keep shared highlights in place; resetting the whole SVG retriggers its transitions.
+    for (const el of hot?.els || []) if (!els.includes(el)) el.classList.remove('hot');
+    for (const el of els) if (!el.classList.contains('hot')) el.classList.add('hot');
     // Resource rows describe the selected routes; keep that context bright on enter/leave.
     svg.classList.toggle('hovering', !key.startsWith('row:'));
     hot = { key, els };
@@ -252,7 +253,19 @@ async function main() {
       if (!id) {   // a row in the resources column: say who reaches it, and how
         const name = g.querySelector('text').textContent.replace(/^[▸▾]\s*/, '');
         const via = g.dataset.via ? `  ·  via ${g.dataset.via}` : '';
-        return light('row:' + g.dataset.row, [g], name + via, ev);
+        const srcs = new Set((g.dataset.srcs || '').split('\u0000').filter(Boolean));
+        const ns = new Set(), es = new Set();
+        for (const src of srcs) {
+          const [n, e] = walk(src, inn, e => e.dataset.src);
+          for (const id of n) ns.add(id);
+          for (const edge of e) if (drawn(edge)) es.add(edge);
+        }
+        // Prefixes share their bucket's drawn connector, but only these holders light up.
+        const bucket = g.dataset.row.split('\u0000')[0];
+        const links = [...resCol.layer.querySelectorAll('.ed')].filter(e =>
+          drawn(e) && e.dataset.row === bucket && srcs.has(e.dataset.src));
+        return light('row:' + g.dataset.row,
+                     [g, ...nodes.filter(n => drawn(n) && ns.has(n.dataset.id)), ...es, ...links], name + via, ev);
       }
       const mine = edges.filter(e => drawn(e) && (e.dataset.src === id || e.dataset.dst === id));
       const ends = new Set(mine.map(e => e.dataset.src === id ? e.dataset.dst : e.dataset.src));
@@ -503,11 +516,12 @@ async function main() {
       }
       this.items = this.cache[instance]; this.render(); refit();
     },
-    close() { this.instance = null; this.items = []; this.layer.replaceChildren(); },
+    close() { leave(); this.instance = null; this.items = []; this.layer.replaceChildren(); },
     toggle(key) { this.open_.has(key) ? this.open_.delete(key) : this.open_.add(key); this.render(); },
     // The tree, shown two levels deep (db › schema; bucket › prefix) with the third
     // (tables) folded under its schema until clicked — 851 rows is not a map.
     render() {
+      leave(); // Rows are replaced: do not retain hover state for detached elements.
       this.layer.replaceChildren();
       if (!this.instance) return;
       const x = this.x, ORDER = { none: 0, read: 1, write: 2, admin: 3 };
@@ -558,7 +572,8 @@ async function main() {
         for (const [src, lv] of k.bySrc) {
           if (!pos.has(src)) continue;
           const [x1, y1] = from(src), x2 = x - ARR, y2 = y + H / 2;
-          this.layer.append(el('path', { class: `ed on e-${lv}`, 'marker-end': 'url(#arr)', d: route(x1, y1, x2, y2) }));
+          this.layer.append(el('path', { class: `ed on e-${lv}`, 'data-src': src, 'data-row': k.key,
+                                        'marker-end': 'url(#arr)', d: route(x1, y1, x2, y2) }));
         }
       });
       shown.forEach((k, j) => {
