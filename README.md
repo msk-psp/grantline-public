@@ -35,6 +35,20 @@ at the top of any page; your choice is saved in a cookie. On your first visit,
 Grantline uses your browser language. Account names, resource paths and native
 commands retain their original spelling.
 
+## Run with Docker
+
+Published GitHub Releases provide `linux/amd64` and `linux/arm64` images on GHCR.
+Stable releases also update `latest`; pre-releases keep their own version tag.
+
+```bash
+docker run --rm -p 127.0.0.1:8420:8420 ghcr.io/msk-psp/grantline-public:latest
+```
+
+Open **http://127.0.0.1:8420/** for the built-in demo. No credentials are needed.
+For real systems, mount your own configuration and persist runtime state; see
+[container configuration](docs/usage.md#containers). Pin a release tag or digest
+for deployments. The image includes the PostgreSQL driver.
+
 ## Common commands
 
 ```bash

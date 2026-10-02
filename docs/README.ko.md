@@ -34,6 +34,20 @@ grantline -c examples/demo/grantline.toml serve
 언어를 선택하면 쿠키에 저장됩니다. 처음 방문할 때는 브라우저 언어를 사용합니다.
 계정명, 리소스 경로, 서비스의 원본 명령어는 그대로 표시됩니다.
 
+## Docker로 실행하기
+
+GitHub Release를 발행하면 GHCR에 `linux/amd64`·`linux/arm64` 이미지를 배포합니다.
+안정 릴리스는 `latest`도 갱신하며, 사전 릴리스는 해당 버전 태그만 사용합니다.
+
+```bash
+docker run --rm -p 127.0.0.1:8420:8420 ghcr.io/msk-psp/grantline-public:latest
+```
+
+**http://127.0.0.1:8420/** 에서 인증 정보 없이 내장 데모를 볼 수 있습니다.
+실제 시스템은 외부 설정을 마운트하고 실행 기록을 보존하세요.
+[컨테이너 설정](usage.md#containers)을 참고하고, 배포 시 릴리스 태그나 digest를
+고정하세요. 이미지에는 PostgreSQL 드라이버가 포함되어 있습니다.
+
 ## 자주 쓰는 명령
 
 ```bash

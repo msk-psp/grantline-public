@@ -206,7 +206,7 @@ class _ObservationCache:
 
 def serve(observe_fn, port: int, bridges_fn=lambda: [], adapters: dict | None = None,
           audit_path: str | None = None, recorder=None, approvals=None, ttl_s: float = 60,
-          graph_fn=None, trusted_hosts=(), auth=None) -> None:
+          graph_fn=None, trusted_hosts=(), auth=None, host: str = "127.0.0.1") -> None:
     """GET renders, POST writes. That split is load-bearing, not convention: a GET
     that changed something would be triggered by a link, a prefetch, or a reload of
     the page that just wrote — and F3's whole claim is that only what the operator
@@ -524,7 +524,7 @@ def serve(observe_fn, port: int, bridges_fn=lambda: [], adapters: dict | None = 
         def log_message(self, *a):  # quiet
             pass
 
-    print(f"grantline: http://127.0.0.1:{port}/  (Ctrl-C to stop)")
+    print(f"grantline: http://{host}:{port}/  (Ctrl-C to stop)")
     # 첫 방문자가 관측을 기다리지 않게 미리 한 번 읽어 둔다. 서버가 뜬 뒤 백그라운드로
     # 도니 기동이 늦어지지 않고, 실패해도 첫 요청이 정상 경로로 다시 시도한다.
     # 그리고 이 예열이 프로세스당 하나뿐인 스냅샷을 남기므로, 콘솔을 켠 시각이
@@ -540,7 +540,7 @@ def serve(observe_fn, port: int, bridges_fn=lambda: [], adapters: dict | None = 
             if stopped.wait(max(0.01, ttl_s)):
                 break
 
-    server = HTTPServer(("127.0.0.1", port), Handler)
+    server = HTTPServer((host, port), Handler)
     threading.Thread(target=refresh, daemon=True).start()
     try:
         server.serve_forever()

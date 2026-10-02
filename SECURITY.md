@@ -6,7 +6,8 @@ The current default branch is the supported version.
 
 ## Trust boundaries
 
-- Grantline is an operator tool. The HTTP server binds to loopback. Before sharing
+- Grantline is an operator tool. The HTTP server binds to loopback by default. `serve --host 0.0.0.0`
+  listens on all container/network interfaces; this does not enable authentication. Before sharing
   it, put an authenticated reverse proxy in front of it, restrict
   network access, and set `[web] trusted_hosts = ["console.example.com"]` in the external
   configuration. This allowlist and same-origin POST checks do not authenticate users.

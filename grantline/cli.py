@@ -269,7 +269,7 @@ def cmd_serve(args):
     web.serve(lambda: _observe_and_plan(it, adaps, rec), args.port, lambda: bridges,
               adapters=adaps, audit_path=audit_path, recorder=rec, approvals=_approvals(args.config),
               graph_fn=_graph_builder(args.config, adaps, bridges),
-              trusted_hosts=web_cfg.get("trusted_hosts", []), auth=web_cfg.get("auth"))
+              trusted_hosts=web_cfg.get("trusted_hosts", []), auth=web_cfg.get("auth"), host=args.host)
     return 0
 
 
@@ -438,6 +438,7 @@ def main(argv=None) -> int:
         help="show every finding instead of the first few per kind")
     s = sub.add_parser("serve", help="web access matrix")
     s.add_argument("--port", type=int, default=8420)
+    s.add_argument("--host", default="127.0.0.1", help="bind address (containers: 0.0.0.0)")
     a = sub.add_parser("apply", help="execute the plan (read-only unless --write)")
     a.add_argument("--write", action="store_true", help="actually execute (default: dry-run)")
     a.add_argument("--yes", action="store_true", help="skip the confirmation prompt")

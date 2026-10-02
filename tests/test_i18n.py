@@ -98,7 +98,7 @@ for readme in readmes:
                      for line in block.splitlines() if line.strip()])
     for target in re.findall(r'\]\(([^)]+)\)', text):
         if '://' not in target:
-            assert (readme.parent / target).is_file(), (readme, target)
+            assert (readme.parent / urllib.parse.urlsplit(target).path).is_file(), (readme, target)
 assert all(command == commands[0] for command in commands)
 
 

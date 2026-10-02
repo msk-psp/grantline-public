@@ -33,6 +33,20 @@ grantline -c examples/demo/grantline.toml serve
 该选择会保存在 Cookie 中。首次访问时使用浏览器语言。
 账号名称、资源路径和服务的原生命令保持原样。
 
+## 使用 Docker
+
+发布 GitHub Release 时，会在 GHCR 上发布 `linux/amd64` 和 `linux/arm64` 镜像。
+稳定版本同时更新 `latest`；预发布版本仅使用独立的版本标签。
+
+```bash
+docker run --rm -p 127.0.0.1:8420:8420 ghcr.io/msk-psp/grantline-public:latest
+```
+
+打开 **http://127.0.0.1:8420/** 即可体验内置演示，无需凭据。
+连接实际系统时，请挂载外部配置并持久保存运行记录。参阅
+[容器配置](usage.md#containers)，部署时固定发布标签或 digest。
+镜像已包含 PostgreSQL 驱动。
+
 ## 常用命令
 
 ```bash
