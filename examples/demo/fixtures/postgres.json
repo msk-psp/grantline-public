@@ -1,0 +1,853 @@
+{
+  "grants": [
+    {
+      "subject": "achen",
+      "resource": "role:sales_reader",
+      "priv": "MEMBER",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "achen",
+      "resource": "role:sales_writer",
+      "priv": "MEMBER",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "bmiller",
+      "resource": "role:sales_reader",
+      "priv": "MEMBER",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "hlang",
+      "resource": "role:sales_reader",
+      "priv": "MEMBER",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "sales_reader",
+      "resource": "db:analytics",
+      "priv": "CONNECT",
+      "grantor": "dba",
+      "source": "implicit"
+    },
+    {
+      "subject": "sales_reader",
+      "resource": "schema:analytics.public",
+      "priv": "USAGE",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "sales_reader",
+      "resource": "table:analytics.public.orders",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "sales_writer",
+      "resource": "table:analytics.public.orders",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "sales_writer",
+      "resource": "table:analytics.public.orders",
+      "priv": "INSERT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "sales_writer",
+      "resource": "table:analytics.public.orders",
+      "priv": "UPDATE",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "sales_reader",
+      "resource": "table:analytics.public.customers",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "sales_writer",
+      "resource": "table:analytics.public.customers",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "sales_writer",
+      "resource": "table:analytics.public.customers",
+      "priv": "INSERT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "sales_writer",
+      "resource": "table:analytics.public.customers",
+      "priv": "UPDATE",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "sales_reader",
+      "resource": "table:analytics.public.events",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "sales_writer",
+      "resource": "table:analytics.public.events",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "sales_writer",
+      "resource": "table:analytics.public.events",
+      "priv": "INSERT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "sales_writer",
+      "resource": "table:analytics.public.events",
+      "priv": "UPDATE",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "sales_reader",
+      "resource": "db:warehouse",
+      "priv": "CONNECT",
+      "grantor": "dba",
+      "source": "implicit"
+    },
+    {
+      "subject": "sales_reader",
+      "resource": "schema:warehouse.sales",
+      "priv": "USAGE",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "sales_reader",
+      "resource": "table:warehouse.sales.orders",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "sales_writer",
+      "resource": "table:warehouse.sales.orders",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "sales_writer",
+      "resource": "table:warehouse.sales.orders",
+      "priv": "INSERT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "sales_writer",
+      "resource": "table:warehouse.sales.orders",
+      "priv": "UPDATE",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "sales_reader",
+      "resource": "table:warehouse.sales.customers",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "sales_writer",
+      "resource": "table:warehouse.sales.customers",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "sales_writer",
+      "resource": "table:warehouse.sales.customers",
+      "priv": "INSERT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "sales_writer",
+      "resource": "table:warehouse.sales.customers",
+      "priv": "UPDATE",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "sales_reader",
+      "resource": "table:warehouse.sales.events",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "sales_writer",
+      "resource": "table:warehouse.sales.events",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "sales_writer",
+      "resource": "table:warehouse.sales.events",
+      "priv": "INSERT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "sales_writer",
+      "resource": "table:warehouse.sales.events",
+      "priv": "UPDATE",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "cdiaz",
+      "resource": "role:product_reader",
+      "priv": "MEMBER",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "cdiaz",
+      "resource": "role:product_writer",
+      "priv": "MEMBER",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "dnovak",
+      "resource": "role:product_reader",
+      "priv": "MEMBER",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "gito",
+      "resource": "role:product_reader",
+      "priv": "MEMBER",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "product_reader",
+      "resource": "db:analytics",
+      "priv": "CONNECT",
+      "grantor": "dba",
+      "source": "implicit"
+    },
+    {
+      "subject": "product_reader",
+      "resource": "schema:analytics.public",
+      "priv": "USAGE",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "product_reader",
+      "resource": "table:analytics.public.orders",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "product_writer",
+      "resource": "table:analytics.public.orders",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "product_writer",
+      "resource": "table:analytics.public.orders",
+      "priv": "INSERT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "product_writer",
+      "resource": "table:analytics.public.orders",
+      "priv": "UPDATE",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "product_reader",
+      "resource": "table:analytics.public.customers",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "product_writer",
+      "resource": "table:analytics.public.customers",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "product_writer",
+      "resource": "table:analytics.public.customers",
+      "priv": "INSERT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "product_writer",
+      "resource": "table:analytics.public.customers",
+      "priv": "UPDATE",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "product_reader",
+      "resource": "table:analytics.public.events",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "product_writer",
+      "resource": "table:analytics.public.events",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "product_writer",
+      "resource": "table:analytics.public.events",
+      "priv": "INSERT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "product_writer",
+      "resource": "table:analytics.public.events",
+      "priv": "UPDATE",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "product_reader",
+      "resource": "db:warehouse",
+      "priv": "CONNECT",
+      "grantor": "dba",
+      "source": "implicit"
+    },
+    {
+      "subject": "product_reader",
+      "resource": "schema:warehouse.product",
+      "priv": "USAGE",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "product_reader",
+      "resource": "table:warehouse.product.orders",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "product_writer",
+      "resource": "table:warehouse.product.orders",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "product_writer",
+      "resource": "table:warehouse.product.orders",
+      "priv": "INSERT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "product_writer",
+      "resource": "table:warehouse.product.orders",
+      "priv": "UPDATE",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "product_reader",
+      "resource": "table:warehouse.product.customers",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "product_writer",
+      "resource": "table:warehouse.product.customers",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "product_writer",
+      "resource": "table:warehouse.product.customers",
+      "priv": "INSERT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "product_writer",
+      "resource": "table:warehouse.product.customers",
+      "priv": "UPDATE",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "product_reader",
+      "resource": "table:warehouse.product.events",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "product_writer",
+      "resource": "table:warehouse.product.events",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "product_writer",
+      "resource": "table:warehouse.product.events",
+      "priv": "INSERT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "product_writer",
+      "resource": "table:warehouse.product.events",
+      "priv": "UPDATE",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "epark",
+      "resource": "role:finance_reader",
+      "priv": "MEMBER",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "epark",
+      "resource": "role:finance_writer",
+      "priv": "MEMBER",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "foyelaran",
+      "resource": "role:finance_reader",
+      "priv": "MEMBER",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "finance_reader",
+      "resource": "db:analytics",
+      "priv": "CONNECT",
+      "grantor": "dba",
+      "source": "implicit"
+    },
+    {
+      "subject": "finance_reader",
+      "resource": "schema:analytics.public",
+      "priv": "USAGE",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "finance_reader",
+      "resource": "table:analytics.public.orders",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "finance_writer",
+      "resource": "table:analytics.public.orders",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "finance_writer",
+      "resource": "table:analytics.public.orders",
+      "priv": "INSERT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "finance_writer",
+      "resource": "table:analytics.public.orders",
+      "priv": "UPDATE",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "finance_reader",
+      "resource": "table:analytics.public.customers",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "finance_writer",
+      "resource": "table:analytics.public.customers",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "finance_writer",
+      "resource": "table:analytics.public.customers",
+      "priv": "INSERT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "finance_writer",
+      "resource": "table:analytics.public.customers",
+      "priv": "UPDATE",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "finance_reader",
+      "resource": "table:analytics.public.events",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "finance_writer",
+      "resource": "table:analytics.public.events",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "finance_writer",
+      "resource": "table:analytics.public.events",
+      "priv": "INSERT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "finance_writer",
+      "resource": "table:analytics.public.events",
+      "priv": "UPDATE",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "finance_reader",
+      "resource": "db:warehouse",
+      "priv": "CONNECT",
+      "grantor": "dba",
+      "source": "implicit"
+    },
+    {
+      "subject": "finance_reader",
+      "resource": "schema:warehouse.finance",
+      "priv": "USAGE",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "finance_reader",
+      "resource": "table:warehouse.finance.orders",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "finance_writer",
+      "resource": "table:warehouse.finance.orders",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "finance_writer",
+      "resource": "table:warehouse.finance.orders",
+      "priv": "INSERT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "finance_writer",
+      "resource": "table:warehouse.finance.orders",
+      "priv": "UPDATE",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "finance_reader",
+      "resource": "table:warehouse.finance.customers",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "finance_writer",
+      "resource": "table:warehouse.finance.customers",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "finance_writer",
+      "resource": "table:warehouse.finance.customers",
+      "priv": "INSERT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "finance_writer",
+      "resource": "table:warehouse.finance.customers",
+      "priv": "UPDATE",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "finance_reader",
+      "resource": "table:warehouse.finance.events",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "finance_writer",
+      "resource": "table:warehouse.finance.events",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "finance_writer",
+      "resource": "table:warehouse.finance.events",
+      "priv": "INSERT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "finance_writer",
+      "resource": "table:warehouse.finance.events",
+      "priv": "UPDATE",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "svc_airflow",
+      "resource": "db:analytics",
+      "priv": "CONNECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "svc_airflow",
+      "resource": "table:analytics.public.events",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "svc_airflow",
+      "resource": "table:analytics.public.events",
+      "priv": "INSERT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "svc_airflow",
+      "resource": "table:analytics.public.events",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "svc_airflow",
+      "resource": "table:analytics.public.events",
+      "priv": "INSERT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "svc_airflow",
+      "resource": "table:analytics.public.events",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "svc_airflow",
+      "resource": "table:analytics.public.events",
+      "priv": "INSERT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "svc_airflow",
+      "resource": "db:warehouse",
+      "priv": "CONNECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "svc_airflow",
+      "resource": "table:warehouse.sales.events",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "svc_airflow",
+      "resource": "table:warehouse.sales.events",
+      "priv": "INSERT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "svc_airflow",
+      "resource": "table:warehouse.product.events",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "svc_airflow",
+      "resource": "table:warehouse.product.events",
+      "priv": "INSERT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "svc_airflow",
+      "resource": "table:warehouse.finance.events",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "svc_airflow",
+      "resource": "table:warehouse.finance.events",
+      "priv": "INSERT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "svc_metabase",
+      "resource": "db:analytics",
+      "priv": "CONNECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "svc_metabase",
+      "resource": "table:analytics.public.events",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "svc_metabase",
+      "resource": "table:analytics.public.events",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "svc_metabase",
+      "resource": "table:analytics.public.events",
+      "priv": "SELECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "duckdb",
+      "resource": "db:warehouse",
+      "priv": "CONNECT",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "cdiaz",
+      "resource": "role:duckdb",
+      "priv": "MEMBER",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "epark",
+      "resource": "role:duckdb",
+      "priv": "MEMBER",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "gito",
+      "resource": "role:duckdb",
+      "priv": "MEMBER",
+      "grantor": "dba",
+      "source": "explicit"
+    },
+    {
+      "subject": "PUBLIC",
+      "resource": "db:analytics",
+      "priv": "CONNECT",
+      "grantor": "dba",
+      "source": "implicit"
+    }
+  ],
+  "facts": {
+    "tables": []
+  },
+  "kinds": {
+    "PUBLIC": "account",
+    "achen": "account",
+    "bmiller": "account",
+    "cdiaz": "account",
+    "dnovak": "account",
+    "duckdb": "role",
+    "epark": "account",
+    "finance_reader": "role",
+    "finance_writer": "role",
+    "foyelaran": "account",
+    "gito": "account",
+    "hlang": "account",
+    "product_reader": "role",
+    "product_writer": "role",
+    "sales_reader": "role",
+    "sales_writer": "role",
+    "svc_airflow": "account",
+    "svc_metabase": "account"
+  }
+}

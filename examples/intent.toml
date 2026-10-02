@@ -1,0 +1,93 @@
+# Declared intent — the single place that says who should have what.
+# Anything a managed subject holds beyond this file gets revoked *by name*
+# (permissions are additive; absence from this file is not enough).
+
+managed_subjects = ["alice", "bob", "carol", "svc_etl", "svc_dashboard", "PUBLIC"]
+# 'dave' is deliberately unmanaged: his drift is reported, never auto-revoked.
+
+# ── PostgreSQL ───────────────────────────────────────────────────────────────
+[[grants]]
+system = "postgres"
+subject = "alice"
+resource = "role:analyst_read"
+privs = ["MEMBER"]
+
+[[grants]]
+system = "postgres"
+subject = "carol"
+resource = "role:analyst_read"
+privs = ["MEMBER"]
+
+[[grants]]
+system = "postgres"
+subject = "bob"
+resource = "role:analyst_write"
+privs = ["MEMBER"]
+
+[[grants]]
+system = "postgres"
+subject = "svc_etl"
+resource = "db:analytics"
+privs = ["CONNECT"]
+
+[[grants]]
+system = "postgres"
+subject = "svc_etl"
+resource = "table:analytics.public.events"
+privs = ["SELECT", "INSERT"]
+
+[[grants]]
+system = "postgres"
+subject = "svc_dashboard"
+resource = "db:analytics"
+privs = ["CONNECT"]
+
+# Default privileges declared on a *group* role — the lint will flag this:
+# members own what they create, so this covers nothing they make.
+[[grants]]
+system = "postgres"
+subject = "analyst_read"
+resource = "default:analytics.public@analyst_write"
+privs = ["SELECT"]
+
+# ── ClickHouse ───────────────────────────────────────────────────────────────
+[[grants]]
+system = "clickhouse"
+subject = "bob"
+resource = "db:metrics"
+privs = ["SELECT"]
+
+[[grants]]
+system = "clickhouse"
+subject = "svc_dashboard"
+resource = "db:metrics"
+privs = ["SELECT"]
+
+# ── S3-compatible object storage ─────────────────────────────────────────────
+[[grants]]
+system = "s3"
+subject = "alice"
+resource = "bucket:data-lake"
+privs = ["Read", "List"]
+
+[[grants]]
+system = "s3"
+subject = "svc_etl"
+resource = "bucket:data-lake/raw/*"
+privs = ["Write"]
+
+# This lives in database 'hr', which the demo observer cannot connect to —
+# it shows up as '?' (unverified), not as a planned GRANT.
+[[grants]]
+system = "postgres"
+subject = "carol"
+resource = "table:hr.public.salaries"
+privs = ["SELECT"]
+
+# svc_etl carries an IAM policy, so this lands as a POLICY diff in the plan
+# (its native action list is dead weight and is left untouched).
+[[grants]]
+system = "s3"
+subject = "svc_etl"
+resource = "bucket:data-lake/curated/*"
+privs = ["Read"]

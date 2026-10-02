@@ -1,0 +1,150 @@
+{
+  "grants": [
+    {
+      "subject": "achen",
+      "resource": "role:sales_reader",
+      "priv": "MEMBER",
+      "grantor": "dba"
+    },
+    {
+      "subject": "bmiller",
+      "resource": "role:sales_reader",
+      "priv": "MEMBER",
+      "grantor": "dba"
+    },
+    {
+      "subject": "hlang",
+      "resource": "role:sales_reader",
+      "priv": "MEMBER",
+      "grantor": "dba"
+    },
+    {
+      "subject": "sales_reader",
+      "resource": "table:analytics.public.orders",
+      "priv": "SELECT",
+      "grantor": "dba"
+    },
+    {
+      "subject": "sales_writer",
+      "resource": "table:analytics.public.orders",
+      "priv": "UPDATE",
+      "grantor": "dba"
+    },
+    {
+      "subject": "sales_reader",
+      "resource": "table:analytics.public.events",
+      "priv": "SELECT",
+      "grantor": "dba"
+    },
+    {
+      "subject": "sales_writer",
+      "resource": "table:analytics.public.events",
+      "priv": "UPDATE",
+      "grantor": "dba"
+    },
+    {
+      "subject": "cdiaz",
+      "resource": "role:product_reader",
+      "priv": "MEMBER",
+      "grantor": "dba"
+    },
+    {
+      "subject": "dnovak",
+      "resource": "role:product_reader",
+      "priv": "MEMBER",
+      "grantor": "dba"
+    },
+    {
+      "subject": "gito",
+      "resource": "role:product_reader",
+      "priv": "MEMBER",
+      "grantor": "dba"
+    },
+    {
+      "subject": "product_reader",
+      "resource": "table:analytics.public.orders",
+      "priv": "SELECT",
+      "grantor": "dba"
+    },
+    {
+      "subject": "product_writer",
+      "resource": "table:analytics.public.orders",
+      "priv": "UPDATE",
+      "grantor": "dba"
+    },
+    {
+      "subject": "product_reader",
+      "resource": "table:analytics.public.events",
+      "priv": "SELECT",
+      "grantor": "dba"
+    },
+    {
+      "subject": "product_writer",
+      "resource": "table:analytics.public.events",
+      "priv": "UPDATE",
+      "grantor": "dba"
+    },
+    {
+      "subject": "epark",
+      "resource": "role:finance_reader",
+      "priv": "MEMBER",
+      "grantor": "dba"
+    },
+    {
+      "subject": "foyelaran",
+      "resource": "role:finance_reader",
+      "priv": "MEMBER",
+      "grantor": "dba"
+    },
+    {
+      "subject": "finance_reader",
+      "resource": "table:analytics.public.orders",
+      "priv": "SELECT",
+      "grantor": "dba"
+    },
+    {
+      "subject": "finance_writer",
+      "resource": "table:analytics.public.orders",
+      "priv": "UPDATE",
+      "grantor": "dba"
+    },
+    {
+      "subject": "finance_reader",
+      "resource": "table:analytics.public.events",
+      "priv": "SELECT",
+      "grantor": "dba"
+    },
+    {
+      "subject": "finance_writer",
+      "resource": "table:analytics.public.events",
+      "priv": "UPDATE",
+      "grantor": "dba"
+    },
+    {
+      "subject": "svc_airflow_staging",
+      "resource": "db:analytics",
+      "priv": "CONNECT",
+      "grantor": "dba"
+    }
+  ],
+  "facts": {
+    "tables": []
+  },
+  "kinds": {
+    "achen": "account",
+    "bmiller": "account",
+    "cdiaz": "account",
+    "dnovak": "account",
+    "epark": "account",
+    "finance_reader": "role",
+    "finance_writer": "role",
+    "foyelaran": "account",
+    "gito": "account",
+    "hlang": "account",
+    "product_reader": "role",
+    "product_writer": "role",
+    "sales_reader": "role",
+    "sales_writer": "role",
+    "svc_airflow_staging": "account"
+  }
+}

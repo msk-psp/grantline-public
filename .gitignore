@@ -1,0 +1,27 @@
+__pycache__/
+*.egg-info/
+audit.jsonl
+snapshots/
+.venv/
+
+# 조직 고유값이 담긴 실환경 설정 — 이 저장소는 오픈소스다. 실수로도 들어가면 안 된다.
+# 실환경 설정은 저장소 밖(예: ~/.config/grantline/)에 두는 것을 권장하고,
+# 굳이 안에 둔다면 이 패턴을 쓴다.
+*.local.toml
+grantline.local.*
+.env
+.env.*
+!.env.example
+approvals/
+*.pem
+*.key
+dist/
+build/
+.zvec-grep/
+
+# 데모의 이력 두 개는 저장소에 둔다 — 클론하자마자 "무엇이 움직였나" 가 보이도록.
+# 그 디렉터리에 새로 쌓이는 실행 기록은 계속 무시한다.
+!examples/demo/snapshots/
+examples/demo/snapshots/*
+!examples/demo/snapshots/snapshot-2026-08-24T09-00-00Z.jsonl
+!examples/demo/snapshots/snapshot-2026-09-04T09-00-00Z.jsonl

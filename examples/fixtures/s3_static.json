@@ -1,0 +1,21 @@
+{
+  "identities": [
+    {
+      "name": "alice",
+      "actions": ["Read:data-lake", "List:data-lake"]
+    },
+    {
+      "name": "svc_etl",
+      "actions": ["Admin"],
+      "policy": {
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": ["s3:PutObject"],
+            "Resource": ["arn:aws:s3:::data-lake/raw/*"]
+          }
+        ]
+      }
+    }
+  ]
+}

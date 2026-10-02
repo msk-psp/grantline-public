@@ -1,0 +1,342 @@
+/* grantline — one stylesheet for every page. Served at /static/grantline.css. */
+/* Liquid glass — 반투명 판이 배경 위를 떠 있고, 위 모서리에 정반사가 얹힌다.
+   유리 자체는 색을 갖지 않는다. 색은 뒤의 앰비언트가 내고 판은 그것을 흐릴 뿐이다.
+   그래서 등급 색(read/write/admin)만 또렷하게 살아난다 — 데이터가 주인공이다. */
+:root {
+  --ink:#151a21; --muted:#5c6672;
+  --read:#2f6ea8; --write:#b06d24; --admin:#c0392f; --none:#a8b0b9;
+  --add:#1f7a4d; --rm:#c0392f; --accent:#2f6ea8; --grp:#7a4fb5; --mem:#1f8a86;
+  --glass:rgba(255,255,255,.55); --node:#f7f9fc;
+  --glass-2:rgba(255,255,255,.38);
+  --edge:rgba(255,255,255,.75);
+  --rule:rgba(21,26,33,.10);
+  --shadow:0 8px 32px rgba(21,26,33,.10), 0 2px 8px rgba(21,26,33,.06);
+  --radius:22px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink:#e8ecf2; --muted:#98a2b0;
+    --read:#7db2e8; --write:#e0a45c; --admin:#f0776c; --none:#5a6470;
+    --add:#5fd39a; --rm:#f0776c; --accent:#7db2e8; --grp:#b794f0; --mem:#5cd2c9;
+    --glass:rgba(30,36,46,.55); --node:#1a2029;
+    --glass-2:rgba(30,36,46,.40);
+    --edge:rgba(255,255,255,.14);
+    --rule:rgba(255,255,255,.10);
+    --shadow:0 8px 32px rgba(0,0,0,.38), 0 2px 8px rgba(0,0,0,.24);
+  }
+}
+
+* { box-sizing:border-box; }
+html { color-scheme:light dark; }
+body {
+  margin:0; min-height:100vh; color:var(--ink);
+  font:14px/1.65 -apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased;
+  background:#eef1f6;
+}
+@media (prefers-color-scheme: dark) { body { background:#0e1116; } }
+
+/* 앰비언트 — 유리가 흐릴 대상. 없으면 backdrop-filter 가 할 일이 없어
+   그냥 반투명 회색 판이 된다. */
+body::before {
+  content:""; position:fixed; inset:-20vmax; z-index:-1; pointer-events:none;
+  background:
+    radial-gradient(38vmax 38vmax at 12% 8%,  rgba(88,140,255,.30), transparent 62%),
+    radial-gradient(34vmax 34vmax at 88% 14%, rgba(255,132,84,.24),  transparent 60%),
+    radial-gradient(42vmax 42vmax at 72% 88%, rgba(120,220,190,.26), transparent 64%),
+    radial-gradient(30vmax 30vmax at 26% 96%, rgba(190,120,255,.22), transparent 60%);
+  filter:blur(12px);
+}
+@media (prefers-reduced-motion: no-preference) {
+  body::before { animation:drift 44s ease-in-out infinite alternate; }
+  @keyframes drift {
+    from { transform:translate3d(0,0,0) scale(1); }
+    to   { transform:translate3d(-3vmax,2vmax,0) scale(1.08); }
+  }
+}
+
+.page { max-width:1140px; margin:0 auto; padding:3.5rem 1.25rem 5rem;
+        display:flex; flex-direction:column; gap:1.5rem; }
+
+/* 유리 판 공통. `backdrop-filter` 를 못 쓰는 브라우저에서는 --glass 불투명도만으로도
+   읽히도록 배경색을 충분히 준다. */
+.glass {
+  background:var(--glass);
+  -webkit-backdrop-filter:blur(28px) saturate(190%);
+  backdrop-filter:blur(28px) saturate(190%);
+  border:1px solid var(--edge);
+  border-radius:var(--radius);
+  box-shadow:var(--shadow), inset 0 1px 0 rgba(255,255,255,.55);
+  padding:1.5rem 1.6rem;
+}
+@media (prefers-color-scheme: dark) {
+  .glass { box-shadow:var(--shadow), inset 0 1px 0 rgba(255,255,255,.10); }
+}
+
+header.glass { padding:2rem 1.9rem 1.7rem; }
+h1 { font-size:1.75rem; margin:0 0 .45rem; letter-spacing:-.025em; font-weight:640; }
+.lede { color:var(--muted); margin:0; max-width:74ch; font-size:13.5px; }
+h2 { font-size:.68rem; letter-spacing:.16em; text-transform:uppercase; color:var(--muted);
+     margin:0 0 1rem; font-weight:620; }
+
+.scroll { overflow-x:auto; margin:-.4rem -.5rem; padding:.4rem .5rem; }
+table { border-collapse:separate; border-spacing:0; min-width:100%; font-size:13px; }
+th,td { padding:.55rem .8rem; text-align:left; white-space:nowrap;
+        border-bottom:1px solid var(--rule); }
+thead th { font-size:9.5px; letter-spacing:.13em; text-transform:uppercase;
+           color:var(--muted); font-weight:620; padding-bottom:.7rem; }
+thead tr:first-child th { border-bottom:none; padding-bottom:.15rem; }
+tbody th { font-family:ui-monospace,'SF Mono',Menlo,monospace; font-weight:600;
+           font-size:12.5px; position:sticky; left:0;
+           background:linear-gradient(90deg,var(--glass-2) 82%,transparent); }
+tbody tr:last-child th, tbody tr:last-child td { border-bottom:none; }
+tbody tr { transition:background .18s ease; }
+tbody tr:hover { background:rgba(255,255,255,.30); }
+@media (prefers-color-scheme: dark) { tbody tr:hover { background:rgba(255,255,255,.05); } }
+td { font-family:ui-monospace,'SF Mono',Menlo,monospace; font-size:12px; }
+td.read  { color:var(--read);  }
+td.list  { color:var(--muted); }
+td.blind { color:var(--muted); font-style:italic; }
+.cnt { display:inline-block; margin-left:.35rem; padding:0 .3rem; border-radius:999px;
+  background:rgba(127,127,127,.18); font-size:9px; font-weight:600; vertical-align:middle; }
+td.write { color:var(--write); font-weight:620; }
+td.admin { color:var(--admin); font-weight:640; }
+td.none  { color:var(--none);  }
+td.unobs { color:var(--muted); font-weight:640; }
+.src { font-size:10px; color:var(--muted); }
+
+/* 알약 배지 — 유리 위에 얹히는 작은 유리. */
+.drift {
+  display:inline-block; margin-left:.4rem; padding:.05rem .45rem; border-radius:999px;
+  font-size:10.5px; font-weight:640; letter-spacing:.02em;
+  border:1px solid currentColor; background:rgba(255,255,255,.30);
+}
+.d-add { color:var(--add); } .d-rm { color:var(--rm); }
+
+.cmd { display:flex; flex-direction:column; gap:.35rem; }
+.cmd code {
+  font-family:ui-monospace,'SF Mono',Menlo,monospace; font-size:12px;
+  padding:.5rem .75rem; border-radius:12px; border:1px solid var(--rule);
+  background:rgba(255,255,255,.30); overflow-x:auto; white-space:pre;
+}
+@media (prefers-color-scheme: dark) { .cmd code { background:rgba(255,255,255,.045); } }
+.cmd code.add { color:var(--add);  border-color:color-mix(in srgb,var(--add) 34%,transparent); }
+.cmd code.rm  { color:var(--rm);   border-color:color-mix(in srgb,var(--rm) 34%,transparent); }
+
+.note { padding:.85rem 0; border-bottom:1px solid var(--rule); }
+.note:first-child { padding-top:0; }
+.note:last-child { border-bottom:none; padding-bottom:0; }
+.note b { font-size:12.5px; font-weight:640; }
+.note p { margin:.25rem 0 0; color:var(--muted); font-size:12.5px; max-width:78ch; }
+.ok { color:var(--muted); margin:0; font-size:13px; }
+
+/* ── authorization paths ── */
+.nav { display:flex; gap:.9rem; align-items:baseline; margin-bottom:1.4rem;
+       font-family:ui-monospace,'SF Mono',Menlo,monospace; font-size:11px; }
+.nav a { color:var(--muted); text-decoration:none; border-bottom:1px solid transparent; }
+.nav a:hover, .nav a.on { color:var(--ink); border-bottom-color:var(--accent); }
+.page.wide { max-width:min(1960px, 97vw); }
+.map { position:relative; height:82vh; min-height:520px; overflow:hidden; border-radius:16px; contain:strict;
+       background:var(--glass-2); border:1px solid var(--rule); cursor:grab; user-select:none; }
+.map.dragging { cursor:grabbing; }
+/* 지도가 첫 화면이라 껍데기는 관측을 기다리지 않고 나간다 (web.do_GET). 그 사이를
+   빈 상자로 두지 않는다 — 무엇을 기다리는지 적고, 도착하면 map.js 가 지운다. */
+.map p.loading { position:absolute; inset:0; display:flex; align-items:center;
+                 justify-content:center; margin:0; padding:0 2rem; text-align:center;
+                 color:var(--muted); font-size:12.5px; line-height:1.6; }
+/* toolbar: filters on the left, the view on the right; each group carries its header */
+.tools { display:flex; gap:1.6rem; align-items:flex-end; flex-wrap:wrap; margin:-.2rem 0 .7rem; }
+.tools .grp { display:flex; gap:.3rem; align-items:center; flex-wrap:wrap; }
+.tools .grp.view { margin-left:auto; }
+.tools .lbl { flex-basis:100%; font:10px ui-monospace,Menlo,monospace; letter-spacing:.14em;
+              text-transform:uppercase; color:var(--muted); margin-bottom:.15rem; }
+.tools button { font:12px/1 ui-monospace,Menlo,monospace; min-width:2.1rem; padding:.45rem .6rem;
+                color:var(--ink); background:var(--glass); border:1px solid var(--edge); border-radius:9px;
+                cursor:pointer; display:inline-flex; align-items:center; gap:.35rem; }
+.tools button:hover { border-color:var(--accent); }
+.tools button[data-env], .tools button[data-kind] { opacity:.45; }
+.tools button.on { opacity:1; border-color:var(--accent); }
+.tools button svg { width:14px; height:14px; }
+.gr .off { opacity:0 !important; pointer-events:none; }
+/* hover: what the cursor is on, and only that — the rest steps back without
+   moving. Inside a selection the focus rules still win: hovering narrows what is
+   already lit, it never brings back what the selection excluded. */
+.gr .ed.hot, .gr .bridge.hot { opacity:1; stroke-width:3; }
+.gr .nd.hot rect { stroke-width:2.6; }
+.gr.hovering .nd:not(.hot) { opacity:.32; }
+.gr .rs.hot rect { stroke:var(--accent); stroke-width:2.4; }
+.gr.hovering .ed:not(.hot), .gr.hovering .bridge:not(.hot), .gr.hovering .bl:not(.hot) { opacity:.05; }
+.gr.focus.hovering .nd:not(.on) { opacity:.04; }
+.gr.focus.hovering .ed:not(.on), .gr.focus.hovering .bridge:not(.on) { opacity:0; }
+.tip { position:absolute; z-index:2; pointer-events:none; max-width:26rem;
+       font:11px/1.5 ui-monospace,Menlo,monospace; color:var(--ink);
+       background:var(--node); border:1px solid var(--edge); border-radius:8px;
+       padding:.3rem .5rem; box-shadow:0 2px 10px rgba(0,0,0,.25); }
+/* ⚠ 지도 위에 얹는 안내문이다. `.hint` 는 폼 아래 설명에도 쓰이는 이름이라
+   지도 안으로 한정한다 — 안 그러면 폼 안내문이 절대배치돼 버튼 위로 뜬다
+   (실제로 grant/revoke 의 "Preview the command" 가 privilege 필드와 겹쳤다). */
+.map .hint { position:absolute; left:.9rem; bottom:.7rem; font:10.5px/1.4 ui-monospace,Menlo,monospace;
+        color:var(--muted); pointer-events:none; }
+/* The camera is a CSS transform on the <svg>, not a viewBox rewrite: a transform
+   is composited (no layout, no re-tessellation of ~1000 paths per frame). Text is
+   re-rasterised once the motion stops. */
+.gr { width:100%; height:auto; display:block; overflow:visible;
+      transform-origin:0 0; will-change:transform; backface-visibility:hidden; }
+/* following a route: everything else goes (almost) away — but it *fades*, so the
+   eye keeps its place. Nothing moves; only what is lit changes. */
+.gr .nd, .gr .ed, .gr .bridge, .gr .bl { transition:opacity .28s ease; }
+.gr.moving * { transition:none !important; }
+.gr .ed { fill:none; stroke:var(--muted); stroke-width:1.2; opacity:.34; }
+/* relationship kinds */
+.gr .e-member { stroke:var(--mem); }
+.gr .e-policy { stroke:var(--grp); }
+.gr .e-route  { stroke:var(--grp); stroke-dasharray:2 3; }
+.gr .e-read   { stroke:var(--read); }
+.gr .e-write  { stroke:var(--write); }
+.gr .e-admin  { stroke:var(--admin); }
+.gr .e-none   { stroke:var(--none); }
+.gr .bridge { fill:none; stroke:var(--admin); stroke-width:1.8; stroke-dasharray:5 4; }
+/* bridge notes sit on top of whatever column the midpoint lands in — shown only
+   while the bridge is on a followed route */
+.gr .bl { font-family:ui-monospace,Menlo,monospace; font-size:10px; fill:var(--admin); display:none; }
+.gr.focus .bl.on { display:block; }
+/* opaque, so a line passing behind a box is hidden by it */
+.gr .nd rect { fill:var(--node); stroke:var(--edge); stroke-width:1; }
+.gr .nd text { font-family:ui-monospace,Menlo,monospace; font-size:12.5px; fill:var(--ink); }
+.gr .nd .fo { font-size:10px; fill:var(--muted); }
+/* node kinds — the colour is the answer to "what is this box" */
+.gr .human   rect { stroke:var(--read); }
+.gr .service rect { stroke:var(--add); stroke-width:1.6; }
+.gr .svc-account rect { stroke:var(--add); stroke-dasharray:4 3; }
+.gr .role    rect { stroke:var(--write); stroke-width:1.6; }
+.gr .group   rect { stroke:var(--grp); stroke-width:1.6; }
+.gr .policy  rect { stroke:var(--grp); stroke-dasharray:4 3; }
+.gr .instance rect { stroke:var(--muted); stroke-dasharray:2 3; }
+.gr .instance { cursor:pointer; }
+.gr .instance text { font-weight:600; }
+.gr .ic { color:var(--ink); opacity:.9; }
+/* resources column: derived from the selection, so never faded by it */
+.gr .rs rect { stroke:var(--muted); }
+.gr .rs.d1 rect, .gr .rs.d2 rect { stroke-dasharray:3 3; }
+.gr .rs.deeper { cursor:pointer; }
+.gr .rs.deeper rect { stroke:var(--ink); }
+.gr .rs .fo.e-read { fill:var(--read); } .gr .rs .fo.e-write { fill:var(--write); } .gr .rs .fo.e-admin { fill:var(--admin); }
+.gr .gh .cs { font-weight:600; letter-spacing:.08em; text-transform:uppercase; }
+.gr .crumb { cursor:pointer; fill:var(--ink); }
+.gr .crumb:hover { text-decoration:underline; }
+.gr .res text { pointer-events:auto; }
+.gr .i-postgres { color:#5b8fc9; } .gr .i-clickhouse { color:#f2c500; }
+.gr .i-s3 { color:#3faa6a; } .gr .i-airflow { color:#1a9cf0; }
+/* 'used by' icons sit left of the 'lives in' ones, a hair apart */
+.gr .ic.used { opacity:1; }
+.gr .service .ic, .gr .svc-account .ic { color:var(--add); }
+.gr .ch { font-family:ui-monospace,Menlo,monospace; font-size:10px; letter-spacing:.14em;
+          text-transform:uppercase; fill:var(--muted); }
+.gr .cs { font-family:ui-monospace,Menlo,monospace; font-size:10px; fill:var(--muted); opacity:.8; }
+.gr .rt { stroke-dasharray:2 3; }
+.gr .hit rect { stroke:var(--admin); stroke-width:2; }
+/* click a node: its routes (both directions) stay, everything else fades */
+.gr .nd { cursor:pointer; outline:none; }
+.gr.focus .nd:not(.on) { opacity:.04; }
+.gr.focus .ed:not(.on), .gr.focus .bridge:not(.on), .gr.focus .bl:not(.on) { opacity:0; }
+.gr.focus .ed.on { stroke-width:2.2; opacity:1; }
+.gr.focus .bridge.on { opacity:1; }
+/* no SVG filter here: a drop-shadow forces a re-render of the layer on every frame
+   of a drag, and the glow is what the eye read as flicker */
+.gr .nd.sel rect { stroke-width:3.5; }
+.gr .nd.on rect { stroke-width:2.2; fill:color-mix(in srgb, currentColor 10%, var(--glass)); }
+.gr .human.on   { color:var(--read); }  .gr .service.on, .gr .svc-account.on { color:var(--add); }
+.gr .role.on    { color:var(--write); } .gr .group.on, .gr .policy.on { color:var(--grp); }
+.legend { display:flex; gap:1.4rem; flex-wrap:wrap; font-size:11.5px; color:var(--muted);
+  margin-top:.9rem; font-family:ui-monospace,Menlo,monospace; }
+.legend b { font-weight:600; }
+.legend .sep { flex-basis:100%; height:0; }
+footer { color:var(--muted); font-size:11px; text-align:center;
+         font-family:ui-monospace,'SF Mono',Menlo,monospace; letter-spacing:.03em;
+         padding-top:.5rem; }
+
+/* pages */
+.chip { display:inline-block; margin:0 .25rem .3rem 0; padding:.08rem .42rem;
+        border:1px solid var(--rule); border-radius:4px; font-size:11px;
+        font-family:ui-monospace,'SF Mono',Menlo,monospace; text-decoration:none;
+        color:var(--ink); }
+.chip:hover { border-color:var(--accent); }
+.chip.more { border-style:dashed; color:var(--muted); }
+.num { font-variant-numeric:tabular-nums; text-align:right; }
+.route { font-family:ui-monospace,'SF Mono',Menlo,monospace; font-size:12px;
+         padding:.3rem 0; border-bottom:1px solid var(--rule); }
+.route .hop { color:var(--muted); }
+.route .bridge { color:var(--accent); }
+.lvl.list { color:var(--muted); }
+.dests { margin:.25rem 0 .1rem 1.2rem; display:flex; flex-wrap:wrap; gap:.15rem .8rem; }
+.dests .res { color:var(--muted); }
+.via { font-family:ui-monospace,'SF Mono',Menlo,monospace; font-size:11px;
+       color:var(--muted); white-space:nowrap; }
+.res { font-family:ui-monospace,'SF Mono',Menlo,monospace; font-size:12px; }
+
+/* ── grant / revoke ── */
+.chip.go { border-color:color-mix(in srgb,var(--add) 40%,transparent); color:var(--add); }
+.chip.rm { border-color:color-mix(in srgb,var(--rm) 40%,transparent); color:var(--rm); }
+.acts { display:inline-flex; flex-wrap:wrap; gap:.15rem .3rem; margin-left:.4rem; }
+.hint { color:var(--muted); font-size:11px; font-family:ui-monospace,Menlo,monospace; }
+/* 그리드다. flex-wrap 은 필드 폭이 남으면 줄을 안 바꿔서, 버튼이 마지막 필드와
+   같은 줄에 얹혀 privilege 입력과 겹쳤다. 열은 화면에 맞춰 늘고 버튼은 자기 줄을 갖는다. */
+form.act { display:grid; grid-template-columns:repeat(auto-fit, minmax(12rem, 1fr));
+           gap:.7rem 1rem; align-items:end; }
+form.act label { display:flex; flex-direction:column; gap:.25rem; font-size:9.5px;
+  letter-spacing:.13em; text-transform:uppercase; color:var(--muted); font-weight:620;
+  min-width:0; }
+form.act button { grid-column:1 / -1; justify-self:start; }
+form.act input, form.act select {
+  font-family:ui-monospace,'SF Mono',Menlo,monospace; font-size:12.5px; color:var(--ink);
+  padding:.4rem .6rem; border:1px solid var(--rule); border-radius:10px;
+  background:rgba(255,255,255,.34); min-width:0; width:100%; }
+@media (prefers-color-scheme: dark) {
+  form.act input, form.act select { background:rgba(255,255,255,.06); } }
+button { font:inherit; font-size:12.5px; font-weight:620; cursor:pointer;
+  padding:.45rem 1rem; border-radius:999px; border:1px solid var(--edge);
+  background:rgba(255,255,255,.42); color:var(--ink); }
+@media (prefers-color-scheme: dark) { button { background:rgba(255,255,255,.10); } }
+button.run { border-color:var(--rm); color:var(--rm); }
+button.run.grant { border-color:var(--add); color:var(--add); }
+.warn { border-left:2px solid var(--write); padding:.1rem 0 .1rem .8rem; margin:.9rem 0;
+  color:var(--ink); font-size:12.5px; max-width:78ch; }
+.warn.stop { border-left-color:var(--rm); }
+.warn.done { border-left-color:var(--add); }
+.warn b { display:block; font-size:11px; letter-spacing:.1em; text-transform:uppercase;
+  color:var(--muted); margin-bottom:.2rem; }
+.warn pre { margin:.35rem 0 0; white-space:pre-wrap; font-size:12px;
+  font-family:ui-monospace,Menlo,monospace; color:var(--muted); }
+
+/* ── the routes page turns the glass off ────────────────────────────────────
+   backdrop-filter re-blurs everything behind the panel on every frame the map
+   moves, and the ambient gradient behind it is itself animating: two full-screen
+   re-composites per frame, on top of the map. That was the drag lag. Plain panels
+   here; the other pages keep the glass. */
+.page.wide .glass { -webkit-backdrop-filter:none; backdrop-filter:none; background:var(--panel); }
+body:has(.page.wide)::before { animation:none !important; filter:none; }
+:root { --panel:#f3f5f9; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --panel:#141922; } }
+:root[data-theme="dark"] { --panel:#141922; }
+
+/* ── change queue ─────────────────────────────────────────────────────────
+   한 요청은 카드 하나다. 명령 전문이 보이는 것이 요점 — 승인은 "이 문자열"에
+   동의하는 것이고, 실행은 그 문자열이 아니면 거부한다. */
+.req { border:1px solid var(--rule); border-radius:12px; padding:.7rem .85rem; margin:.55rem 0;
+       background:var(--glass-2); }
+.req-h { font-size:13.5px; display:flex; align-items:center; gap:.4rem; flex-wrap:wrap; }
+.req-m { color:var(--muted); font-size:11.5px; margin:.25rem 0 .45rem; }
+.req .cmd { margin:0 0 .5rem; padding:.5rem .6rem; border-radius:8px; overflow-x:auto;
+            background:var(--node); border:1px solid var(--rule);
+            font:11.5px/1.55 ui-monospace,Menlo,monospace; white-space:pre; }
+.req-w { display:flex; gap:.3rem; flex-wrap:wrap; }
+.req-w .chip { font-size:11px; }
+.req-w .chip.yes { border-color:var(--add); color:var(--add); }
+.req-w .chip.no  { border-color:var(--rule); color:var(--muted); }
+.st { font:10px ui-monospace,Menlo,monospace; letter-spacing:.1em; text-transform:uppercase;
+      padding:.12rem .4rem; border-radius:999px; border:1px solid currentColor; }
+.st-pending  { color:var(--write); }
+.st-approved { color:var(--read); }
+.st-executed { color:var(--add); }
+.st-denied   { color:var(--muted); }
+.st-failed   { color:var(--admin); }

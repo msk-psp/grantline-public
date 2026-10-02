@@ -1,0 +1,14 @@
+{
+  "name": "svc-mlflow",
+  "actions": [
+    "Read:models",
+    "Write:models",
+    "List:models"
+  ],
+  "credentials": [
+    {
+      "access_key": "AKSVCMLFLOW",
+      "secret_key": "…"
+    }
+  ]
+}

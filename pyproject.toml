@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "grantline"
+version = "0.1.0"
+description = "See and converge access across PostgreSQL, ClickHouse, and S3-compatible storage using each system's native permission commands."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.11"
+
+[project.urls]
+Homepage = "https://github.com/msk-psp/grantline-public-v2"
+Changelog = "https://github.com/msk-psp/grantline-public-v2/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
+postgres = ["psycopg[binary]>=3.1"]
+dev = ["ruff>=0.6"]
+
+[project.scripts]
+grantline = "grantline.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["grantline*"]
+
+[tool.setuptools.package-data]
+grantline = ["static/*"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+# The code keeps deliberate one-liners (`a; b` on one line where the two are one
+# thought) and long prose lines inside HTML and comments. Those are style, not defects.
+ignore = ["E501", "E701", "E702", "E731", "E741"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E402"]   # sys.path insert before the package import, on purpose

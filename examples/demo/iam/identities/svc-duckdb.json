@@ -1,0 +1,13 @@
+{
+  "name": "svc-duckdb",
+  "actions": [
+    "Read:data-lake",
+    "List:data-lake"
+  ],
+  "credentials": [
+    {
+      "access_key": "AKSVCDUCKDB",
+      "secret_key": "…"
+    }
+  ]
+}

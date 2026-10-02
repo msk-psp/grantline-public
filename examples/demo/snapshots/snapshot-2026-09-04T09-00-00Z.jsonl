@@ -1,0 +1,200 @@
+{"run": {"ts": "2026-09-04T09:00:00+00:00", "user": "demo", "systems": ["postgres", "postgres-staging", "s3"]}}
+{"grant": {"system": "postgres", "subject": "PUBLIC", "resource": "db:analytics", "priv": "CONNECT", "source": "implicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "achen", "resource": "role:sales_reader", "priv": "MEMBER", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "achen", "resource": "role:sales_writer", "priv": "MEMBER", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "bmiller", "resource": "role:sales_reader", "priv": "MEMBER", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "cdiaz", "resource": "role:duckdb", "priv": "MEMBER", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "cdiaz", "resource": "role:product_reader", "priv": "MEMBER", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "cdiaz", "resource": "role:product_writer", "priv": "MEMBER", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "dnovak", "resource": "role:product_reader", "priv": "MEMBER", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "duckdb", "resource": "db:warehouse", "priv": "CONNECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "epark", "resource": "role:duckdb", "priv": "MEMBER", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "epark", "resource": "role:finance_reader", "priv": "MEMBER", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "epark", "resource": "role:finance_writer", "priv": "MEMBER", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "finance_reader", "resource": "db:analytics", "priv": "CONNECT", "source": "implicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "finance_reader", "resource": "db:warehouse", "priv": "CONNECT", "source": "implicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "finance_reader", "resource": "schema:analytics.public", "priv": "USAGE", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "finance_reader", "resource": "schema:warehouse.finance", "priv": "USAGE", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "finance_reader", "resource": "table:analytics.public.customers", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "finance_reader", "resource": "table:analytics.public.events", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "finance_reader", "resource": "table:analytics.public.orders", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "finance_reader", "resource": "table:warehouse.finance.customers", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "finance_reader", "resource": "table:warehouse.finance.events", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "finance_reader", "resource": "table:warehouse.finance.orders", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "finance_writer", "resource": "table:analytics.public.customers", "priv": "INSERT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "finance_writer", "resource": "table:analytics.public.customers", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "finance_writer", "resource": "table:analytics.public.customers", "priv": "UPDATE", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "finance_writer", "resource": "table:analytics.public.events", "priv": "INSERT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "finance_writer", "resource": "table:analytics.public.events", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "finance_writer", "resource": "table:analytics.public.events", "priv": "UPDATE", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "finance_writer", "resource": "table:analytics.public.orders", "priv": "INSERT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "finance_writer", "resource": "table:analytics.public.orders", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "finance_writer", "resource": "table:analytics.public.orders", "priv": "UPDATE", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "finance_writer", "resource": "table:warehouse.finance.customers", "priv": "INSERT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "finance_writer", "resource": "table:warehouse.finance.customers", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "finance_writer", "resource": "table:warehouse.finance.customers", "priv": "UPDATE", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "finance_writer", "resource": "table:warehouse.finance.events", "priv": "INSERT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "finance_writer", "resource": "table:warehouse.finance.events", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "finance_writer", "resource": "table:warehouse.finance.events", "priv": "UPDATE", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "finance_writer", "resource": "table:warehouse.finance.orders", "priv": "INSERT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "finance_writer", "resource": "table:warehouse.finance.orders", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "finance_writer", "resource": "table:warehouse.finance.orders", "priv": "UPDATE", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "foyelaran", "resource": "role:finance_reader", "priv": "MEMBER", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "gito", "resource": "role:duckdb", "priv": "MEMBER", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "gito", "resource": "role:product_reader", "priv": "MEMBER", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "hlang", "resource": "role:sales_reader", "priv": "MEMBER", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "product_reader", "resource": "db:analytics", "priv": "CONNECT", "source": "implicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "product_reader", "resource": "db:warehouse", "priv": "CONNECT", "source": "implicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "product_reader", "resource": "schema:analytics.public", "priv": "USAGE", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "product_reader", "resource": "schema:warehouse.product", "priv": "USAGE", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "product_reader", "resource": "table:analytics.public.customers", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "product_reader", "resource": "table:analytics.public.events", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "product_reader", "resource": "table:analytics.public.orders", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "product_reader", "resource": "table:warehouse.product.customers", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "product_reader", "resource": "table:warehouse.product.events", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "product_reader", "resource": "table:warehouse.product.orders", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "product_writer", "resource": "table:analytics.public.customers", "priv": "INSERT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "product_writer", "resource": "table:analytics.public.customers", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "product_writer", "resource": "table:analytics.public.customers", "priv": "UPDATE", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "product_writer", "resource": "table:analytics.public.events", "priv": "INSERT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "product_writer", "resource": "table:analytics.public.events", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "product_writer", "resource": "table:analytics.public.events", "priv": "UPDATE", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "product_writer", "resource": "table:analytics.public.orders", "priv": "INSERT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "product_writer", "resource": "table:analytics.public.orders", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "product_writer", "resource": "table:analytics.public.orders", "priv": "UPDATE", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "product_writer", "resource": "table:warehouse.product.customers", "priv": "INSERT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "product_writer", "resource": "table:warehouse.product.customers", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "product_writer", "resource": "table:warehouse.product.customers", "priv": "UPDATE", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "product_writer", "resource": "table:warehouse.product.events", "priv": "INSERT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "product_writer", "resource": "table:warehouse.product.events", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "product_writer", "resource": "table:warehouse.product.events", "priv": "UPDATE", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "product_writer", "resource": "table:warehouse.product.orders", "priv": "INSERT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "product_writer", "resource": "table:warehouse.product.orders", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "product_writer", "resource": "table:warehouse.product.orders", "priv": "UPDATE", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "sales_reader", "resource": "db:analytics", "priv": "CONNECT", "source": "implicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "sales_reader", "resource": "db:warehouse", "priv": "CONNECT", "source": "implicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "sales_reader", "resource": "schema:analytics.public", "priv": "USAGE", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "sales_reader", "resource": "schema:warehouse.sales", "priv": "USAGE", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "sales_reader", "resource": "table:analytics.public.customers", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "sales_reader", "resource": "table:analytics.public.events", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "sales_reader", "resource": "table:analytics.public.orders", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "sales_reader", "resource": "table:warehouse.sales.customers", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "sales_reader", "resource": "table:warehouse.sales.events", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "sales_reader", "resource": "table:warehouse.sales.orders", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "sales_writer", "resource": "table:analytics.public.customers", "priv": "INSERT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "sales_writer", "resource": "table:analytics.public.customers", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "sales_writer", "resource": "table:analytics.public.customers", "priv": "UPDATE", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "sales_writer", "resource": "table:analytics.public.events", "priv": "INSERT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "sales_writer", "resource": "table:analytics.public.events", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "sales_writer", "resource": "table:analytics.public.events", "priv": "UPDATE", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "sales_writer", "resource": "table:analytics.public.orders", "priv": "INSERT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "sales_writer", "resource": "table:analytics.public.orders", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "sales_writer", "resource": "table:analytics.public.orders", "priv": "UPDATE", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "sales_writer", "resource": "table:warehouse.sales.customers", "priv": "INSERT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "sales_writer", "resource": "table:warehouse.sales.customers", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "sales_writer", "resource": "table:warehouse.sales.customers", "priv": "UPDATE", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "sales_writer", "resource": "table:warehouse.sales.events", "priv": "INSERT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "sales_writer", "resource": "table:warehouse.sales.events", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "sales_writer", "resource": "table:warehouse.sales.events", "priv": "UPDATE", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "sales_writer", "resource": "table:warehouse.sales.orders", "priv": "INSERT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "sales_writer", "resource": "table:warehouse.sales.orders", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "sales_writer", "resource": "table:warehouse.sales.orders", "priv": "UPDATE", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "svc_airflow", "resource": "db:analytics", "priv": "CONNECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "svc_airflow", "resource": "db:warehouse", "priv": "CONNECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "svc_airflow", "resource": "table:analytics.public.events", "priv": "INSERT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "svc_airflow", "resource": "table:analytics.public.events", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "svc_airflow", "resource": "table:warehouse.finance.events", "priv": "INSERT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "svc_airflow", "resource": "table:warehouse.finance.events", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "svc_airflow", "resource": "table:warehouse.product.events", "priv": "INSERT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "svc_airflow", "resource": "table:warehouse.product.events", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "svc_airflow", "resource": "table:warehouse.sales.events", "priv": "INSERT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "svc_airflow", "resource": "table:warehouse.sales.events", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "svc_metabase", "resource": "db:analytics", "priv": "CONNECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres", "subject": "svc_metabase", "resource": "table:analytics.public.events", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres-staging", "subject": "achen", "resource": "role:sales_reader", "priv": "MEMBER", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres-staging", "subject": "bmiller", "resource": "role:sales_reader", "priv": "MEMBER", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres-staging", "subject": "cdiaz", "resource": "role:product_reader", "priv": "MEMBER", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres-staging", "subject": "dnovak", "resource": "role:product_reader", "priv": "MEMBER", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres-staging", "subject": "epark", "resource": "role:finance_reader", "priv": "MEMBER", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres-staging", "subject": "finance_reader", "resource": "table:analytics.public.events", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres-staging", "subject": "finance_reader", "resource": "table:analytics.public.orders", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres-staging", "subject": "finance_writer", "resource": "table:analytics.public.events", "priv": "UPDATE", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres-staging", "subject": "finance_writer", "resource": "table:analytics.public.orders", "priv": "UPDATE", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres-staging", "subject": "foyelaran", "resource": "role:finance_reader", "priv": "MEMBER", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres-staging", "subject": "gito", "resource": "role:product_reader", "priv": "MEMBER", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres-staging", "subject": "hlang", "resource": "role:sales_reader", "priv": "MEMBER", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres-staging", "subject": "product_reader", "resource": "table:analytics.public.events", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres-staging", "subject": "product_reader", "resource": "table:analytics.public.orders", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres-staging", "subject": "product_writer", "resource": "table:analytics.public.events", "priv": "UPDATE", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres-staging", "subject": "product_writer", "resource": "table:analytics.public.orders", "priv": "UPDATE", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres-staging", "subject": "sales_reader", "resource": "table:analytics.public.events", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres-staging", "subject": "sales_reader", "resource": "table:analytics.public.orders", "priv": "SELECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres-staging", "subject": "sales_writer", "resource": "table:analytics.public.events", "priv": "UPDATE", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres-staging", "subject": "sales_writer", "resource": "table:analytics.public.orders", "priv": "UPDATE", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "postgres-staging", "subject": "svc_airflow_staging", "resource": "db:analytics", "priv": "CONNECT", "source": "explicit", "grantor": "dba"}}
+{"grant": {"system": "s3", "subject": "achen", "resource": "bucket:data-lake", "priv": "List", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "achen", "resource": "bucket:data-lake/sales", "priv": "Read", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "achen", "resource": "bucket:exports/sales", "priv": "Read", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "achen", "resource": "bucket:exports/sales", "priv": "Write", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "achen", "resource": "bucket:reference", "priv": "List", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "achen", "resource": "bucket:reference", "priv": "Read", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "achen", "resource": "bucket:scratch/achen", "priv": "Read", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "achen", "resource": "bucket:scratch/achen", "priv": "Write", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "bmiller", "resource": "bucket:data-lake", "priv": "List", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "bmiller", "resource": "bucket:data-lake/sales", "priv": "Read", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "bmiller", "resource": "bucket:exports/sales", "priv": "Read", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "bmiller", "resource": "bucket:exports/sales", "priv": "Write", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "bmiller", "resource": "bucket:reference", "priv": "List", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "bmiller", "resource": "bucket:reference", "priv": "Read", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "cdiaz", "resource": "bucket:data-lake", "priv": "List", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "cdiaz", "resource": "bucket:data-lake/product", "priv": "Read", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "cdiaz", "resource": "bucket:exports/product", "priv": "Read", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "cdiaz", "resource": "bucket:exports/product", "priv": "Write", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "cdiaz", "resource": "bucket:reference", "priv": "List", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "cdiaz", "resource": "bucket:reference", "priv": "Read", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "cdiaz", "resource": "bucket:scratch/cdiaz", "priv": "Read", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "cdiaz", "resource": "bucket:scratch/cdiaz", "priv": "Write", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "dnovak", "resource": "bucket:data-lake", "priv": "List", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "dnovak", "resource": "bucket:data-lake/product", "priv": "Read", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "dnovak", "resource": "bucket:exports/product", "priv": "Read", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "dnovak", "resource": "bucket:exports/product", "priv": "Write", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "dnovak", "resource": "bucket:reference", "priv": "List", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "dnovak", "resource": "bucket:reference", "priv": "Read", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "epark", "resource": "bucket:data-lake", "priv": "List", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "epark", "resource": "bucket:data-lake/finance", "priv": "Read", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "epark", "resource": "bucket:exports/finance", "priv": "Read", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "epark", "resource": "bucket:exports/finance", "priv": "Write", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "epark", "resource": "bucket:reference", "priv": "List", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "epark", "resource": "bucket:reference", "priv": "Read", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "epark", "resource": "bucket:scratch/epark", "priv": "Read", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "epark", "resource": "bucket:scratch/epark", "priv": "Write", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "foyelaran", "resource": "bucket:data-lake", "priv": "List", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "foyelaran", "resource": "bucket:data-lake/finance", "priv": "Read", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "foyelaran", "resource": "bucket:exports/finance", "priv": "Read", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "foyelaran", "resource": "bucket:exports/finance", "priv": "Write", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "foyelaran", "resource": "bucket:reference", "priv": "List", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "foyelaran", "resource": "bucket:reference", "priv": "Read", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "gito", "resource": "bucket:data-lake", "priv": "List", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "gito", "resource": "bucket:data-lake/product", "priv": "Read", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "gito", "resource": "bucket:exports/product", "priv": "Read", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "gito", "resource": "bucket:exports/product", "priv": "Write", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "gito", "resource": "bucket:reference", "priv": "List", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "gito", "resource": "bucket:reference", "priv": "Read", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "hlang", "resource": "bucket:data-lake", "priv": "List", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "hlang", "resource": "bucket:data-lake/sales", "priv": "Read", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "hlang", "resource": "bucket:exports/sales", "priv": "Read", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "hlang", "resource": "bucket:exports/sales", "priv": "Write", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "hlang", "resource": "bucket:reference", "priv": "List", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "hlang", "resource": "bucket:reference", "priv": "Read", "source": "policy"}}
+{"grant": {"system": "s3", "subject": "svc-airflow", "resource": "bucket:data-lake", "priv": "List", "source": "explicit"}}
+{"grant": {"system": "s3", "subject": "svc-airflow", "resource": "bucket:data-lake", "priv": "Read", "source": "explicit"}}
+{"grant": {"system": "s3", "subject": "svc-airflow", "resource": "bucket:data-lake", "priv": "Write", "source": "explicit"}}
+{"grant": {"system": "s3", "subject": "svc-backup", "resource": "bucket:archive", "priv": "List", "source": "explicit"}}
+{"grant": {"system": "s3", "subject": "svc-backup", "resource": "bucket:archive", "priv": "Write", "source": "explicit"}}
+{"grant": {"system": "s3", "subject": "svc-backup", "resource": "bucket:data-lake", "priv": "Read", "source": "explicit"}}
+{"grant": {"system": "s3", "subject": "svc-duckdb", "resource": "bucket:data-lake", "priv": "List", "source": "explicit"}}
+{"grant": {"system": "s3", "subject": "svc-duckdb", "resource": "bucket:data-lake", "priv": "Read", "source": "explicit"}}
+{"grant": {"system": "s3", "subject": "svc-mlflow", "resource": "bucket:models", "priv": "List", "source": "explicit"}}
+{"grant": {"system": "s3", "subject": "svc-mlflow", "resource": "bucket:models", "priv": "Read", "source": "explicit"}}
+{"grant": {"system": "s3", "subject": "svc-mlflow", "resource": "bucket:models", "priv": "Write", "source": "explicit"}}
+{"unobserved": {"system": "clickhouse", "prefixes": [""], "note": "observer could not connect: connection refused"}}

@@ -1,0 +1,81 @@
+{
+  "grants": [
+    {
+      "subject": "alice",
+      "resource": "role:analyst_read",
+      "priv": "MEMBER",
+      "grantor": "dba"
+    },
+    {
+      "subject": "bob",
+      "resource": "role:analyst_write",
+      "priv": "MEMBER",
+      "grantor": "dba"
+    },
+    {
+      "subject": "bob",
+      "resource": "role:analyst_reader",
+      "priv": "MEMBER",
+      "grantor": "dba"
+    },
+    {
+      "subject": "dave",
+      "resource": "role:analyst_read",
+      "priv": "MEMBER",
+      "grantor": "dba"
+    },
+    {
+      "subject": "svc_etl",
+      "resource": "db:analytics",
+      "priv": "CONNECT",
+      "grantor": "alice"
+    },
+    {
+      "subject": "svc_etl",
+      "resource": "table:analytics.public.events",
+      "priv": "INSERT",
+      "grantor": "alice"
+    },
+    {
+      "subject": "svc_dashboard",
+      "resource": "db:analytics",
+      "priv": "CONNECT"
+    },
+    {
+      "subject": "analyst_read",
+      "resource": "default:analytics.public@analyst_write",
+      "priv": "SELECT"
+    },
+    {
+      "subject": "PUBLIC",
+      "resource": "db:analytics",
+      "priv": "CONNECT",
+      "source": "implicit"
+    },
+    {
+      "subject": "PUBLIC",
+      "resource": "db:analytics",
+      "priv": "TEMPORARY",
+      "source": "implicit"
+    }
+  ],
+  "facts": {
+    "tables": [
+      {
+        "name": "analytics.public.legacy_events",
+        "owner": "svc_etl",
+        "acl_empty": true
+      }
+    ]
+  },
+  "unobserved": [
+    {
+      "prefixes": [
+        "table:hr.",
+        "schema:hr.",
+        "default:hr."
+      ],
+      "note": "observer cannot connect to database 'hr': permission denied for database \"hr\""
+    }
+  ]
+}

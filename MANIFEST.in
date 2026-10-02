@@ -1,0 +1,5 @@
+include grantline.toml CONTRIBUTING.md SECURITY.md
+graft examples
+graft tests
+graft docs
+global-exclude __pycache__ *.py[cod]

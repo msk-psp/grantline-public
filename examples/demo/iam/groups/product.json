@@ -1,0 +1,12 @@
+{
+  "name": "product",
+  "members": [
+    "cdiaz",
+    "dnovak",
+    "gito"
+  ],
+  "policy_names": [
+    "team-product",
+    "shared-read"
+  ]
+}

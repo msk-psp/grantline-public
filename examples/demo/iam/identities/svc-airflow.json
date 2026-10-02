@@ -1,0 +1,14 @@
+{
+  "name": "svc-airflow",
+  "actions": [
+    "Read:data-lake",
+    "Write:data-lake",
+    "List:data-lake"
+  ],
+  "credentials": [
+    {
+      "access_key": "AKSVCAIRFLOW",
+      "secret_key": "…"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "name": "sales",
+  "members": [
+    "achen",
+    "bmiller",
+    "hlang"
+  ],
+  "policy_names": [
+    "team-sales",
+    "shared-read"
+  ]
+}

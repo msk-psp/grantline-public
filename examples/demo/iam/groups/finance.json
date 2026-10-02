@@ -1,0 +1,11 @@
+{
+  "name": "finance",
+  "members": [
+    "epark",
+    "foyelaran"
+  ],
+  "policy_names": [
+    "team-finance",
+    "shared-read"
+  ]
+}

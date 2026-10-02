@@ -1,0 +1,16 @@
+{
+  "name": "analysts",
+  "members": [
+    "achen",
+    "bmiller",
+    "cdiaz",
+    "dnovak",
+    "epark",
+    "foyelaran",
+    "gito",
+    "hlang"
+  ],
+  "policy_names": [
+    "shared-read"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "grants": [
+    {"subject": "bob", "resource": "db:metrics", "priv": "SELECT"},
+    {"subject": "bob", "resource": "db:tmp_experiments", "priv": "SELECT"},
+    {"subject": "svc_dashboard", "resource": "db:metrics", "priv": "SELECT"}
+  ],
+  "facts": {
+    "databases": ["default", "system", "metrics"]
+  }
+}

@@ -1,0 +1,92 @@
+{
+  "grants": [
+    {
+      "subject": "sales_analyst",
+      "resource": "db:metrics",
+      "priv": "SELECT"
+    },
+    {
+      "subject": "sales_analyst",
+      "resource": "table:metrics.sales_daily",
+      "priv": "SELECT"
+    },
+    {
+      "subject": "product_analyst",
+      "resource": "db:metrics",
+      "priv": "SELECT"
+    },
+    {
+      "subject": "product_analyst",
+      "resource": "table:metrics.product_daily",
+      "priv": "SELECT"
+    },
+    {
+      "subject": "finance_analyst",
+      "resource": "db:metrics",
+      "priv": "SELECT"
+    },
+    {
+      "subject": "finance_analyst",
+      "resource": "table:metrics.finance_daily",
+      "priv": "SELECT"
+    },
+    {
+      "subject": "achen",
+      "resource": "role:sales_analyst",
+      "priv": "MEMBER"
+    },
+    {
+      "subject": "cdiaz",
+      "resource": "role:product_analyst",
+      "priv": "MEMBER"
+    },
+    {
+      "subject": "epark",
+      "resource": "role:finance_analyst",
+      "priv": "MEMBER"
+    },
+    {
+      "subject": "gito",
+      "resource": "role:product_analyst",
+      "priv": "MEMBER"
+    },
+    {
+      "subject": "svc_loader",
+      "resource": "db:metrics",
+      "priv": "SELECT"
+    },
+    {
+      "subject": "svc_loader",
+      "resource": "db:metrics",
+      "priv": "INSERT"
+    },
+    {
+      "subject": "svc_loader",
+      "resource": "db:metrics",
+      "priv": "ALTER"
+    },
+    {
+      "subject": "svc_dashboard",
+      "resource": "db:metrics",
+      "priv": "SELECT"
+    }
+  ],
+  "facts": {
+    "databases": [
+      "default",
+      "system",
+      "metrics"
+    ]
+  },
+  "kinds": {
+    "achen": "account",
+    "cdiaz": "account",
+    "epark": "account",
+    "finance_analyst": "role",
+    "gito": "account",
+    "product_analyst": "role",
+    "sales_analyst": "role",
+    "svc_dashboard": "account",
+    "svc_loader": "account"
+  }
+}

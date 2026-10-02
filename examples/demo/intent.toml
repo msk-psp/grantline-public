@@ -1,0 +1,17 @@
+# 선언 — 여기 없는 권한은 이 주체들에게서 이름을 대고 회수된다.
+managed_subjects = ["achen", "bmiller", "cdiaz", "dnovak", "epark", "foyelaran", "gito", "hlang"]
+
+[[s3]]
+subject = "achen"
+resource = "bucket:data-lake/sales"
+priv = "Read"
+
+[[s3]]
+subject = "bmiller"
+resource = "bucket:data-lake/sales"
+priv = "Read"
+
+[[postgres]]
+subject = "cdiaz"
+resource = "role:product_writer"
+priv = "MEMBER"

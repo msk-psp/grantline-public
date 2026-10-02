@@ -1,0 +1,98 @@
+# Demo — runs entirely on the files next to this one. No servers, no credentials.
+#
+#   grantline -c examples/demo/grantline.toml serve
+#
+# 이름은 전부 가상이다. 스크린샷·문서용이며 실제 배포에서 쓰는 값은 저장소 밖
+# (`~/.config/grantline/`) 설정에 둔다.
+intent = "intent.toml"
+audit_log = "audit.jsonl"
+snapshots = "snapshots"
+
+[adapters.postgres]
+type = "fixture"
+fixture = "fixtures/postgres.json"
+
+[adapters.postgres-staging]
+# 인스턴스 이름은 섹션이 정하고, 어떤 방언인지는 kind 가 정한다.
+type = "fixture"
+kind = "postgres"
+fixture = "fixtures/postgres-staging.json"
+
+[adapters.clickhouse]
+type = "fixture"
+fixture = "fixtures/clickhouse.json"
+
+# S3 의 신원은 디렉터리 트리다 — identities · groups · policies 가 따로 있고,
+# 정책이 하나라도 붙은 신원은 native actions 가 무시된다 (그 규칙을 그대로 읽는다).
+[adapters.s3]
+type = "s3"
+enforced = "dynamic"
+
+[adapters.s3.planes.dynamic]
+dir = "iam"
+
+# 어느 grant 테이블에도 없는 홉. 선언이 유일한 출처다.
+[[bridges]]
+from = "duckdb"
+to = "svc-duckdb"
+system = "s3"
+note = "DB 확장 → 서버가 들고 있는 S3 키"
+
+[[bridges]]
+from = "service:airflow"
+to = "svc_airflow"
+system = "postgres"
+note = "DAG → PG 로그인"
+
+[[bridges]]
+from = "service:airflow"
+to = "svc_loader"
+system = "clickhouse"
+note = "DAG → CH 로그인"
+
+[[bridges]]
+from = "service:airflow"
+to = "svc-airflow"
+system = "s3"
+note = "DAG → S3 신원"
+
+[[bridges]]
+from = "service:airflow"
+to = "svc_airflow_staging"
+system = "postgres-staging"
+note = "staging DAG → PG 로그인"
+
+[[bridges]]
+from = "service:mlflow"
+to = "svc-mlflow"
+system = "s3"
+note = "MLflow → 아티팩트 스토어"
+
+# 지도가 쓰는 것: 인스턴스의 환경, 서비스 계정 패턴, 사람 이름.
+[graph]
+services = ["svc*", "duckdb", "PUBLIC"]
+
+[graph.environments]
+prod = ["postgres", "clickhouse", "s3"]
+staging = ["postgres-staging", "s3"]
+
+# 사람 → 팀. 지도의 principal 열이 이걸로 묶인다. 관측으로는 알 수 없다.
+[graph.teams]
+achen = "sales"
+bmiller = "sales"
+hlang = "sales"
+cdiaz = "product"
+dnovak = "product"
+gito = "product"
+epark = "finance"
+foyelaran = "finance"
+
+[graph.people]
+achen = "Alice Chen"
+bmiller = "Bob Miller"
+cdiaz = "Carol Diaz"
+dnovak = "Dave Novak"
+epark = "Erin Park"
+foyelaran = "Frank Oyelaran"
+gito = "Grace Ito"
+hlang = "Heidi Lang"

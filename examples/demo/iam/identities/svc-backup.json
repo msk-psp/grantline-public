@@ -1,0 +1,14 @@
+{
+  "name": "svc-backup",
+  "actions": [
+    "Read:data-lake",
+    "Write:archive",
+    "List:archive"
+  ],
+  "credentials": [
+    {
+      "access_key": "AKSVCBACKUP",
+      "secret_key": "…"
+    }
+  ]
+}
