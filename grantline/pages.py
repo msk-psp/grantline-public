@@ -22,7 +22,7 @@ from .act import ActError, Proposal, propose
 from .auth import current, local_path, proxy_target
 from .i18n import LANGUAGES, client_catalog, elapsed, h, language, t
 from .model import Grant
-from .web import _strength, asset, group_of
+from .web import _icon, _kind_of_instance, _strength, asset, group_of
 
 e = html.escape
 
@@ -236,11 +236,11 @@ def render_inventory(observed: set[Grant], recorder=None, unobserved=()) -> str:
         total_r = len({r for c in groups.values() for r in c["res"]})
         total_s = len({s for c in groups.values() for s in c["subj"]})
         sections.append(h("""<section class="glass">
-<h2>{0} <span class="cnt">{1} resources &middot; {2} subjects</span></h2>
+<h2><svg class="service-icon i-{4}" viewBox="0 0 16 16" aria-hidden="true">{5}</svg> {0} <span class="cnt">{1} resources &middot; {2} subjects</span></h2>
 <div class="scroll"><table>
 <thead><tr><th>resource kind</th><th class="num">resources</th><th class="num">subjects</th>
 <th>strongest</th><th>who</th></tr></thead>
-<tbody>{3}</tbody></table></div></section>""", e(system), total_r, total_s, rows))
+<tbody>{3}</tbody></table></div></section>""", e(system), total_r, total_s, rows, e(_kind_of_instance(system)), _icon(_kind_of_instance(system), 0, 0)))
 
     return _shell(t('services'), _nav("/services") + h("""<header class="glass">
 <h1>What is granted, by service</h1>

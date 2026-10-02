@@ -439,3 +439,9 @@ body:has(.page.wide)::before { animation:none !important; filter:none; }
 .log-entity { display:inline-block; max-width:100%; color:var(--ink); background:var(--node); border:1px solid var(--rule);
               border-radius:5px; padding:.08rem .35rem; font:500 .9em/1.6 ui-monospace,Menlo,monospace;
               overflow-wrap:anywhere; white-space:break-spaces; vertical-align:baseline; }
+
+.service-icon { width:1.2em; height:1.2em; vertical-align:-.2em; flex-shrink:0; }
+.tools .env { display:inline-flex; gap:.3rem; flex-wrap:wrap; }
+.service-icon.i-postgres { color:var(--accent); }
+.service-icon.i-clickhouse { color:var(--write); }
+.service-icon.i-s3 { color:var(--add); }

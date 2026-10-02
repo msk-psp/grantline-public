@@ -161,3 +161,26 @@ for (const locale of ['en', 'ko', 'ja', 'zh-CN']) {
   assert.equal(context.GrantlineI18n('via {0}', '<script>Read</script>'), (messages['via {0}'] || 'via {0}').replace('{0}', '<script>Read</script>'));
 }
 console.log('PASS: four client catalogs preserve Unicode and placeholder values');
+
+// Environment identifiers become text, preserving custom names instead of translations.
+const envButtons = [];
+const envBox = { append(button) { envButtons.push(button); } };
+const names = ['prod', 'staging', 'Read', '自定义 <script> " {0}'];
+const environmentSource = source.slice(source.indexOf("  const envBox ="), source.indexOf("  const svcBox ="));
+vm.runInNewContext(environmentSource, {
+  data: { edges: names.map(name => ({ env: [name, name] })) },
+  document: { querySelector: () => envBox, createElement: () => ({ dataset: {} }) }, tr,
+});
+assert.deepEqual(envButtons.map(button => button.textContent), [...names].sort());
+assert.deepEqual(envButtons.map(button => button.dataset.env), [...names].sort());
+assert(envButtons.every(button => !('innerHTML' in button)), 'environment data must never become HTML');
+console.log('PASS: environment identifiers preserve literal names and custom scopes');
+
+const envOn = new Set(names);
+const filterSource = source.slice(source.indexOf('    const shown ='), source.indexOf('    for (const e of edges) e.classList.toggle'));
+const shown = vm.runInNewContext(filterSource + '\nshown', { envOn, kindOn: new Set(['postgres']) });
+for (const name of names) {
+  const edge = { dataset: { env: JSON.stringify([name]), kind: 'postgres' } };
+  assert(shown(edge), 'space and punctuation in environment names must remain filterable');
+  envOn.delete(name); assert.equal(shown(edge), false); envOn.add(name);
+}
