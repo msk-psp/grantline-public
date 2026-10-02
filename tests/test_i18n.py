@@ -143,6 +143,14 @@ with patch.object(web, "HTTPServer", capture):
         except urllib.error.HTTPError as exc:
             return exc.code, exc.headers, exc.read().decode()
     try:
+        # Both shared logos must be real local PNGs with a browser image MIME type.
+        for kind, name in (("postgres", "postgresql.png"), ("s3", "seaweedfs.png")):
+            assert f'href="{web.asset(name)}"' in web._ICONS[kind]
+            with opener.open(base + web.asset(name), timeout=3) as response:
+                data = response.read()
+                assert response.status == 200 and response.headers['Content-Type'] == 'image/png'
+                assert data.startswith(b'\x89PNG\r\n\x1a\n')
+                assert data == (web._STATIC / name).read_bytes()
         for locale in LANGUAGES:
             for path in ('/login', '/', '/services', '/s/services', '/g/s3/bucket%3ARead', '/matrix', '/act', '/missing'):
                 status, headers, body = request(path, {"Cookie": f"grantline_lang={locale}"})
