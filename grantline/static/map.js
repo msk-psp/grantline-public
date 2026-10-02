@@ -157,7 +157,7 @@ async function main() {
     let [x1, y1] = pos.get(e.src), [x2, y2] = pos.get(e.dst);
     const back = x2 < x1;                              // right-to-left: a role bridging onto a key
     x1 += back ? 0 : W; x2 += back ? W + ARR : -ARR; y1 += H / 2; y2 += H / 2;
-    const mid = (x1 + x2) / 2, env = e.env.join(' ');
+    const mid = (x1 + x2) / 2, env = JSON.stringify(e.env);
     const p = el('path', { class: e.cls === 'bridge' ? 'bridge' : `ed ${e.cls}`, 'marker-end': 'url(#arr)',
                            'data-env': env, 'data-kind': e.kind || '', 'data-src': e.src, 'data-dst': e.dst,
                            'data-what': e.what || '', d: route(x1, y1, x2, y2) });
@@ -397,6 +397,14 @@ async function main() {
   // ── filters: environment and service. An edge is drawn while its environment
   //    and its service are both on; a node while one of its edges is. Bridges with
   //    no service of their own (system "*") follow whatever is on.
+  const envBox = document.querySelector('.tools .env');
+  const environments = [...new Set(data.edges.flatMap(edge => edge.env))].sort();
+  for (const name of environments) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'on'; b.dataset.env = name;
+    b.textContent = name; b.title = tr('show what reaches {0}', name);
+    envBox.append(b);
+  }
   const svcBox = document.querySelector('.tools .svc');
   const kinds = [...new Set(Object.values(data.instances).map(i => i.kind))].sort();
   for (const k of kinds) {
@@ -410,7 +418,7 @@ async function main() {
   function applyFilters() {
     leave();
     const envOn = active('env'), kindOn = active('kind');
-    const shown = e => e.dataset.env.split(' ').some(v => envOn.has(v)) && (!e.dataset.kind || kindOn.has(e.dataset.kind));
+    const shown = e => JSON.parse(e.dataset.env).some(v => envOn.has(v)) && (!e.dataset.kind || kindOn.has(e.dataset.kind));
     for (const e of edges) e.classList.toggle('off', !shown(e));
     for (const t of labels) t.classList.toggle('off', !shown(t));
     const alive = new Set();

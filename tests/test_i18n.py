@@ -16,6 +16,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from grantline import pages, web
 from grantline.adapters import Adapter
+from grantline.graph import build
 from grantline.i18n import LANGUAGES, catalog, client_catalog, elapsed, h, language, negotiate, t
 from grantline.model import Grant
 
@@ -62,6 +63,30 @@ for locale in LANGUAGES:
         assert t("on the path") in pages.render_probe("services", [], [])
     finally:
         language.reset(token)
+
+# Service icons share the map marks; configured names are data in every locale.
+services = {Grant(kind, 'alice', 'db:example' if kind != 's3' else 'bucket:example', 'Read')
+            for kind in ('postgres', 'clickhouse', 's3')}
+custom = 'custom" onload="alert(1)'
+services.add(Grant(custom, 'alice', 'db:example', 'Read'))
+for locale in LANGUAGES:
+    token = language.set(locale)
+    try:
+        inventory = pages.render_inventory(services)
+        assert inventory.count('<svg class="service-icon') == 4
+        for kind in ('postgres', 'clickhouse', 's3'):
+            assert f'class="service-icon i-{kind}"' in inventory and web._ICONS[kind] in inventory
+        assert html.escape(custom) in inventory and ' onload="alert(1)"' not in inventory
+        assert t('prod') == 'prod' and t('staging') == 'staging'
+        assert 'class="env"' in web.render_graph_page()
+    finally:
+        language.reset(token)
+graph = build({Grant('postgres', 'alice', 'db:example', 'CONNECT')},
+              [{'from': 'service:worker', 'to': 'alice', 'system': '*'}],
+              envs={'postgres': ('Read', '自定义 <env>')})
+data = web.graph_data(graph)
+assert data['instances']['postgres']['env'] == ['Read', '自定义 <env>']
+assert all(set(edge['env']) == {'Read', '自定义 <env>'} for edge in data['edges'])
 
 # README translations must retain all runnable commands and resolve every local link.
 readmes = [root / 'README.md'] + [root / 'docs' / f'README.{c}.md' for c in ('ko', 'ja', 'zh-CN')]

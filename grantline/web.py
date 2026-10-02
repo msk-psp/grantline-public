@@ -586,7 +586,7 @@ def _service_icon(name: str) -> str:
 
 
 def _icon(kind: str, x: float, y: float) -> str:
-    return (f'<g class="ic i-{kind}" transform="translate({x},{y})" fill="none" stroke="currentColor" '
+    return (f'<g class="ic i-{html.escape(kind)}" transform="translate({x},{y})" fill="none" stroke="currentColor" '
             f'stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">'
             f'{_ICONS.get(kind, _ICONS["generic"])}</g>')
 
@@ -651,8 +651,11 @@ def graph_data(graph, unobserved=()) -> dict:
             if edge.kind != "route":          # a policy's scope is a line, not a resource count
                 reached[edge.system] = reached.get(edge.system, 0) + 1
 
+    environments = sorted({name for edge in graph.edges if edge.system != "*"
+                           for name in graph.env_of(edge.system)}) or ["prod", "staging"]
+
     def env(system: str) -> list[str]:
-        return ["prod", "staging"] if system == "*" else list(graph.env_of(system))
+        return environments if system == "*" else list(graph.env_of(system))
 
     # Where each node lives: the instances whose grant tables mention it. A role
     # called research_maintainer exists in postgres *and* postgres-staging; the column
@@ -721,8 +724,7 @@ server holds, never theirs.</p>
 <h2>Routes <span class="cnt">click a name &middot; scroll to zoom &middot; drag to pan</span></h2>
 <div class="tools">
   <div class="grp" role="group" aria-label="environment"><span class="lbl">environment</span>
-    <button type="button" class="on" data-env="prod" title="what reaches production">prod</button>
-    <button type="button" class="on" data-env="staging" title="what reaches staging">staging</button>
+    <span class="env"></span>
   </div>
   <div class="grp" role="group" aria-label="service"><span class="lbl">service</span><span class="svc"></span></div>
   <div class="grp view" role="group" aria-label="view"><span class="lbl">view</span>
