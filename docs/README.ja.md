@@ -36,6 +36,20 @@ grantline -c examples/demo/grantline.toml serve
 初回アクセス時はブラウザーの言語を使います。
 アカウント名、リソースのパス、サービスのネイティブコマンドは元の表記を維持します。
 
+## Dockerで実行する
+
+GitHub Releaseの公開時に、GHCRへ`linux/amd64`・`linux/arm64`イメージを配布します。
+安定版は`latest`も更新します。プレリリースには個別のバージョンタグを使います。
+
+```bash
+docker run --rm -p 127.0.0.1:8420:8420 ghcr.io/msk-psp/grantline-public:latest
+```
+
+**http://127.0.0.1:8420/** で、認証情報なしで内蔵デモを試せます。
+実際のシステムでは外部設定をマウントし、実行記録を永続化してください。
+[コンテナ設定](usage.md#containers)を参照し、デプロイにはリリースタグまたは
+digestを固定してください。PostgreSQLドライバーはイメージに含まれています。
+
 ## よく使うコマンド
 
 ```bash

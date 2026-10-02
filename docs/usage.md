@@ -282,3 +282,55 @@ CLI commands and native service diagnostics retain their original spelling.
 The CLI and detailed operational documentation are in their original language.
 Translation catalogs live in `grantline/locales/`; English source text is the
 fallback. Templates are translated before service data is interpolated.
+
+## Containers
+
+GitHub Release publication triggers `.github/workflows/release.yml`: the Python
+matrix and container smoke test run first, then an `amd64`/`arm64` image is pushed
+to `ghcr.io/msk-psp/grantline-public`. Use a version tag such as `v0.1.0`, or pin
+the digest reported in the workflow summary. Stable releases update `latest`;
+pre-releases do not. The first published GHCR package must be made **public** in
+its package settings to allow anonymous pulls. Release publishing uses the
+repository's `GITHUB_TOKEN`; no personal registry token is required.
+
+The image defaults to a fictional, credential-free demo. PostgreSQL's binary
+driver is included. It runs as UID/GID `10001:10001`; the demo's writable files
+are disposable when the container is removed.
+
+For real systems, keep configuration and credentials outside the image. Mount
+configuration read-only at `/config`, and a persistent writable directory at
+`/data` for snapshots, audit records and approval requests. The container user
+must be able to read the mounted files; secret files retain mode `0600`. Use
+absolute container paths in your configuration, for example:
+
+```toml
+intent = "/config/intent.toml"
+env_file = "/config/credentials.env"
+audit_log = "/data/audit.jsonl"
+snapshots = "/data/snapshots"
+
+[approvals]
+store = "/data/approvals"
+```
+
+After preparing your external files and granting UID `10001` access to the state
+directory, start the console:
+
+```bash
+docker run --rm -p 127.0.0.1:8420:8420 \
+  --mount type=bind,src="$HOME/.config/grantline",dst=/config,readonly \
+  --mount type=bind,src="$HOME/.local/state/grantline",dst=/data \
+  ghcr.io/msk-psp/grantline-public:v0.1.0 \
+  -c /config/prod.toml serve --host 0.0.0.0 --port 8420
+```
+
+`--host 0.0.0.0` exposes the container listener; the published host port above
+remains on loopback. Outside Docker, `serve` still defaults to `127.0.0.1`.
+Host/Origin validation and proxy authentication apply unchanged. When using a
+reverse proxy or a different public port, set `[web] trusted_hosts` to the exact
+external `host:port` and follow [Security](../SECURITY.md).
+
+Publish a release only from a reviewed commit on `main` after its checks pass.
+Keep credentials out of release notes and build arguments. To roll back, run the
+previous image tag or digest with the same external configuration and state;
+never replace your configuration or observations with the bundled demo files.
