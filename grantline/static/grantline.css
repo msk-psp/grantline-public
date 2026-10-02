@@ -434,3 +434,8 @@ body:has(.page.wide)::before { animation:none !important; filter:none; }
 .note.log-entry { padding:.8rem 1rem; }
 .note.log-entry b { color:var(--log-color); }
 .note.log-entry p { color:var(--ink); }
+
+/* Entity blocks retain identifier spelling, including long resource paths. */
+.log-entity { display:inline-block; max-width:100%; color:var(--ink); background:var(--node); border:1px solid var(--rule);
+              border-radius:5px; padding:.08rem .35rem; font:500 .9em/1.6 ui-monospace,Menlo,monospace;
+              overflow-wrap:anywhere; white-space:break-spaces; vertical-align:baseline; }

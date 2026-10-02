@@ -107,6 +107,7 @@ class Finding:
     title: str
     detail: str
     level: str = ""
+    entities: tuple[str, ...] = ()  # Literal identifiers supplied by the diagnostic producer.
 
     def __post_init__(self):
         if not self.level:

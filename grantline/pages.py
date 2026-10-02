@@ -15,6 +15,7 @@ total.
 from __future__ import annotations
 
 import html
+import re
 from urllib.parse import quote, unquote, urlencode
 
 from .act import ActError, Proposal, propose
@@ -129,17 +130,31 @@ def log_badge(level: str) -> str:
     return h('<span class="log-level log-{0}" title="{1}">{2}</span>', level, e(t(title)), label)
 
 
+def log_entity(value: str) -> str:
+    return h('<code class="log-entity">{0}</code>', e(value))
+
+
+def log_detail(finding) -> str:
+    """Highlight explicit identifiers only; escape both prose and identifier values."""
+    entities = sorted({value for value in finding.entities if value}, key=lambda value: (-len(value), value))
+    if not entities:
+        return e(finding.detail)
+    pattern = r"(?<!\w)(" + "|".join(re.escape(value) for value in entities) + r")(?!\w)"
+    return "".join(log_entity(part) if i % 2 else e(part)
+                   for i, part in enumerate(re.split(pattern, finding.detail)))
+
+
 def render_findings(findings: list) -> str:
     groups: dict[tuple[str, str, str], list] = {}
     for finding in findings:
         groups.setdefault((finding.level, finding.system, finding.title), []).append(finding)
     order = {"error": 0, "warning": 1, "info": 2}
     notes = "".join(
-        h('<div class="note log-entry log-{0}">{1} <b>[{2}] {3}</b>', severity, log_badge(severity), e(system), e(title))
+        h('<div class="note log-entry log-{0}">{1} <b>[{2}] {3}</b>', severity, log_badge(severity), log_entity(system), e(title))
         + (h('<span class="cnt">{0}</span>', len(items)) if len(items) > 1 else "")
-        + "".join(h('<p>{0}</p>', e(item.detail)) for item in items[:2])
+        + "".join(h('<p>{0}</p>', log_detail(item)) for item in items[:2])
         + (h('<details><summary>{0} more findings</summary>', len(items) - 2)
-           + "".join(h('<p>{0}</p>', e(item.detail)) for item in items[2:]) + h('</details>') if len(items) > 2 else "")
+           + "".join(h('<p>{0}</p>', log_detail(item)) for item in items[2:]) + h('</details>') if len(items) > 2 else "")
         + h('</div>')
         for (severity, system, title), items in sorted(groups.items(), key=lambda pair: (order[pair[0][0]], -len(pair[1]), pair[0]))
     ) or h('<p class="ok">No findings.</p>')
@@ -169,7 +184,7 @@ def _since_run(rec) -> str:
         return (h('<section class="glass"><h2>Since your previous run</h2><p class="ok">{0} This is the first run recorded, so there is nothing to compare it with. Nothing here runs on a schedule &mdash; the next comparison will cover however long it happens to be until you run this again.</p></section>', log_badge("info")))
 
     rows = "".join(
-        h('<tr><td>{6}</td><td><span class="drift d-{0}">{1}</span></td><td>{2}</td><td>{3}</td><td class="resource-name">{4}</td><td>{5}</td></tr>', kind, e(t(label)), e(g.system), _chips([g.subject]), e(g.resource), e(g.priv), log_badge("info"))
+        h('<tr><td>{6}</td><td><span class="drift d-{0}">{1}</span></td><td>{2}</td><td>{3}</td><td class="resource-name">{4}</td><td>{5}</td></tr>', kind, e(t(label)), log_entity(g.system), _chips([g.subject]), log_entity(g.resource), log_entity(g.priv), log_badge("info"))
         for kind, label, grants in (("add", "+ Added", cmp.added), ("rm", "− Removed", cmp.removed))
         for g in grants)
     body = (h('<div class="scroll"><table class="change-log"><thead><tr><th>Log level</th><th>Change</th><th>Service</th><th>Account</th><th>Resource</th><th>Privilege</th></tr></thead><tbody>{0}</tbody></table></div>', rows) if rows else
@@ -232,7 +247,7 @@ def render_inventory(observed: set[Grant], recorder=None, unobserved=()) -> str:
 <p class="lede">Browse access by service. Open a resource kind to inspect its resources,
 or an account to see its direct and inherited access.</p></header>""")
                   + _since_run(recorder)
-                  + "".join(h('<section class="glass"><div class="warn stop log-entry log-error" role="status">{2}<b>Could not read {0}</b>{1}. This is unknown access, not an empty service.</div></section>', e(u.system), e(u.note), log_badge("error")) for u in unobserved)
+                  + "".join(h('<section class="glass"><div class="warn stop log-entry log-error" role="status">{2}<b>Could not read {0}</b>{1}. This is unknown access, not an empty service.</div></section>', log_entity(u.system), e(u.note), log_badge("error")) for u in unobserved)
                   + ("".join(sections) if sections else h('<section class="glass"><h2>No observed grants</h2><p class="ok">No grants are available to browse. Check service connections and any read errors above, then refresh.</p></section>')))
 
 
