@@ -84,11 +84,35 @@ class Grant:
             object.__setattr__(self, "resource", r)
 
 
+# Built-in diagnostic kinds have stable titles; custom findings may set a level.
+_FINDING_LEVELS = {
+    "already covered by a broader grant": "info",
+    "deny without a matching allow": "info",
+    "unobserved scope": "error",
+    "system could not be read": "error",
+    "auth plane unreachable": "error",
+    "policy document missing": "error",
+    "policy evaluation incomplete": "error",
+    "policy statement with an unknown effect": "error",
+    "identity missing from the enforced plane": "error",
+    "frozen ACL (owner locked out)": "error",
+    "granted on paper, denied on the path": "error",
+    "reachable, but no grant explains it": "error",
+}
+
+
 @dataclass(frozen=True)
 class Finding:
     system: str
     title: str
     detail: str
+    level: str = ""
+
+    def __post_init__(self):
+        if not self.level:
+            object.__setattr__(self, "level", _FINDING_LEVELS.get(self.title, "warning"))
+        if self.level not in ("info", "warning", "error"):
+            raise ValueError("finding level must be info, warning or error")
 
 
 @dataclass(frozen=True)

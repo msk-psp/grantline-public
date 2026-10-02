@@ -323,5 +323,12 @@
   "Bad Request": "不正なリクエストです",
   "Forbidden": "アクセスできません",
   "Unauthorized": "ログインが必要です",
-  "{0} res ›": "リソース{0}件 ›"
+  "{0} res ›": "リソース{0}件 ›",
+  "Log level": "ログレベル",
+  "Information": "情報",
+  "Warning": "警告",
+  "Error": "エラー",
+  "{0} This is the first run recorded, so there is nothing to compare it with. Nothing here runs on a schedule — the next comparison will cover however long it happens to be until you run this again.": "{0} 初回の記録なので比較対象はありません。定期実行ではなく、次に実行するまでの変化を比較します。",
+  "{0} Nothing changed. Unchanged access is omitted.": "{0} 変更はありません。同じ権限は省略しています。",
+  "{0} Information · {1} Requires review · {2} Observation or verification failed": "{0} 情報 · {1} 要確認 · {2} 観測または検証の失敗"
 }

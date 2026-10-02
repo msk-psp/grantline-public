@@ -323,5 +323,12 @@
   "Bad Request": "잘못된 요청입니다",
   "Forbidden": "접근할 수 없습니다",
   "Unauthorized": "로그인이 필요합니다",
-  "{0} res ›": "리소스 {0}개 ›"
+  "{0} res ›": "리소스 {0}개 ›",
+  "Log level": "로그 수준",
+  "Information": "정보",
+  "Warning": "경고",
+  "Error": "오류",
+  "{0} This is the first run recorded, so there is nothing to compare it with. Nothing here runs on a schedule — the next comparison will cover however long it happens to be until you run this again.": "{0} 첫 관측 기록이라 비교할 이전 기록이 없습니다. 정기 실행이 아니므로 다음 비교는 다시 실행할 때까지의 변화를 다룹니다.",
+  "{0} Nothing changed. Unchanged access is omitted.": "{0} 변경이 없습니다. 동일한 권한은 생략합니다.",
+  "{0} Information · {1} Requires review · {2} Observation or verification failed": "{0} 정보 · {1} 검토 필요 · {2} 관측 또는 검증 실패"
 }

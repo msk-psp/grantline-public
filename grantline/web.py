@@ -140,23 +140,12 @@ def render(observed: set[Grant], changes: list[Change], findings: list[Finding],
     else:
         plan_html = h('<p class="ok">Converged — observed state matches intent.</p>')
 
-    groups: dict[tuple[str, str], list] = {}
-    for f in findings:
-        groups.setdefault((f.system, f.title), []).append(f)
-    notes = "".join(
-        h('<div class="note"><b>[{0}] {1}</b>', e(sysname), e(title))
-        + (h('<span class="cnt">{0}</span>', len(fs)) if len(fs) > 1 else "")
-        + "".join(h('<p>{0}</p>', e(f.detail)) for f in fs[:2])
-        + (h('<details><summary>{0} more findings</summary>', len(fs) - 2)
-           + "".join(h('<p>{0}</p>', e(f.detail)) for f in fs[2:]) + h('</details>') if len(fs) > 2 else "")
-        + h('</div>')
-        for (sysname, title), fs in sorted(groups.items(), key=lambda kv: -len(kv[1]))
-    ) or h('<p class="ok">No findings.</p>')
+    from .pages import _nav, _shell, render_findings
+    notes = render_findings(findings)
 
     # 이 페이지만 nav 가 없어서 매트릭스에 들어가면 다른 탭으로 못 나갔다 —
     # 브라우저 뒤로가기 말고는 길이 없었다. pages._shell 을 안 거치는 두 페이지
     # (여기와 routes) 가 같은 이유로 빠졌고, routes 는 앞서 고쳤다.
-    from .pages import _nav, _shell
     return _shell(t("Access matrix"), h("""
 {0}
 <header class="glass">

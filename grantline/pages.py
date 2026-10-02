@@ -123,6 +123,30 @@ def _chips(subjects, limit=8) -> str:
     return out
 
 
+def log_badge(level: str) -> str:
+    label, title = {"info": ("INFO", "Information"), "warning": ("WARN", "Warning"),
+                    "error": ("ERROR", "Error")}[level]
+    return h('<span class="log-level log-{0}" title="{1}">{2}</span>', level, e(t(title)), label)
+
+
+def render_findings(findings: list) -> str:
+    groups: dict[tuple[str, str, str], list] = {}
+    for finding in findings:
+        groups.setdefault((finding.level, finding.system, finding.title), []).append(finding)
+    order = {"error": 0, "warning": 1, "info": 2}
+    notes = "".join(
+        h('<div class="note log-entry log-{0}">{1} <b>[{2}] {3}</b>', severity, log_badge(severity), e(system), e(title))
+        + (h('<span class="cnt">{0}</span>', len(items)) if len(items) > 1 else "")
+        + "".join(h('<p>{0}</p>', e(item.detail)) for item in items[:2])
+        + (h('<details><summary>{0} more findings</summary>', len(items) - 2)
+           + "".join(h('<p>{0}</p>', e(item.detail)) for item in items[2:]) + h('</details>') if len(items) > 2 else "")
+        + h('</div>')
+        for (severity, system, title), items in sorted(groups.items(), key=lambda pair: (order[pair[0][0]], -len(pair[1]), pair[0]))
+    ) or h('<p class="ok">No findings.</p>')
+    return h('<p class="hint log-legend">{0} Information · {1} Requires review · {2} Observation or verification failed</p>',
+             log_badge("info"), log_badge("warning"), log_badge("error")) + notes
+
+
 # ── F8 ────────────────────────────────────────────────────────────────────────
 def _since_run(rec) -> str:
     """What moved since the previous run — on the front page, above the inventory.
@@ -139,26 +163,26 @@ def _since_run(rec) -> str:
     if rec is None:
         return ""
     if getattr(rec, "error", ""):
-        return (h('<section class="glass"><h2>Since your previous run</h2><div class="warn"><b>not recorded</b>{0} The access shown below was still read live; only the record of this run is missing, so the next run has nothing to compare against.</div></section>', e(rec.error)))
+        return (h('<section class="glass"><h2>Since your previous run</h2><div class="warn log-entry log-error">{1}<b>not recorded</b>{0} The access shown below was still read live; only the record of this run is missing, so the next run has nothing to compare against.</div></section>', e(rec.error), log_badge("error")))
     cmp = getattr(rec, "comparison", None)
     if cmp is None:
-        return (h('<section class="glass"><h2>Since your previous run</h2><p class="ok">This is the first run recorded, so there is nothing to compare it with. Nothing here runs on a schedule &mdash; the next comparison will cover however long it happens to be until you run this again.</p></section>'))
+        return (h('<section class="glass"><h2>Since your previous run</h2><p class="ok">{0} This is the first run recorded, so there is nothing to compare it with. Nothing here runs on a schedule &mdash; the next comparison will cover however long it happens to be until you run this again.</p></section>', log_badge("info")))
 
     rows = "".join(
-        h('<tr><td><span class="drift d-{0}">{1}</span></td><td>{2}</td><td>{3}</td><td class="resource-name">{4}</td><td>{5}</td></tr>', kind, e(t(label)), e(g.system), _chips([g.subject]), e(g.resource), e(g.priv))
+        h('<tr><td>{6}</td><td><span class="drift d-{0}">{1}</span></td><td>{2}</td><td>{3}</td><td class="resource-name">{4}</td><td>{5}</td></tr>', kind, e(t(label)), e(g.system), _chips([g.subject]), e(g.resource), e(g.priv), log_badge("info"))
         for kind, label, grants in (("add", "+ Added", cmp.added), ("rm", "− Removed", cmp.removed))
         for g in grants)
-    body = (h('<div class="scroll"><table class="change-log"><thead><tr><th>Change</th><th>Service</th><th>Account</th><th>Resource</th><th>Privilege</th></tr></thead><tbody>{0}</tbody></table></div>', rows) if rows else
-            h('<p class="ok">Nothing changed. Unchanged access is omitted.</p>'))
+    body = (h('<div class="scroll"><table class="change-log"><thead><tr><th>Log level</th><th>Change</th><th>Service</th><th>Account</th><th>Resource</th><th>Privilege</th></tr></thead><tbody>{0}</tbody></table></div>', rows) if rows else
+            h('<p class="ok">{0} Nothing changed. Unchanged access is omitted.</p>', log_badge('info')))
 
     # A scope that moved in or out of view is not access that moved. Kept out of the
     # list above and counted separately, because in set arithmetic they are
     # indistinguishable from a revoke and a grant (F6).
     blind = ""
     if cmp.obscured:
-        blind += (h('<div class="warn"><b>unknown, not revoked</b>{0} grant(s) sat in a scope this run could not read. They are not listed as removed, because nothing says they were.</div>', len(cmp.obscured)))
+        blind += (h('<div class="warn log-entry log-warning">{1}<b>unknown, not revoked</b>{0} grant(s) sat in a scope this run could not read. They are not listed as removed, because nothing says they were.</div>', len(cmp.obscured), log_badge("warning")))
     if cmp.revealed:
-        blind += (h('<div class="warn"><b>visible, not new</b>{0} grant(s) became readable again after a scope the previous run missed. They are not listed as added.</div>', len(cmp.revealed)))
+        blind += (h('<div class="warn log-entry log-info">{1}<b>visible, not new</b>{0} grant(s) became readable again after a scope the previous run missed. They are not listed as added.</div>', len(cmp.revealed), log_badge("info")))
 
     return h("""<section class="glass"><h2>Since your previous run
 <span class="cnt">{0} changed</span></h2>
@@ -208,7 +232,7 @@ def render_inventory(observed: set[Grant], recorder=None, unobserved=()) -> str:
 <p class="lede">Browse access by service. Open a resource kind to inspect its resources,
 or an account to see its direct and inherited access.</p></header>""")
                   + _since_run(recorder)
-                  + "".join(h('<section class="glass"><div class="warn stop" role="status"><b>Could not read {0}</b>{1}. This is unknown access, not an empty service.</div></section>', e(u.system), e(u.note)) for u in unobserved)
+                  + "".join(h('<section class="glass"><div class="warn stop log-entry log-error" role="status">{2}<b>Could not read {0}</b>{1}. This is unknown access, not an empty service.</div></section>', e(u.system), e(u.note), log_badge("error")) for u in unobserved)
                   + ("".join(sections) if sections else h('<section class="glass"><h2>No observed grants</h2><p class="ok">No grants are available to browse. Check service connections and any read errors above, then refresh.</p></section>')))
 
 
@@ -430,7 +454,7 @@ def render_probe(subject: str, probes, findings) -> str:
     rows = "".join(
         h('<tr><td>{0}</td><td class="res">{1}</td><td class="res">{2}</td><td class="lvl {3}">{4} {5}</td><td class="via">{6}</td></tr>', e(p.system), e(p.resource), e(p.priv), mark[p.verdict][1], mark[p.verdict][0], e(t(p.verdict)), e(p.how))
         for p in sorted(probes, key=lambda p: ({"deny": 0, "unknown": 1, "allow": 2}[p.verdict], p.system, p.resource, p.priv)))
-    fnd = "".join(h('<li><b>{0}</b> — {1}</li>', e(f.title), e(f.detail)) for f in findings)
+    fnd = render_findings(findings)
     return _shell(t("{0} · on the path", subject), _nav(""), h("""<header class="glass">
 <h1>{0} <span class="cnt">on the path</span>
 <a class="chip" href="/s/{1}">back to {2}</a></h1>
@@ -445,7 +469,7 @@ leave a mark and live on the CLI only.</p></header>
 <section class="glass"><h2>Rows <span class="cnt">{8}</span></h2><div class="scroll"><table>
 <thead><tr><th>service</th><th>resource</th><th>privilege</th><th>verdict</th><th>how</th></tr></thead>
 <tbody>{9}</tbody></table></div>
-{10}</section>""", e(subject), quote(subject, safe=""), e(subject), e(subject), n['allow'], n['deny'], n['unknown'], h('<section class="glass"><h2>Where the path disagrees with the table</h2><ul>') + fnd + h('</ul></section>') if findings else '', len(probes), rows, h('<p class="ok">No grants are available to probe for this account. Return to its access page and check observation errors.</p>') if not rows else ''))
+{10}</section>""", e(subject), quote(subject, safe=""), e(subject), e(subject), n['allow'], n['deny'], n['unknown'], h('<section class="glass"><h2>Where the path disagrees with the table</h2>') + fnd + h('</section>') if findings else '', len(probes), rows, h('<p class="ok">No grants are available to probe for this account. Return to its access page and check observation errors.</p>') if not rows else ''))
 
 
 def render_approve(req, approver: str | None, error: str = "", done: str = "") -> str:

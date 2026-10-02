@@ -323,5 +323,12 @@
   "Bad Request": "请求无效",
   "Forbidden": "无法访问",
   "Unauthorized": "需要登录",
-  "{0} res ›": "{0} 个资源 ›"
+  "{0} res ›": "{0} 个资源 ›",
+  "Log level": "日志级别",
+  "Information": "信息",
+  "Warning": "警告",
+  "Error": "错误",
+  "{0} This is the first run recorded, so there is nothing to compare it with. Nothing here runs on a schedule — the next comparison will cover however long it happens to be until you run this again.": "{0} 这是首次记录，没有可比较的历史记录。此工具不定时运行；下次比较将涵盖再次运行前的变化。",
+  "{0} Nothing changed. Unchanged access is omitted.": "{0} 没有变化。未变化的权限已省略。",
+  "{0} Information · {1} Requires review · {2} Observation or verification failed": "{0} 信息 · {1} 需要检查 · {2} 观测或验证失败"
 }

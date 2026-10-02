@@ -12,6 +12,7 @@
   --rule:rgba(21,26,33,.10);
   --shadow:0 8px 32px rgba(21,26,33,.10), 0 2px 8px rgba(21,26,33,.06);
   --radius:22px;
+  --log-warning:#8a4b08;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -23,6 +24,7 @@
     --edge:rgba(255,255,255,.14);
     --rule:rgba(255,255,255,.10);
     --shadow:0 8px 32px rgba(0,0,0,.38), 0 2px 8px rgba(0,0,0,.24);
+    --log-warning:#e0a45c;
   }
 }
 
@@ -420,3 +422,15 @@ body:has(.page.wide)::before { animation:none !important; filter:none; }
 @media (prefers-reduced-motion:reduce) {
   tbody tr { transition:none; }
 }
+
+/* Log levels describe diagnostic severity; grant/revoke colors describe direction. */
+.log-info { --log-color:var(--accent); }
+.log-warning { --log-color:var(--log-warning); }
+.log-error { --log-color:var(--rm); }
+.log-level { display:inline-block; color:var(--log-color); font:650 11px/1.5 ui-monospace,Menlo,monospace;
+             border:1px solid currentColor; border-radius:5px; padding:.1rem .4rem; white-space:nowrap; margin-right:.4rem; }
+.log-entry { border-left:3px solid var(--log-color); border-bottom:0; border-radius:10px;
+             background:color-mix(in srgb,var(--log-color) 6%,var(--node)); padding:.8rem 1rem; margin:.6rem 0; }
+.note.log-entry { padding:.8rem 1rem; }
+.note.log-entry b { color:var(--log-color); }
+.note.log-entry p { color:var(--ink); }
