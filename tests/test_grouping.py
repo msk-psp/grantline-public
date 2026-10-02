@@ -39,7 +39,7 @@ def test_matrix_column_count_follows_groups_not_resources():
     grants = {Grant("s3", "alice", f"bucket:warehouse/ns{i}/*", "Read") for i in range(30)}
     html = render(grants, [], [])
     # 30 resources, one bucket -> one column (plus the subject header column)
-    assert html.count("<th>bucket:warehouse") == 1, "one column per bucket"
+    assert html.count('/g/s3/bucket%3Awarehouse') == 1, "one linked column per bucket"
     assert "30</span>" in html, "the count of collapsed resources stays visible"
 
 

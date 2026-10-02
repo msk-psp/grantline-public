@@ -35,5 +35,6 @@ with tempfile.TemporaryDirectory() as d:
 assert parse_path("/s/researcher_b/probe") == ("probe", ("researcher_b",))
 html = render_probe("researcher_b", [Probe("s3", "researcher_b", "bucket:x", "Read", "deny", "HEAD → 403"),
                             Probe("clickhouse", "researcher_b", "db:research", "SELECT", "unknown", "cannot ask")], [])
-assert "verify" not in html and "HEAD → 403" in html and "cannot ask" in html and "1 denied" in html
+assert 'href="/s/researcher_b/probe"' not in html
+assert "HEAD → 403" in html and "cannot ask" in html and "1 denied" in html
 print("ok")

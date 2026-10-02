@@ -164,7 +164,7 @@ privs = ["Write"]
 
 Read [SECURITY.md](../SECURITY.md) before sharing a console or enabling writes. Shared
 deployments require an authenticated reverse proxy and trusted Host configuration;
-the built-in server does not authenticate users.
+the built-in server does not validate passwords or OIDC sessions itself.
 
 - **Read-only by default** — `plan` never writes; `apply` is a dry-run without
   `--write`, and `--write` asks for confirmation (`--yes` to skip). `serve`
@@ -181,6 +181,50 @@ the built-in server does not authenticate users.
   subjects are reported. A trusted operator can also explicitly name a single write.
 - **Audit log** — an attempt is recorded before every write; its result appends
   `{ts, user, system, cmd, ok}` to `audit.jsonl`.
+
+## Console sign-in
+
+Without authentication configuration, `/login` is a local console landing page.
+For a shared console, an authenticated reverse proxy owns OIDC, sessions and the
+allowed users or groups. Enable the proxy identity gate in the external configuration:
+
+```toml
+[web]
+trusted_hosts = ["console.example.com"]
+
+[web.auth]
+mode = "proxy"
+identity_header = "X-Forwarded-Email"
+login_url = "/oauth2/start"
+logout_url = "/oauth2/sign_out"
+```
+
+The backend must remain reachable only by the trusted proxy, through loopback or
+network isolation. The proxy must strip client-supplied identity headers and inject
+one validated identity. For an ingress `auth_request` setup, use its validated
+`X-Auth-Request-Email` header instead. Setting this table alone does not make a
+publicly reachable backend safe: Grantline trusts the configured header.
+
+Route `/login` and static assets to Grantline, the configured sign-in/sign-out
+endpoints to the proxy, and all other console traffic through authentication.
+Preserve API authentication failures as HTTP 401 rather than a 200 HTML sign-in
+page. Unauthenticated page requests return to `/login`; API and write requests
+fail with 401. Grantline accepts only local return paths. Restrict redirect domains
+at the proxy as well.
+
+The account appears in navigation, and new approval requests record that identity.
+Signing in does not grant access to PostgreSQL, ClickHouse or S3, and approval
+tokens still authorize their individual approval decisions. Sign-out clears the
+proxy session; the identity provider may still have its own active session.
+See OAuth2 Proxy's official [endpoints](https://oauth2-proxy.github.io/oauth2-proxy/features/endpoints/)
+and [configuration](https://oauth2-proxy.github.io/oauth2-proxy/configuration/overview/).
+
+The console has searchable inventories and an account matrix. Detail links retain
+all account chips, including those behind “more.” Focusing a change field preserves
+its value; changing service retains the account and clears resource/privilege fields
+because they belong to that service. Editing a proposal hides the previous preview
+until you preview again. Successful writes and requests redirect to a read-only
+detail page, so refreshing it does not submit the operation again.
 
 ## Login and permission probes
 

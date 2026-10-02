@@ -28,11 +28,20 @@ async function main() {
   const done = () => map.querySelector('p.loading')?.remove();
   const stop = msg => { done(); map.insertAdjacentHTML('afterbegin',
     `<p class="loading">${esc(msg)}</p>`); };
-  let res;
-  try { res = await fetch('/api/graph.json' + location.search); }
+  async function readData(path) {
+    const res = await fetch(path);
+    if (res.status === 401) {
+      location.assign('/login?next=' + encodeURIComponent(location.pathname + location.search));
+      throw new Error('Sign in to continue.');
+    }
+    if (!res.ok) throw new Error(`Service request failed (${res.status}). Try refreshing.`);
+    if (!res.headers.get('Content-Type')?.includes('application/json'))
+      throw new Error('The gateway returned a sign-in page or an unexpected response. Check sign-in and refresh.');
+    return res.json();
+  }
+  let data;
+  try { data = await readData('/api/graph.json' + location.search); }
   catch (err) { stop(`could not read the services: ${err}`); return; }
-  if (!res.ok) { stop(`could not load the map (${res.status}) — nothing below is drawn`); return; }
-  const data = await res.json();
   done();
   // F6 on the map. A system that could not be read draws no lines, and a map with no
   // lines into it looks exactly like a system nobody can reach. Say which, and why,
@@ -511,9 +520,18 @@ async function main() {
       if (this.instance === instance) { this.close(); return; }
       this.instance = instance; this.open_ = new Set();
       if (!this.cache[instance]) {
-        const r = await fetch('/api/resources.json?instance=' + encodeURIComponent(instance));
-        this.cache[instance] = r.ok ? (await r.json()).items.map(i => ({ ...i, parts: this.parts(i.res) })) : [];
+        try {
+          const data = await readData('/api/resources.json?instance=' + encodeURIComponent(instance));
+          this.cache[instance] = data.items.map(i => ({ ...i, parts: this.parts(i.res) }));
+        } catch (err) {
+          if (this.instance !== instance) return;
+          this.close(); note.querySelector('.resource-error')?.remove();
+          note.insertAdjacentHTML('beforeend', `<div class="warn stop resource-error" role="alert"><b>Resources unavailable</b>${esc(String(err))} <a href="?refresh=1">Refresh</a></div>`);
+          return;
+        }
       }
+      if (this.instance !== instance) return;
+      note.querySelector('.resource-error')?.remove();
       this.items = this.cache[instance]; this.render(); refit();
     },
     close() { leave(); this.instance = null; this.items = []; this.layer.replaceChildren(); },

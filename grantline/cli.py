@@ -262,13 +262,14 @@ def cmd_serve(args):
     from . import web
     it, adaps, audit_path, bridges, snapdir = _load(args.config)
     rec = snap.Recorder(snapdir)
+    web_cfg = tomllib.loads(Path(args.config).read_text()).get("web", {})
     # The adapters and the audit path go along so the console can grant and revoke
     # (F3). They do not make it write: an adapter writes only when the config names a
     # write credential and that environment variable exists — see Adapter.write_ready.
     web.serve(lambda: _observe_and_plan(it, adaps, rec), args.port, lambda: bridges,
               adapters=adaps, audit_path=audit_path, recorder=rec, approvals=_approvals(args.config),
               graph_fn=_graph_builder(args.config, adaps, bridges),
-              trusted_hosts=tomllib.loads(Path(args.config).read_text()).get("web", {}).get("trusted_hosts", []))
+              trusted_hosts=web_cfg.get("trusted_hosts", []), auth=web_cfg.get("auth"))
     return 0
 
 

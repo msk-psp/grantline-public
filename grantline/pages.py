@@ -18,6 +18,7 @@ import html
 from urllib.parse import quote, unquote, urlencode
 
 from .act import ActError, Proposal, propose
+from .auth import current, local_path, proxy_target
 from .model import Grant
 from .web import _strength, asset, group_of
 
@@ -35,13 +36,47 @@ def _act_href(action: str, **fields) -> str:
     return e("/act?" + urlencode({"action": action, **q}))  # goes into an attribute
 
 
-def _shell(title: str, *parts: str) -> str:
-    return f"""<!doctype html><meta charset="utf-8"><title>{e(title)} &middot; grantline</title>
+def _shell(title: str, *parts: str, wide: bool = False) -> str:
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{e(title)} &middot; Grantline</title>
 <link rel="stylesheet" href="{asset("grantline.css")}">
-<div class="page">{"".join(parts)}
+<script src="{asset("console.js")}" defer></script></head><body>
+<a class="skip-link" href="#main">Skip to content</a>
+<main id="main" class="page{' wide' if wide else ''}">{"".join(parts)}
 <footer>grantline &middot; read-only observation &middot;
 every write is previewed as the native command first</footer>
-</div>"""
+</main></body></html>"""
+
+
+def render_error(status: int, message: str) -> str:
+    title = {400: "Check your request", 401: "Sign in to continue", 403: "Access unavailable", 404: "Page not found",
+             409: "The request changed", 413: "Request too large", 500: "Unable to load this page",
+             503: "Service temporarily unavailable"}.get(status, "Request unavailable")
+    return _shell(title, _nav(""), f'<header class="glass"><h1>{title}</h1>'
+                  f'<p class="lede" role="alert">{e(message)}</p>'
+                  '<p><a class="chip" href="/login">Sign in / access details</a> '
+                  '<a class="chip" href="/">Return to the access map</a> '
+                  '<a class="chip" href="/act">View changes</a></p></header>')
+
+
+def render_login(cfg, destination="/") -> str:
+    destination = local_path(destination)
+    user = (current.get() or {}).get("user", "")
+    if user:
+        message = f'Signed in as <strong>{e(user)}</strong>.'
+        href, button = destination, "Continue to console"
+    elif cfg:
+        message = 'Use your organization\'s sign-in provider. Grantline does not receive or store your password.'
+        href, button = proxy_target(cfg["login_url"], destination), "Continue with SSO"
+    else:
+        message = 'This local console does not require sign-in. Shared deployments use an authenticated proxy.'
+        href, button = destination, "Explore the console"
+    return _shell("Access Grantline", '<header class="glass login"><a class="brand" href="/">Grantline</a>'
+                  '<h1>Untangle access.<br>Follow the grants.</h1>'
+                  '<p class="lede">Understand PostgreSQL, ClickHouse and S3 access in one place.</p>'
+                  f'<p class="login-state">{message}</p><a class="primary" href="{e(href)}">{button} &rarr;</a>'
+                  '<p class="hint">Observation and permission changes stay separate. Every change is previewed first.</p></header>')
 
 
 
@@ -69,16 +104,25 @@ def _nav(here: str) -> str:
              ("/services", "services", "what is granted, by service"),
              ("/matrix", "matrix", "subjects × resource groups"),
              ("/act", q + ("" if WRITE_READY is not False else " — read-only"), act_title)]
-    return '<div class="nav">' + "".join(
-        f'<a href="{h}" class="{"on" if h == here else ""}" title="{e(ti)}">{t}</a>' for h, t, ti in items
-    ) + f'<a href="{here}?refresh" title="pages reuse one observation for a minute; this re-reads every service now">&#x21bb; refresh</a></div>'
+    session = current.get() or {}
+    if session.get("user"):
+        identity = (f'<span class="identity" title="{e(session["user"])}">{e(session["user"])}</span>'
+                    f'<a href="{e(session["logout"])}">Sign out</a>')
+    else:
+        identity = '<a class="identity" href="/login">Sign in</a>' if session.get("enabled") else '<a class="identity" href="/login">Local console</a>'
+    return '<nav class="nav" aria-label="Main navigation"><a class="brand" href="/">Grantline</a>' + "".join(
+        f'<a href="{h}" class="{"on" if h == here else ""}"'
+        + (' aria-current="page"' if h == here else '') + f' title="{e(ti)}">{t}</a>' for h, t, ti in items
+    ) + '<a class="refresh" href="?refresh" title="Re-read access from every service">&#x21bb; refresh</a>' + identity + '</nav>'
 
 
 def _chips(subjects, limit=8) -> str:
     s = sorted(subjects)
-    out = "".join(f'<a class="chip" href="/s/{quote(x)}">{e(x)}</a>' for x in s[:limit])
+    def chip(x): return f'<a class="chip" href="/s/{quote(x, safe="")}">{e(x)}</a>'
+    out = "".join(chip(x) for x in s[:limit])
     if len(s) > limit:
-        out += f'<span class="chip more">+{len(s) - limit}</span>'
+        out += (f'<details class="more-chips"><summary class="chip more">+{len(s) - limit} more</summary>'
+                + "".join(chip(x) for x in s[limit:]) + '</details>')
     return out
 
 
@@ -144,7 +188,7 @@ times you ran this. Only what differs appears below.</p>
 
 
 # ── F1 ────────────────────────────────────────────────────────────────────────
-def render_inventory(observed: set[Grant], recorder=None) -> str:
+def render_inventory(observed: set[Grant], recorder=None, unobserved=()) -> str:
     """One section per service, one row per resource kind (`/services`).
 
     Deliberately *not* one row per service. A service's grants are not one thing —
@@ -165,7 +209,7 @@ def render_inventory(observed: set[Grant], recorder=None) -> str:
     for system in sorted(by_sys):
         groups = by_sys[system]
         rows = "".join(
-            f'<tr><td><a class="res" href="/g/{quote(system)}/{quote(grp)}">{e(grp)}</a></td>'
+            f'<tr><td><a class="res" href="/g/{quote(system, safe="")}/{quote(grp, safe="")}">{e(grp)}</a></td>'
             f'<td class="num">{len(c["res"])}</td>'
             f'<td class="num">{len(c["subj"])}</td>'
             f'<td class="lvl {_strength(c["privs"])}">{_strength(c["privs"])}</td>'
@@ -182,11 +226,14 @@ def render_inventory(observed: set[Grant], recorder=None) -> str:
 
     return _shell("services", _nav("/services") + """<header class="glass">
 <h1>What is granted, by service</h1>
-<p class="lede">Every service, broken out by the kind of resource it grants on &mdash; because a
-database grant and a role membership are revoked differently, a single per-service total
-would hide the only distinction worth acting on. Each kind links to its individual
-resources; each name links to that subject's page.</p></header>"""
-                  + _since_run(recorder) + "".join(sections))
+<p class="lede">Browse access by service. Open a resource kind to inspect its resources,
+or an account to see its direct and inherited access.</p></header>"""
+                  + _since_run(recorder)
+                  + "".join(f'<section class="glass"><div class="warn stop" role="status"><b>Could not read {e(u.system)}</b>'
+                            f'{e(u.note)}. This is unknown access, not an empty service.</div></section>' for u in unobserved)
+                  + ("".join(sections) if sections else '<section class="glass"><h2>No observed grants</h2>'
+                     '<p class="ok">No grants are available to browse. Check service connections and any read errors above, '
+                     'then refresh.</p></section>'))
 
 
 # ── F1 drill ──────────────────────────────────────────────────────────────────
@@ -209,14 +256,16 @@ def render_group(observed: set[Grant], system: str, group: str) -> str:
         f'<td><a class="chip go" href="{_act_href("grant", system=system, resource=r)}">'
         f"grant on this</a></td></tr>"
         for r, subs in sorted(res.items()))
-    return _shell(f"{system} · {group}", _nav(""), f"""<header class="glass">
+    return _shell(f"{system} · {group}", _nav("/services"), f"""<header class="glass">
+<a class="back" href="/services">&larr; All services</a>
 <h1>{e(group)} <span class="cnt">on {e(system)}</span></h1>
 <p class="lede">{len(res)} resources. This is the level a revoke acts on. Granting starts
 from a row here, with the resource already filled in; revoking starts from the subject
 who holds it, because that is where the route is visible.</p></header>
 <section class="glass"><div class="scroll"><table>
 <thead><tr><th>resource</th><th>strongest</th><th>who</th><th></th></tr></thead>
-<tbody>{rows}</tbody></table></div></section>""")
+<tbody>{rows}</tbody></table></div>
+{'<p class="ok">No resources were observed in this group. Return to services or refresh to check again.</p>' if not rows else ''}</section>""")
 
 
 # ── F2 ────────────────────────────────────────────────────────────────────────
@@ -286,7 +335,7 @@ def render_subject(observed: set[Grant], graph, subject: str, unobserved=()) -> 
             cut = ('<span class="hint">the first hop is a declared bridge, not a grant '
                    '&mdash; it is removed in the server\'s own configuration</span>')
         return (f'via {via}<span class="acts">{cut}'
-                f'<a class="chip" href="/s/{quote(holder)}">revoke on {e(holder)}</a>'
+                f'<a class="chip" href="/s/{quote(holder, safe="")}">revoke on {e(holder)}</a>'
                 f"</span>")
 
     show_by = bool(grantors)
@@ -321,7 +370,7 @@ def render_subject(observed: set[Grant], graph, subject: str, unobserved=()) -> 
         given_html = (f'<section class="glass"><h2>Granted by {e(subject)} '
                       f'<span class="cnt">{len(given)}</span></h2><div class="scroll"><table>'
                       '<thead><tr><th>system</th><th>to</th><th>resource</th><th>privilege</th></tr></thead><tbody>'
-                      + "".join(f'<tr><td>{e(g.system)}</td><td><a class="chip" href="/s/{quote(g.subject)}">{e(g.subject)}</a></td>'
+                      + "".join(f'<tr><td>{e(g.system)}</td><td><a class="chip" href="/s/{quote(g.subject, safe="")}">{e(g.subject)}</a></td>'
                                 f'<td class="res">{e(g.resource)}</td><td class="res">{e(g.priv)}</td></tr>' for g in given)
                       + "</tbody></table></div></section>")
 
@@ -344,7 +393,7 @@ def render_subject(observed: set[Grant], graph, subject: str, unobserved=()) -> 
         for a, b in zip(chain, chain[1:]):
             cls = "bridge" if (a, b) in bridged else "hop"
             out.append(f'<span class="{cls}">&rarr;</span> <a class="chip" '
-                       f'href="/s/{quote(b)}">{e(b)}</a>')
+                       f'href="/s/{quote(b, safe="")}">{e(b)}</a>')
         return ('<div class="route">' + " ".join(out)
                 + f'<span class="cnt">{len(dests)}</span>'
                 + '<div class="dests">'
@@ -354,23 +403,27 @@ def render_subject(observed: set[Grant], graph, subject: str, unobserved=()) -> 
     route_html = "".join(
         one_chain(c, d) for c, d in
         sorted(chains.items(), key=lambda kv: (-len(kv[0]), kv[0])))
-    if not routes:
+    if not mine:
+        route_html = '<p class="hint">No observed grants or routes for this account.</p>'
+    elif not routes:
         route_html = ('<p class="ok">Every grant is held directly &mdash; '
                       "no role or bridge stands in between.</p>")
 
-    return _shell(subject, _nav(""), f"""<header class="glass">
+    return _shell(subject, _nav("/matrix"), f"""<header class="glass">
+<a class="back" href="/matrix">&larr; All accounts</a>
 <h1>{e(graph.label(subject) if hasattr(graph, "label") else subject)}
 <a class="chip go" href="{_act_href("grant", subject=subject)}">grant something</a>
-<a class="chip" href="/s/{quote(subject)}/probe" title="ask each service, as this subject, on the real path">verify on the path</a></h1>
+<a class="chip" href="/s/{quote(subject, safe="")}/probe" title="ask each service, as this subject, on the real path">verify on the path</a></h1>
 <p class="lede">{len(mine)} grants across {len(by_sys)} services &mdash;
 {_direct} held directly, {_inherited} inherited through a role or bridge. Routes below show
-<em>how</em> the authority arrives: a name in the middle is a role or an account that must
+<em>how</em> the authority arrives.</p><details class="explain"><summary>How to read inherited access</summary><p>A name in the middle is a role or an account that must
 also be removed, and an <span class="route"><span class="bridge">&rarr;</span></span>
 marks a hop that leaves the system entirely &mdash; a server-held credential, not
 this subject's own. Rows held <em>via</em> something carry no revoke button: the grant
 belongs to the role, and revoking in this subject's name would report success and change
-nothing &mdash; so the row offers the hop to cut instead.</p></header>
-<section class="glass"><h2>Routes <span class="cnt">{len(chains)} chains &middot; {len(routes)} paths &middot; <a href="/?focus={quote(subject)}">show on the map</a></span></h2>
+nothing &mdash; so the row offers the hop to cut instead.</p></details>
+{'<p class="ok">No grants were observed for this account. Check the name and read errors before concluding it has no access.</p>' if not mine else ''}</header>
+<section class="glass"><h2>Routes <span class="cnt">{len(chains)} chains &middot; {len(routes)} paths &middot; <a href="/?focus={quote(subject, safe="")}">show on the map</a></span></h2>
 {route_html}</section>{blind}{direct}{given_html}""")
 
 
@@ -399,7 +452,7 @@ def queue_sections(reqs: list) -> list[str]:
             + f'">{e(a)}</span>'
             for a in r.required)
         head = (f'<span class="st st-{e(r.status)}">{e(r.status)}</span> '
-                f'<b>{e(r.action)}</b> {e(r.priv)} on <code>{e(r.resource)}</code> '
+                f'<b>{e(r.action)}</b> {e(r.priv)} for <a href="/s/{quote(r.subject, safe="")}">{e(r.subject)}</a> on <code>{e(r.resource)}</code> '
                 f'<span class="cnt">{e(r.system)}</span>')
         meta = (f'{e(r.requester)} asked, {e(r.ts[:16].replace("T", " "))}'
                 + (f' &middot; waiting on {len(waiting)}' if waiting else '')
@@ -407,7 +460,7 @@ def queue_sections(reqs: list) -> list[str]:
         return (f'<div class="req"><div class="req-h">{head}</div>'
                 f'<div class="req-m">{meta}</div>'
                 f'<pre class="cmd">{e(r.cmd)}</pre>'
-                f'<div class="req-w">{who}</div></div>')
+                f'<div class="req-w">{who}<a class="chip" href="/approve/{quote(r.id, safe="")}">View request</a></div></div>')
 
     body = []
     if live:
@@ -419,7 +472,7 @@ def queue_sections(reqs: list) -> list[str]:
                     'row or a subject page where the fields are already filled in.</p></section>')
     if done:
         body.append('<section class="glass"><h2>Settled <span class="cnt">'
-                    f'{len(done)}</span></h2>' + "".join(card(r) for r in done[-20:]) + "</section>")
+                    f'{len(done)}</span></h2>' + "".join(card(r) for r in sorted(done, key=lambda r: r.ts, reverse=True)[:20]) + "</section>")
     return body
 
 
@@ -437,17 +490,19 @@ def render_probe(subject: str, probes, findings) -> str:
     fnd = "".join(f'<li><b>{e(f.title)}</b> — {e(f.detail)}</li>' for f in findings)
     return _shell(f"{subject} · on the path", _nav(""), f"""<header class="glass">
 <h1>{e(subject)} <span class="cnt">on the path</span>
-<a class="chip" href="/s/{quote(subject)}">back to {e(subject)}</a></h1>
+<a class="chip" href="/s/{quote(subject, safe="")}">back to {e(subject)}</a></h1>
 <p class="lede">The grant table says what <em>should</em> be reachable; this asks each service,
 as {e(subject)}, whether it <em>is</em>. {n['allow']} allowed · {n['deny']} denied ·
 {n['unknown']} could not be asked &mdash; <code>unknown</code> is a reason, never "no access".
 S3 rows are the real thing (their own key, the real endpoint); PostgreSQL rows are
-server-evaluated, not a login; ClickHouse cannot be asked as another user. Write probes
+server-evaluated unless subject login credentials are configured. ClickHouse can verify
+a configured subject login; otherwise it resolves grants as the observer. Write probes
 leave a mark and live on the CLI only.</p></header>
 {'<section class="glass"><h2>Where the path disagrees with the table</h2><ul>' + fnd + '</ul></section>' if findings else ''}
 <section class="glass"><h2>Rows <span class="cnt">{len(probes)}</span></h2><div class="scroll"><table>
 <thead><tr><th>service</th><th>resource</th><th>privilege</th><th>verdict</th><th>how</th></tr></thead>
-<tbody>{rows}</tbody></table></div></section>""")
+<tbody>{rows}</tbody></table></div>
+{'<p class="ok">No grants are available to probe for this account. Return to its access page and check observation errors.</p>' if not rows else ''}</section>""")
 
 
 def render_approve(req, approver: str | None, error: str = "", done: str = "") -> str:
@@ -457,15 +512,20 @@ def render_approve(req, approver: str | None, error: str = "", done: str = "") -
                    for a, t in sorted((a, req.approved.get(a, "")) for a in req.required))
     form = ""
     if approver and req.status == "pending" and approver not in req.approved:
-        form = (f'<form method="post" action="/approve/{quote(req.id)}"><input type="hidden" name="t" value="{e(req.required[approver])}">'
+        form = (f'<form method="post" action="/approve/{quote(req.id, safe="")}"><input type="hidden" name="t" value="{e(req.required[approver])}">'
                 f'<button class="chip go" name="decision" value="approve">approve as {e(approver)}</button> '
                 f'<button class="chip rm" name="decision" value="deny">deny</button></form>')
     msg = (f'<p class="ok">{e(done)}</p>' if done else "") + (f'<p class="rm">{e(error)}</p>' if error else "")
+    if not approver and req.status == "pending":
+        msg += '<p class="hint">Viewing only. Use your personal approval link to approve or deny this request.</p>'
+    if req.status == "approved":
+        msg += '<p class="hint">All approvers approved. Awaiting execution by an operator with a write credential.</p>'
     return _shell(f"approve {req.id}", _nav(""), f"""<header class="glass">
+<a class="back" href="/act">&larr; All changes</a>
 <h1>{e(req.action)} {e(req.subject)} <span class="cnt">{e(req.priv)} on {e(req.resource)} · {e(req.system)}</span></h1>
 <p class="lede">Requested by {e(req.requester)} at {e(req.ts[:19])}. Status: <b>{e(req.status)}</b>.
-This exact command runs when everyone below has approved &mdash; nothing else, and nothing if
-anyone denies:</p><pre>{e(req.cmd)}</pre>{msg}{form}</header>
+Every approver must approve this exact command. Execution also requires a write credential;
+denial prevents it from running.</p><pre>{e(req.cmd)}</pre>{msg}{form}</header>
 <section class="glass"><h2>Approvers</h2><div class="scroll"><table><thead><tr><th>who</th><th>decision</th></tr></thead>
 <tbody>{rows}</tbody></table></div>{f'<p class="hint">{e(req.note)}</p>' if req.note else ''}</section>""")
 
@@ -480,14 +540,17 @@ configured). Delivery status:</p><ul>{items}</ul></header>""")
 
 # ── F3 ────────────────────────────────────────────────────────────────────────
 def _field(label: str, name: str, value: str, options=None, listid: str = "") -> str:
+    field_id = f"field-{name}"
     if options is not None:
         opts = "".join(f'<option value="{e(o)}"{" selected" if o == value else ""}>{e(o)}'
                        f"</option>" for o in options)
-        control = f'<select name="{name}">{opts}</select>'
+        if name == "system" and value not in options:
+            opts = '<option value="" selected>Choose a service</option>' + opts
+        control = f'<select id="{field_id}" name="{name}" required>{opts}</select>'
     else:
-        control = (f'<input name="{name}" value="{e(value)}" autocomplete="off"'
+        control = (f'<input id="{field_id}" name="{name}" value="{e(value)}" autocomplete="off" required'
                    + (f' list="{listid}"' if listid else "") + ">")
-    return f"<label>{e(label)}{control}</label>"
+    return f'<div class="field"><label for="{field_id}">{e(label)}</label>{control}</div>'
 
 
 def render_act(params: dict, observed: set[Grant], adapters: dict,
@@ -528,30 +591,16 @@ def render_act(params: dict, observed: set[Grant], adapters: dict,
         for s, fields in opts.items() for f, vals in fields.items())
     here = slot.get(system, "s0")
 
-    form = f"""<section class="glass"><h2>What should change</h2>
+    form = f"""<section class="glass"><h2>1 &middot; Describe the change</h2>
 <form class="act" id="propose" method="get" action="/act">
 {_field("direction", "action", action, options=["grant", "revoke"])}
 {_field("system", "system", system, options=systems)}
 {_field("subject", "subject", subject, listid=f"{here}-subject")}
 {_field("resource", "resource", resource, listid=f"{here}-resource")}
 {_field("privilege", "priv", priv, listid=f"{here}-priv")}
-<button type="submit">Preview the command</button>
+<button type="submit"{' disabled' if not systems else ''}>Preview the command</button>
 </form>{datalist}
-<script>
-(function(){{var f=document.getElementById("propose");if(!f)return;var s=f.system;
-var names=["subject","resource","priv"];
-function sync(){{names.forEach(function(n){{
-f[n].setAttribute("list","s"+s.selectedIndex+"-"+n);}});}}
-s.addEventListener("change",sync);sync();
-// datalist 는 칸에 적힌 글자로 목록을 거른다 — 한 번 고르고 나면 그 값과 맞는
-// 한 줄만 남아 목록이 안 보인다. 그래서 다시 누르면 비우고, 아무것도 안 고르고
-// 떠나면 되돌린다. 제출 때도 되돌린다 (Enter 는 blur 없이 보낸다).
-names.forEach(function(n){{var el=f[n];
-el.addEventListener("focus",function(){{el.dataset.was=el.value;el.value="";}});
-el.addEventListener("blur",function(){{if(!el.value)el.value=el.dataset.was||"";}});}});
-f.addEventListener("submit",function(){{names.forEach(function(n){{var el=f[n];
-if(!el.value)el.value=el.dataset.was||"";}});}});}})();
-</script>
+{'<p class="warn">No services are configured. Configure a service before preparing a change.</p>' if not systems else ''}
 <p class="hint">Resources are spelled as the model spells them &mdash;
 <code>role:analyst_read</code>, <code>db:analytics</code>,
 <code>table:&lt;db&gt;.&lt;schema&gt;.&lt;name&gt;</code>,
@@ -590,13 +639,9 @@ than typing it.</p></section>"""
           if WRITE_READY is False else "")
     return _shell("changes", _nav("/act"), f"""<header class="glass">
 <h1>Changes</h1>{ro}
-<p class="lede">Propose one below; everything proposed is queued underneath. One subject,
-one resource, one privilege &mdash; the only shape this screen has, so nothing here can
-touch something you did not name. The native command is shown before anything runs, and
-it is the command that runs, character for character. Approving one agrees to
-<em>that exact string</em>: if the system moves underneath it, the run is refused rather
-than re-planned.</p></header>""",
-                  form, *blocks, *queue_sections(requests or []))
+<p class="lede">Describe one change, review its exact command, then submit it.
+Track requests and approvals below. Nothing runs while preparing a preview.</p></header>""",
+                  *blocks, form, *queue_sections(requests or []))
 
 
 # Set by web.serve when the config has an [approvals] section: the preview then offers
@@ -646,7 +691,7 @@ that variable in the environment this console runs in and the button appears.</d
         body.append(_request_form(p))
 
     verb = "would grant" if p.action == "grant" else "would revoke"
-    return f"""<section class="glass"><h2>Preview &middot; {e(p.grant.system)}</h2>
+    return f"""<section class="glass" id="preview"><h2>2 &middot; Preview &middot; {e(p.grant.system)}</h2>
 <p class="hint">{verb} {e(p.grant.priv)} on {e(p.grant.resource)}
 {"to" if p.action == "grant" else "from"} {e(p.grant.subject)}</p>
 {"".join(body)}</section>"""

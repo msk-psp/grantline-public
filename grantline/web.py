@@ -9,7 +9,7 @@ import html
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlencode, urlsplit
 
 from .diff import Change
 from .model import Finding, Grant, level
@@ -99,7 +99,8 @@ def render(observed: set[Grant], changes: list[Change], findings: list[Finding],
         sys_span[sysname] = sys_span.get(sysname, 0) + 1
     head1 = "".join(f'<th colspan="{n}">{e(s)}</th>' for s, n in sys_span.items())
     head2 = "".join(
-        f'<th>{e(g)}<span class="cnt">{len(cols[(s, g)])}</span></th>' for s, g in col_list)
+        f'<th><a href="/g/{quote(s, safe="")}/{quote(g, safe="")}">{e(g)}</a>'
+        f'<span class="cnt">{len(cols[(s, g)])}</span></th>' for s, g in col_list)
 
     rows = []
     for subj in subjects:
@@ -126,7 +127,7 @@ def render(observed: set[Grant], changes: list[Change], findings: list[Finding],
             label = _strength(c["privs"]).upper()[:2] + ("" if n == 1 else f"·{n}")
             tds.append(f'<td class="{klass}" title="{e(", ".join(sorted(c["res"]))[:400])}">'
                        f'{e(label)}{badge}</td>')
-        rows.append(f"<tr><th>{e(subj)}</th>{''.join(tds)}</tr>")
+        rows.append(f'<tr><th scope="row"><a href="/s/{quote(subj, safe="")}">{e(subj)}</a></th>{"".join(tds)}</tr>')
 
     if changes:
         lines = "".join(
@@ -136,6 +137,8 @@ def render(observed: set[Grant], changes: list[Change], findings: list[Finding],
         more = (f'<p class="ok">… {len(changes) - 200} more</p>'
                 if len(changes) > 200 else "")
         plan_html = f'<div class="cmd">{lines}</div>{more}'
+    elif unobserved:
+        plan_html = '<p class="ok">No changes planned. Some scopes could not be observed; convergence is unknown.</p>'
     else:
         plan_html = '<p class="ok">Converged — observed state matches intent.</p>'
 
@@ -154,10 +157,8 @@ def render(observed: set[Grant], changes: list[Change], findings: list[Finding],
     # 이 페이지만 nav 가 없어서 매트릭스에 들어가면 다른 탭으로 못 나갔다 —
     # 브라우저 뒤로가기 말고는 길이 없었다. pages._shell 을 안 거치는 두 페이지
     # (여기와 routes) 가 같은 이유로 빠졌고, routes 는 앞서 고쳤다.
-    from .pages import _nav  # pages imports web; 호출 시점에 푼다
-    return f"""<!doctype html><meta charset="utf-8"><title>grantline</title>
-<link rel="stylesheet" href="{asset("grantline.css")}">
-<div class="page">
+    from .pages import _nav, _shell
+    return _shell("Access matrix", f"""
 {_nav("/matrix")}
 <header class="glass">
 <h1>Access matrix</h1>
@@ -173,6 +174,7 @@ count of distinct resources behind each. Hover a cell for the list.
 <div class="scroll"><table>
 <thead><tr><th></th>{head1}</tr><tr><th>subject</th>{head2}</tr></thead>
 <tbody>{"".join(rows)}</tbody></table></div>
+{'<p class="ok">No accounts or grants were observed. Check service read errors and refresh before interpreting this as no access.</p>' if not rows else ''}
 </section>
 <section class="glass">
 <h2>Plan &middot; native commands, nothing applied</h2>{plan_html}
@@ -180,8 +182,7 @@ count of distinct resources behind each. Hover a cell for the list.
 <section class="glass">
 <h2>Findings</h2>{notes}
 </section>
-<footer>grantline &middot; read-only observation &middot; apply requires the CLI with --write</footer>
-</div>"""
+""")
 
 
 def _form(raw: str) -> dict[str, str]:
@@ -215,12 +216,14 @@ class _ObservationCache:
 
 def serve(observe_fn, port: int, bridges_fn=lambda: [], adapters: dict | None = None,
           audit_path: str | None = None, recorder=None, approvals=None, ttl_s: float = 60,
-          graph_fn=None, trusted_hosts=()) -> None:
+          graph_fn=None, trusted_hosts=(), auth=None) -> None:
     """GET renders, POST writes. That split is load-bearing, not convention: a GET
     that changed something would be triggered by a link, a prefetch, or a reload of
     the page that just wrote — and F3's whole claim is that only what the operator
     named is touched."""
     adaps = adapters or {}
+    from .auth import current, local_path, proxy_config, proxy_target, proxy_user
+    auth_cfg = proxy_config(auth)
 
     def reqs() -> list:
         """Everything proposed so far — the queue that lives under the form."""
@@ -281,20 +284,48 @@ def serve(observe_fn, port: int, bridges_fn=lambda: [], adapters: dict | None = 
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
-            self.send_header("Referrer-Policy", "no-referrer")
+            # Native form POSTs need Origin; no-referrer turns it into null.
+            # Send only the origin, never an approval token in the page's path/query.
+            self.send_header("Referrer-Policy", "strict-origin")
             self.send_header("X-Frame-Options", "DENY")
+            self.send_header("X-Content-Type-Options", "nosniff")
             self.end_headers()
-            self.wfile.write(body)
+            if self.command != "HEAD": self.wfile.write(body)
 
-        def _send_bytes(self, body: bytes, ctype: str, cache: str = "no-store"):
-            self.send_response(200)
+        def send_error(self, code, message=None, explain=None):
+            from .pages import render_error
+            self._send(render_error(code, message or self.responses.get(code, ("Request unavailable",))[0]), code)
+
+        def _redirect(self, location):
+            self.send_response(303)
+            self.send_header("Location", location)
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def _send_bytes(self, body: bytes, ctype: str, cache: str = "no-store", status=200):
+            self.send_response(status)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", cache)
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Referrer-Policy", "no-referrer")
             self.end_headers()
             self.wfile.write(body)
 
         def do_GET(self):
+            user = proxy_user(self.headers, auth_cfg)
+            token = current.set({"enabled": auth_cfg is not None, "user": user,
+                                 "logout": proxy_target(auth_cfg["logout_url"], "/login") if auth_cfg else ""})
+            try:
+                self._get()
+            except Exception:  # noqa: BLE001 — do not expose service credentials in HTTP errors
+                self.send_error(503, "Unable to load access data. Refresh or check the configured service connections.")
+            finally:
+                current.reset(token)
+
+        def _get(self):
             if not self._trusted():
                 return
             from .pages import parse_path, render_act, render_group, render_inventory, render_subject
@@ -307,6 +338,19 @@ def serve(observe_fn, port: int, bridges_fn=lambda: [], adapters: dict | None = 
                 ctype = {"css": "text/css", "js": "text/javascript"}.get(f.suffix[1:], "application/octet-stream")
                 # versioned URLs (asset()) — safe to cache for a long time
                 self._send_bytes(f.read_bytes(), ctype + "; charset=utf-8", cache="max-age=31536000, immutable")
+                return
+            if path == "/login":
+                from .pages import render_login
+                self._send(render_login(auth_cfg, _form(query).get("next", "/")))
+                return
+            if auth_cfg and not current.get()["user"]:
+                login = "/login?" + urlencode({"next": local_path(self.path)})
+                if path.startswith("/api/"):
+                    import json
+                    self._send_bytes(json.dumps({"error": "Sign in to continue", "login": login}).encode(),
+                                     "application/json", status=401)
+                else:
+                    self._redirect(login)
                 return
             if path == "/api/graph.json":
                 import json
@@ -324,6 +368,9 @@ def serve(observe_fn, port: int, bridges_fn=lambda: [], adapters: dict | None = 
             page, args = parse_path(path)
             if page == "404":
                 self.send_error(404)
+                return
+            if page in ("approve", "request") and not (approvals is not None and approvals.enabled):
+                self.send_error(404, "Approvals are not enabled on this console. Preview a change instead.")
                 return
             # 큐의 대기 건수는 nav 배지가 쓴다. 파일 몇 개를 세는 일이라 매 요청에 해도 된다.
             from . import pages as _pages
@@ -364,15 +411,26 @@ def serve(observe_fn, port: int, bridges_fn=lambda: [], adapters: dict | None = 
             else:
                 # F8. The recorder, not the request: this process snapshots once, so
                 # "since your previous run" keeps meaning the run and not the reload.
-                html_ = render_inventory(observed, recorder)
+                html_ = render_inventory(observed, recorder, unobserved=data[5])
             self._send(html_)
 
         def do_POST(self):
-            with cache.lock:
-                self._post()
+            user = proxy_user(self.headers, auth_cfg)
+            token = current.set({"enabled": auth_cfg is not None, "user": user,
+                                 "logout": proxy_target(auth_cfg["logout_url"], "/login") if auth_cfg else ""})
+            try:
+                with cache.lock:
+                    self._post()
+            except Exception:  # noqa: BLE001 — a failed response does not prove a write failed
+                self.send_error(503, "Unable to finish this request. Check its status in Changes before retrying.")
+            finally:
+                current.reset(token)
 
         def _post(self):
             if not self._trusted(write=True):
+                return
+            if auth_cfg and not current.get()["user"]:
+                self.send_error(401, "Your sign-in session is unavailable. Sign in again before submitting a change.")
                 return
             from .pages import parse_path
             page, args = parse_path(self.path.partition("?")[0])
@@ -381,6 +439,8 @@ def serve(observe_fn, port: int, bridges_fn=lambda: [], adapters: dict | None = 
                 return
             if page == "act" and _pages.APPROVALS_ENABLED:
                 self.send_error(403, "approval is required"); return
+            if page in ("request", "approve") and not (approvals is not None and approvals.enabled):
+                self.send_error(404, "Approvals are not enabled on this console."); return
             try:
                 if self.headers.get("Transfer-Encoding") or len(self.headers.get_all("Content-Length", [])) != 1:
                     raise ValueError("one Content-Length required")
@@ -390,6 +450,8 @@ def serve(observe_fn, port: int, bridges_fn=lambda: [], adapters: dict | None = 
                 params = _form(self.rfile.read(n).decode())
             except (ValueError, UnicodeError):
                 self.send_error(400, "invalid request body"); return
+            if page == "approve" and params.get("decision") not in ("approve", "deny"):
+                self.send_error(400, "Choose approve or deny. No decision was recorded."); return
             observed = observe(fresh=True)[0]
             cache.clear()  # before and after: no refresh can publish pre-write state
             try:
@@ -404,13 +466,9 @@ def serve(observe_fn, port: int, bridges_fn=lambda: [], adapters: dict | None = 
                 from .pages import render_approve
                 try:
                     req, who = approvals.decide(args[0], params.get("t", ""), params.get("decision") == "approve")
-                    done = f"{who}: {req.status if req.status != 'pending' else 'approved'}"
                     if req.status == "approved" and adaps.get(req.system) and adaps[req.system].write_ready()[0]:
                         req = approvals.run(req, adaps, audit_path, observed)
-                        done += f" — executed: {req.cmd}"
-                    elif req.status == "approved":
-                        done += " — every approver said yes; no write credential here, run: grantline request --execute " + req.id
-                    self._send(render_approve(req, who, done=done))
+                    self._redirect("/approve/" + quote(req.id, safe="") + "?" + urlencode({"t": params.get("t", "")}))
                 except ActError as exc:
                     try:
                         req = approvals.load(args[0])
@@ -419,14 +477,15 @@ def serve(observe_fn, port: int, bridges_fn=lambda: [], adapters: dict | None = 
                         self.send_error(404, str(exc))
                 return
             if page == "request":
-                from .pages import render_requested
                 try:
                     prop = propose(params.get("action", ""), params.get("system", ""), params.get("subject", ""),
                                    params.get("resource", ""), params.get("priv", ""), observed, adaps)
                     if not params.get("cmd") or params["cmd"] != prop.cmd:
                         raise ActError("preview the current command before requesting approval")
-                    req = approvals.create(prop)
-                    self._send(render_requested(req, approvals.notify(req)))
+                    req = approvals.create(prop, requester=current.get()["user"] or None)
+                    req.note = "; ".join(approvals.notify(req))
+                    approvals.save(req)
+                    self._redirect("/approve/" + quote(req.id, safe=""))
                 except ActError as exc:
                     self._send(render_act(params, observed, adaps, error=str(exc), requests=reqs()), 409)
                 return
@@ -438,9 +497,8 @@ def serve(observe_fn, port: int, bridges_fn=lambda: [], adapters: dict | None = 
                                params.get("subject", ""), params.get("resource", ""),
                                params.get("priv", ""), observed, adaps)
                 execute(prop, adaps, audit_path, expect_cmd=params.get("cmd"))
-                done = (f"{prop.action} on {prop.grant.system}: {prop.cmd} — "
-                        f"recorded in {audit_path}. The numbers on this page come from a "
-                        f"fresh read, so reload the subject's page to see it land.")
+                self._redirect("/s/" + quote(prop.grant.subject, safe=""))
+                return
             except ActError as exc:
                 error = str(exc)
             self._send(render_act(params, observed, adaps, error=error, done=done, requests=reqs()),
@@ -633,10 +691,8 @@ def graph_data(graph, unobserved=()) -> dict:
 
 
 def render_graph_page() -> str:
-    from .pages import _nav  # pages imports web; resolve at call time
-    return f"""<!doctype html><meta charset="utf-8"><title>authorization paths</title>
-<link rel="stylesheet" href="{asset("grantline.css")}">
-<div class="page wide">
+    from .pages import _nav, _shell
+    return _shell("Authorization paths", f"""
 {_nav("/")}
 <header class="glass">
 <h1>Authorization paths</h1>
@@ -678,6 +734,4 @@ server holds, never theirs.</p>
   <span style="color:var(--admin)"><b>→</b> admin &middot; <b>- -</b> bridge, declared not discovered</span>
 </div>
 </section>
-<footer>grantline &middot; read-only observation</footer>
-</div>
-<script type="module" src="{asset("map.js")}"></script>"""
+<script type="module" src="{asset("map.js")}"></script>""", wide=True)
