@@ -20,12 +20,22 @@ const classList = () => {
 };
 const svg = { classList: classList() };
 const tip = { style: {} };
-const map = { append() {}, getBoundingClientRect: () => ({ left: 0, top: 0 }) };
+const map = { append() {}, addEventListener() {}, getBoundingClientRect: () => ({ left: 0, top: 0 }) };
 const source = readFileSync(new URL('../grantline/static/map.js', import.meta.url), 'utf8');
 const hover = source.slice(source.indexOf("  const tip = document.createElement('div')"),
-                          source.indexOf('  const nameOf ='));
-const context = vm.createContext({ svg, map, document: { createElement: () => tip }, live: () => true });
-const { light, unhover } = vm.runInContext(hover + '\n({ light, unhover })', context);
+                          source.indexOf('  // ── camera'));
+const account = { classList: classList(), dataset: { id: 'alice' } };
+const holder = { classList: classList(), dataset: { id: 'group:product' } };
+const unrelated = { classList: classList(), dataset: { id: 'bob' } };
+const member = { classList: classList(), dataset: { src: 'alice', dst: 'group:product' } };
+const connector = { classList: classList(), dataset: { src: 'group:product', row: 'projects' } };
+const otherConnector = { classList: classList(), dataset: { src: 'bob', row: 'projects' } };
+const context = vm.createContext({ svg, map, document: { createElement: () => tip },
+  nodes: [account, holder, unrelated], edges: [member], nodeById: new Map(), drag: null,
+  resCol: { layer: { querySelectorAll: () => [connector, otherConnector] } },
+  setTimeout, clearTimeout,
+});
+const { light, unhover, hover: onHover } = vm.runInContext(hover + '\n({ light, unhover, hover })', context);
 const row = { classList: classList() }, node = { classList: classList() };
 const pointer = { clientX: 100, clientY: 100 };
 
@@ -67,4 +77,26 @@ assert.deepEqual(svg.classList.changes, [], 'global hovering stays enabled betwe
 assert.deepEqual(node.classList.changes, [], 'shared highlights stay in place between targets');
 unhover();
 
-console.log('PASS: repeated row hover keeps context, node/edge hover and tooltip still work');
+// Exercise the actual resource branch, including inherited access and selection limits.
+const resource = { classList: classList(), dataset: { row: 'projects\u0000product', srcs: 'group:product' },
+  querySelector: () => ({ textContent: 'product' }) };
+resource.classList.add('on');
+const resourcePointer = { ...pointer, target: { closest: () => resource } };
+for (let i = 0; i < 5; i++) {
+  onHover(resourcePointer);
+  for (const el of [resource, account, holder, member, connector]) assert(el.classList.contains('hot'));
+  for (const el of [unrelated, otherConnector]) assert.equal(el.classList.contains('hot'), false);
+  assert.equal(svg.classList.contains('hovering'), false, 'resource feedback keeps the map stable');
+  unhover();
+  for (const el of [resource, account, holder, member, connector]) assert.equal(el.classList.contains('hot'), false);
+}
+svg.classList.add('focus');
+holder.classList.add('on');
+connector.classList.add('on');
+onHover(resourcePointer);
+assert.equal(account.classList.contains('hot'), false, 'selection-excluded account stays excluded');
+assert(holder.classList.contains('hot'));
+unhover();
+svg.classList.remove('focus');
+
+console.log('PASS: repeated resource hover highlights holders and inherited routes within the selection');

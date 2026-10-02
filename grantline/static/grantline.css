@@ -162,7 +162,6 @@ td.unobs { color:var(--muted); font-weight:640; }
    moving. Inside a selection the focus rules still win: hovering narrows what is
    already lit, it never brings back what the selection excluded. */
 .gr .ed.hot, .gr .bridge.hot { opacity:1; stroke-width:3; }
-.gr .nd.hot rect { stroke-width:2.6; }
 .gr.hovering .nd:not(.hot) { opacity:.32; }
 .gr.hovering .ed:not(.hot), .gr.hovering .bridge:not(.hot), .gr.hovering .bl:not(.hot) { opacity:.05; }
 .gr.focus.hovering .nd:not(.on) { opacity:.04; }
@@ -242,11 +241,13 @@ td.unobs { color:var(--muted); font-weight:640; }
 .gr.focus .nd:not(.on) { opacity:.04; }
 .gr.focus .ed:not(.on), .gr.focus .bridge:not(.on), .gr.focus .bl:not(.on) { opacity:0; }
 .gr.focus .ed.on { stroke-width:2.2; opacity:1; }
+.gr.focus .ed.hot { stroke-width:3; }
 .gr.focus .bridge.on { opacity:1; }
 /* no SVG filter here: a drop-shadow forces a re-render of the layer on every frame
    of a drag, and the glow is what the eye read as flicker */
 .gr .nd.sel rect { stroke-width:3.5; }
 .gr .nd.on rect { stroke-width:2.2; fill:color-mix(in srgb, currentColor 10%, var(--glass)); }
+.gr .nd.hot rect { stroke-width:2.6; fill:color-mix(in srgb, var(--accent) 18%, var(--node)); }
 /* Resource hover wins over the selected route's base fill and stroke width. */
 .gr .rs.hot rect { fill:color-mix(in srgb, var(--accent) 18%, var(--node)); stroke:var(--accent); stroke-width:2.4; }
 .gr .human.on   { color:var(--read); }  .gr .service.on, .gr .svc-account.on { color:var(--add); }
