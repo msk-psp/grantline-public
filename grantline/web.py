@@ -347,9 +347,10 @@ def serve(observe_fn, port: int, bridges_fn=lambda: [], adapters: dict | None = 
                 f = _STATIC / name
                 if "/" in name or not f.is_file():
                     self.send_error(404); return
-                ctype = {"css": "text/css", "js": "text/javascript"}.get(f.suffix[1:], "application/octet-stream")
+                ctype = {"css": "text/css; charset=utf-8", "js": "text/javascript; charset=utf-8",
+                         "png": "image/png"}.get(f.suffix[1:], "application/octet-stream")
                 # versioned URLs (asset()) — safe to cache for a long time
-                self._send_bytes(f.read_bytes(), ctype + "; charset=utf-8", cache="max-age=31536000, immutable")
+                self._send_bytes(f.read_bytes(), ctype, cache="max-age=31536000, immutable")
                 return
             if path == "/login":
                 from .pages import render_login
@@ -553,18 +554,11 @@ _KIND_ORDER = ("human", "service", "svc-account", "role", "group", "policy", "in
 _KIND_TITLE = {"svc-account": "service account", "instance": "service instance"}
 
 _ICONS = {
-    # The marks people already know, reduced to 16px strokes in the brand's colour.
-    # PostgreSQL: the elephant — head, ear, trunk, eye
-    "postgres": '<ellipse cx="3" cy="7.2" rx="2" ry="2.9" fill="currentColor" stroke="none" opacity=".6"/>'
-                '<ellipse cx="13" cy="7.2" rx="2" ry="2.9" fill="currentColor" stroke="none" opacity=".6"/>'
-                '<circle cx="8" cy="6.6" r="4.6" fill="currentColor" stroke="none"/>'
-                '<path d="M8 9.5v5.5" stroke-width="2.8"/>'
-                '<circle cx="6.3" cy="5.8" r=".85" fill="#0e1116" stroke="none"/><circle cx="9.7" cy="5.8" r=".85" fill="#0e1116" stroke="none"/>',
+    # Unmodified official logos, served locally; see static/LOGO-NOTICES.txt.
+    "postgres": f'<image href="{asset("postgresql.png")}" width="16" height="16" preserveAspectRatio="xMidYMid meet"/>',
     # ClickHouse: the bars, one of them red
     "clickhouse": '<path d="M1.5 2v12M4.8 2v12M8.1 2v12M11.4 2v12" stroke-width="1.8"/><path d="M14.5 6.5v3" stroke="#e03e2d" stroke-width="1.8"/>',
-    # SeaweedFS (S3 here): a seaweed stalk with fronds
-    "s3": '<path d="M8 15V1.5"/><path d="M8 6C5.4 6 3.8 4.6 3.3 2.6 5.8 2.6 7.5 3.7 8 6z"/>'
-          '<path d="M8 9.8c2.6 0 4.2-1.4 4.7-3.4-2.5 0-4.2 1.1-4.7 3.4z"/><path d="M8 13.4c-2.4 0-3.9-1.2-4.4-3 2.3 0 3.9 1 4.4 3z"/>',
+    "s3": f'<image href="{asset("seaweedfs.png")}" width="16" height="16" preserveAspectRatio="xMidYMid meet"/>',
     # Airflow: the pinwheel
     "airflow": '<path d="M8 8C8 4.4 9.8 2.2 14 1.8 12.6 4.6 10.8 6.8 8 8zM8 8c3.6 0 5.8 1.8 6.2 6-2.8-1.4-5-3.2-6.2-6zM8 8c0 3.6-1.8 5.8-6 6.2 1.4-2.8 3.2-5 6-6.2zM8 8C4.4 8 2.2 6.2 1.8 2c2.8 1.4 5 3.2 6.2 6z" fill="currentColor" stroke="none"/>',
     # a running service: a box with a status light
