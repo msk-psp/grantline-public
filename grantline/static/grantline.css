@@ -214,6 +214,7 @@ summary { cursor:pointer; }
 .gr .ed.hot, .gr .bridge.hot { opacity:1; stroke-width:3; }
 .gr.hovering .nd:not(.hot) { opacity:.32; }
 .gr.hovering .ed:not(.hot), .gr.hovering .bridge:not(.hot), .gr.hovering .bl:not(.hot) { opacity:.05; }
+.gr.focus.hovering .ed.on:not(.hot), .gr.focus.hovering .bridge.on:not(.hot) { opacity:.05; }
 .gr.focus.hovering .nd:not(.on) { opacity:.04; }
 .gr.focus.hovering .ed:not(.on), .gr.focus.hovering .bridge:not(.on) { opacity:0; }
 .tip { position:absolute; z-index:2; pointer-events:none; max-width:26rem;
