@@ -1,4 +1,4 @@
-// Resource-row hover must not dim the whole map each time the pointer enters or leaves.
+// Resource hover dims unrelated routes without resetting shared highlights between targets.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
@@ -45,16 +45,23 @@ for (let i = 0; i < 5; i++) {
   assert(row.classList.contains('hot'));
   assert.equal(tip.textContent, 'product · via team-product');
   assert.equal(tip.hidden, false);
-  assert.equal(svg.classList.contains('hovering'), false, 'row hover must keep map context bright');
+  assert(svg.classList.contains('hovering'), 'row hover dims unrelated map elements');
+  const changes = svg.classList.changes.length;
+  light('row:projects/product', [row], 'product · via team-product', pointer);
+  assert.equal(svg.classList.changes.length, changes, 'moving within a row keeps dimming stable');
   unhover();
   assert.equal(row.classList.contains('hot'), false);
   assert.equal(tip.hidden, true);
+  assert.equal(svg.classList.contains('hovering'), false, 'leaving restores map opacity');
 }
-assert.deepEqual(svg.classList.changes, [], 'row re-entry/leave must not mutate the whole SVG class');
+assert.deepEqual(svg.classList.changes, Array.from({ length: 5 }, () => [
+  ['add', 'hovering'], ['remove', 'hovering'],
+]).flat(), 'each re-entry enables dimming once and each leave clears it once');
 
 // Moving straight from one resource row to another must not reset the SVG either.
 const secondRow = { classList: classList() };
 light('row:projects/product', [row], 'product', pointer);
+svg.classList.changes.length = 0;
 light('row:projects/analytics', [secondRow], 'analytics', pointer);
 assert.equal(row.classList.contains('hot'), false);
 assert.equal(secondRow.classList.contains('hot'), true);
@@ -64,8 +71,10 @@ unhover();
 for (const key of ['nd:researcher_d', 'ed:researcher_d>group:product']) {
   light(key, [node], 'route', pointer);
   assert(svg.classList.contains('hovering'), 'node/edge hover still focuses its routes');
+  svg.classList.changes.length = 0;
   light('row:projects/analytics', [row], 'analytics', pointer);
-  assert.equal(svg.classList.contains('hovering'), false);
+  assert(svg.classList.contains('hovering'));
+  assert.deepEqual(svg.classList.changes, [], 'node/edge-to-row keeps global dimming in place');
   assert.equal(node.classList.contains('hot'), false);
   unhover();
 }
@@ -87,7 +96,7 @@ for (let i = 0; i < 5; i++) {
   onHover(resourcePointer);
   for (const el of [resource, account, holder, member, connector]) assert(el.classList.contains('hot'));
   for (const el of [unrelated, otherConnector]) assert.equal(el.classList.contains('hot'), false);
-  assert.equal(svg.classList.contains('hovering'), false, 'resource feedback keeps the map stable');
+  assert(svg.classList.contains('hovering'), 'resource hover dims unrelated routes');
   unhover();
   for (const el of [resource, account, holder, member, connector]) assert.equal(el.classList.contains('hot'), false);
 }
@@ -100,7 +109,7 @@ assert(holder.classList.contains('hot'));
 unhover();
 svg.classList.remove('focus');
 
-console.log('PASS: repeated resource hover highlights holders and inherited routes within the selection');
+console.log('PASS: repeated resource hover dims unrelated routes and preserves shared highlights and selection limits');
 
 // API failures must not turn into empty access or a JSON exception from an SSO page.
 const apiSource = source.slice(source.indexOf('  async function readData('), source.indexOf('  let data;'));

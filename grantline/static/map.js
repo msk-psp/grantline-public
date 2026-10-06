@@ -245,8 +245,8 @@ async function main() {
     // Keep shared highlights in place; resetting the whole SVG retriggers its transitions.
     for (const el of hot?.els || []) if (!els.includes(el)) el.classList.remove('hot');
     for (const el of els) if (!el.classList.contains('hot')) el.classList.add('hot');
-    // Resource rows describe the selected routes; keep that context bright on enter/leave.
-    svg.classList.toggle('hovering', !key.startsWith('row:'));
+    // Keep dimming enabled between targets, including resource rows.
+    if (!svg.classList.contains('hovering')) svg.classList.add('hovering');
     hot = { key, els };
     tip.textContent = text; tip.hidden = false; place();
   }
