@@ -1,0 +1,13 @@
+#!/bin/sh
+# Git passes refs on stdin. Deleted refs do not publish content.
+while read -r local_ref local_sha remote_ref remote_sha; do
+    case "$local_sha" in 0000000000000000000000000000000000000000) continue ;; esac
+    if [ "$remote_sha" = 0000000000000000000000000000000000000000 ]; then
+        # Existing remote refs establish already-public history, even on feature bases.
+        python3 scripts/privacy_gate.py --unpushed "$local_sha" || exit 1
+        continue
+    else
+        base=$remote_sha
+    fi
+    python3 scripts/privacy_gate.py --range "$base" "$local_sha" || exit 1
+done
