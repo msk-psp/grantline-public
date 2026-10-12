@@ -49,7 +49,8 @@ def group_of(system: str, resource: str) -> tuple[str, str]:
     return (system, _bucket_family(resource) if k == "bucket" else k)
 
 
-_RANK = {"admin": 4, "write": 3, "rw": 3, "read": 2, "list": 1}
+_RANK = {"admin": 4, "write": 3, "rw": 3, "read": 2, "list": 1,
+         "listallmybuckets": 1, "listbucket": 1, "getbucketlocation": 1}
 
 
 def _strength(privs: set[str]) -> str:

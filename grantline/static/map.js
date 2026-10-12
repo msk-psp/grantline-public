@@ -563,7 +563,7 @@ async function main() {
       leave(); // Rows are replaced: do not retain hover state for detached elements.
       this.layer.replaceChildren();
       if (!this.instance) return;
-      const x = this.x, ORDER = { none: 0, read: 1, write: 2, admin: 3 };
+      const x = this.x, ORDER = { none: 0, list: .5, read: 1, write: 2, admin: 3 };
       const here = this.items.filter(i => litIds === null || litIds.has(i.src));
       const root = { kids: new Map(), n: 0, bySrc: new Map(), depth: -1 };
       const worse = (a, b) => ORDER[a] >= ORDER[b] ? a : b;
