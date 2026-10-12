@@ -52,3 +52,25 @@ client timeout alone does not stop server work. See the official
 
 Demo identities, organizations, hostnames, and data in this repository are fictional.
 The license does not establish permission to publish someone else's code or assets.
+
+## Public-source privacy gate
+
+Tracked hooks and the CI `privacy` job check newly published commit ranges for
+realistic Slack user IDs, non-example email addresses, private-key/token patterns,
+private IPv4 addresses, internal hosts and personal home paths. Author/committer
+emails must use GitHub's noreply domain. A narrowly scoped exception preserves
+the official AWS SigV4 example access key in its existing regression test; test
+directories are not generally exempt.
+
+The gate does not identify every person, secret, username or sensitive value.
+Binary images/GIFs, unrecognized identifiers in arbitrary prose and PR descriptions still
+need human review. Existing history is not rewritten or audited on every PR.
+For a staged-index audit use `python3 scripts/privacy_gate.py --tracked`; for a
+specific new range use `python3 scripts/privacy_gate.py --range BASE HEAD`.
+If CI has no valid base (initial push or reusable invocation), it scans all history
+instead of silently skipping. That fallback can report historical findings;
+ordinary PR/push ranges do not recheck their baseline. CI runs on PRs and main
+pushes, only after publication. A direct push or web-created merge on another
+branch is not covered by this workflow; use hooks and GitHub email privacy settings.
+Never suppress a finding merely because the identifier belongs to another
+workspace: it can still link a person to operational context.

@@ -10,10 +10,35 @@ grantline -c grantline.toml serve       # http://127.0.0.1:8420
 
 ## Before you push
 
+Enable the repository's opt-in hooks once (no global Git settings change):
+
+```bash
+git config --local core.hooksPath .githooks
+```
+
+The pre-commit hook scans staged text and effective author/committer emails,
+not unsaved working-tree edits. The pre-push hook checks new commits, including
+their message bodies, author/committer emails and
+files added then removed within the range. CI repeats the range check as the
+`privacy` job. Require that check in the protected branch rules; local hooks
+can be bypassed and are not an access control.
+
+Use fictional accounts and `example.com` addresses in fixtures. Use a GitHub
+`users.noreply.github.com` email for new commits; this does not rewrite existing
+history. Never paste approval tokens or real Slack IDs in examples. Diagnostics
+show rule names and locations only, not matched values.
+
+In GitHub **Settings → Emails**, enable **Keep my email addresses private** and
+**Block command line pushes that expose my email**. This also protects the identity
+GitHub uses for future web-created merge commits. CI runs after upload: a failing
+check cannot retract data already published. It is a review barrier, not a promise
+that publication was prevented. The opt-in hooks run before commit/push instead.
+
 ```bash
 ruff check grantline tests
 python tests/run.py
 node tests/test_map_hover.mjs
+python3 scripts/privacy_gate.py --staged
 ```
 
 CI runs these checks on Python 3.11–3.13 plus the fixture `plan`. A change is
