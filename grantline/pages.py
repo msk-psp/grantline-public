@@ -89,6 +89,7 @@ PENDING_COUNT = 0     # serve() 가 매 요청 전에 채운다. 0 이면 큐 �
 # serve() 가 기동 때 한 번 채운다: 어느 어댑터든 쓰기 자격이 있으면 True, 하나도 없으면
 # False, 안 물어봤으면 None(CLI 렌더·테스트). 클러스터 배포본은 항상 False 다.
 WRITE_READY: bool | None = None
+CODE_PROPOSALS = False
 
 
 def _nav(here: str) -> str:
@@ -103,11 +104,11 @@ def _nav(here: str) -> str:
     # 탭이 미리 그렇게 말한다. 본문 머리에도 같은 문장이 있다.
     act_title = ("this deployment holds no write credential — the page shows the native "
                  "command to run elsewhere, and runs nothing"
-                 if WRITE_READY is False else "propose a change; everything proposed is queued here")
+                 if WRITE_READY is False and not CODE_PROPOSALS else "propose a change; everything proposed is queued here")
     items = [("/", "routes", "how authority reaches a resource"),
              ("/services", "services", "what is granted, by service"),
              ("/matrix", "matrix", "subjects × resource groups"),
-             ("/act", q + ("" if WRITE_READY is not False else " " + t("— read-only")), act_title)]
+             ("/act", q + ("" if WRITE_READY is not False or CODE_PROPOSALS else " " + t("— read-only")), act_title)]
     session = current.get() or {}
     if session.get("user"):
         identity = (h('<span class="identity" title="{0}">{1}</span><a href="{2}">Sign out</a>', e(session["user"]), e(session["user"]), e(session["logout"])))
@@ -505,14 +506,19 @@ def render_approve(req, approver: str | None, error: str = "", done: str = "") -
         msg += h('<p class="hint">Viewing only. Use your personal approval link to approve or deny this request.</p>')
     if req.status == "approved":
         msg += h('<p class="hint">All approvers approved. Awaiting execution by an operator with a write credential.</p>')
+    if req.code_plan:
+        msg += h('<h2>Approved code plan</h2><pre>{0}</pre><p class="hint">Approval creates a PR, not a permission change.</p>', e(req.code_plan["summary"]))
+    if req.pr_url:
+        msg += h('<p><a class="chip" href="{0}">View permission PR</a></p><p class="hint">Permission PR created; merge and application are still required.</p>', e(req.pr_url))
+    requirement = (h('<p>Approval creates a PR, not a permission change.</p>') if req.code_plan else
+                   h('<p>Every approver must approve this exact command. Execution also requires a write credential; denial prevents it from running.</p>'))
     return _shell(t("approve {0}", req.id), _nav(""), h("""<header class="glass">
 <a class="back" href="/act">&larr; All changes</a>
 <h1>{0} {1} <span class="cnt">{2} on {3} · {4}</span></h1>
 <p class="lede">Requested by {5} at {6}. Status: <b>{7}</b>.
-Every approver must approve this exact command. Execution also requires a write credential;
-denial prevents it from running.</p><pre>{8}</pre>{9}{10}</header>
+</p>{13}<pre>{8}</pre>{9}{10}</header>
 <section class="glass"><h2>Approvers</h2><div class="scroll"><table><thead><tr><th>who</th><th>decision</th></tr></thead>
-<tbody>{11}</tbody></table></div>{12}</section>""", e(t(req.action)), e(req.display_name(req.subject)), e(req.priv), e(req.resource), e(req.system), e(req.display_name(req.requester)), e(req.ts[:19]), e(t(req.status)), e(req.cmd), msg, form, rows, h('<p class="hint">{0}</p>', e(req.display_note())) if req.note else ''))
+<tbody>{11}</tbody></table></div>{12}</section>""", e(t(req.action)), e(req.display_name(req.subject)), e(req.priv), e(req.resource), e(req.system), e(req.display_name(req.requester)), e(req.ts[:19]), e(t(req.status)), e(req.cmd), msg, form, rows, h('<p class="hint">{0}</p>', e(req.display_note())) if req.note else '', requirement))
 
 
 def render_requested(req, links: list[str]) -> str:
@@ -611,7 +617,8 @@ than typing it.</p></section>""", _field("direction", "action", action, options=
     # 쓰기 자격이 없는 배포에서는 이 화면이 무엇을 하는 곳인지 먼저 말한다. 명령을
     # 보여주는 일은 그대로 되지만 여기서 실행되지는 않는다 — 그걸 눌러 보고 알게 하지
     # 않는다. 아래 preview 의 「no button here」와 같은 사실을, 누르기 전에.
-    ro = (h('<div class="warn"><b>read-only here</b>This console holds no write credential, so nothing on this page runs. It still spells the exact native command for the change you describe — copy it into the service\'s own client, or use the CLI with <code>--write</code> where the credential lives.</div>')
+    ro = (h('<div class="warn">Approval creates a PR, not a permission change.</div>') if CODE_PROPOSALS else
+          h('<div class="warn"><b>read-only here</b>This console holds no write credential, so nothing on this page runs. It still spells the exact native command for the change you describe — copy it into the service\'s own client, or use the CLI with <code>--write</code> where the credential lives.</div>')
           if WRITE_READY is False else "")
     return _shell(t('changes'), _nav("/act"), h("""<header class="glass">
 <h1>Changes</h1>{0}

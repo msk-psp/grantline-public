@@ -342,6 +342,11 @@
   "Information": "信息",
   "Warning": "警告",
   "Error": "错误",
+  "proposed": "已创建 PR",
+  "Approved code plan": "待批准的代码变更",
+  "Approval creates a PR, not a permission change.": "批准会创建 PR，不会立即更改权限。",
+  "View permission PR": "查看权限变更 PR",
+  "Permission PR created; merge and application are still required.": "已创建权限变更 PR，仍需合并和应用。",
   "{0} This is the first run recorded, so there is nothing to compare it with. Nothing here runs on a schedule — the next comparison will cover however long it happens to be until you run this again.": "{0} 这是首次记录，没有可比较的历史记录。此工具不定时运行；下次比较将涵盖再次运行前的变化。",
   "{0} Nothing changed. Unchanged access is omitted.": "{0} 没有变化。未变化的权限已省略。",
   "{0} Information · {1} Requires review · {2} Observation or verification failed": "{0} 信息 · {1} 需要检查 · {2} 观测或验证失败"

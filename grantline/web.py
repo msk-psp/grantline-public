@@ -258,6 +258,7 @@ def serve(observe_fn, port: int, bridges_fn=lambda: [], adapters: dict | None = 
 
     from . import pages as _pages
     _pages.APPROVALS_ENABLED = approvals is not None and approvals.enabled
+    _pages.CODE_PROPOSALS = bool(approvals and approvals.writer)
     # 한 번만 묻는다: 이 프로세스에 쓰기 자격이 있는가. 환경변수는 기동 후 바뀌지
     # 않고, 답이 「없음」이면 changes 탭이 그 사실을 먼저 말한다 (pages._nav).
     # 어댑터가 답을 못 주면(구식 어댑터) 아무 말도 하지 않는다 — None.
@@ -526,8 +527,10 @@ def serve(observe_fn, port: int, bridges_fn=lambda: [], adapters: dict | None = 
             if page == "approve":
                 from .pages import render_approve
                 try:
-                    req, who = approvals.decide(args[0], params.get("t", ""), params.get("decision") == "approve")
-                    if req.status == "approved" and adaps.get(req.system) and adaps[req.system].write_ready()[0]:
+                    req, who = approvals.decide(args[0], params.get("t", ""), params.get("decision") == "approve", actor=current.get()["user"] or None)
+                    if req.status == "approved" and approvals.writer:
+                        req = approvals.submit(req)
+                    elif req.status == "approved" and adaps.get(req.system) and adaps[req.system].write_ready()[0]:
                         req = approvals.run(req, adaps, audit_path, observed)
                     self._redirect("/approve/" + quote(req.id, safe="") + "?" + urlencode({"t": params.get("t", "")}))
                 except ActError as exc:
