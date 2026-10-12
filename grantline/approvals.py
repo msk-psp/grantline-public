@@ -36,6 +36,7 @@ from pathlib import Path
 
 from . import slack
 from .act import ActError, Proposal, execute
+from .i18n import LANGUAGES, language, t
 
 
 @dataclass
@@ -53,6 +54,15 @@ class Request:
     approved: dict = field(default_factory=dict)   # approver -> ts
     status: str = "pending"                        # pending | approved | executed | denied | failed
     note: str = ""
+    names: dict = field(default_factory=dict)       # display names only; identity stays unchanged
+
+    def display_name(self, identity: str) -> str:
+        return self.names.get(identity, identity)
+
+    def display_note(self) -> str:
+        if self.note.startswith("denied by "):
+            return t("Denied by {0}", self.display_name(self.note[len("denied by "):]))
+        return self.note
 
     @property
     def missing(self) -> list[str]:
@@ -67,6 +77,7 @@ class Approvals:
         self.console_url = cfg.get("console_url", "").rstrip("/")
         self.admin = list(cfg.get("admin", []))
         self.rules = list(cfg.get("rules", []))
+        self.names = dict(cfg.get("names", {}))
         self.slack_cfg = slack_cfg or {}
 
     # ── who ──────────────────────────────────────────────────────────────────
@@ -101,12 +112,17 @@ class Approvals:
         p = self._path(rid)
         if not p.exists():
             raise ActError(f"no request '{rid}'")
-        return Request(**json.loads(p.read_text()))
+        return self._read(p)
+
+    def _read(self, path: Path) -> Request:
+        req = Request(**json.loads(path.read_text()))
+        req.names = {**self.names, **req.names}
+        return req
 
     def all(self) -> list[Request]:
         if not self.store.is_dir():
             return []
-        return [Request(**json.loads(p.read_text())) for p in sorted(self.store.glob("*.json"))]
+        return [self._read(p) for p in sorted(self.store.glob("*.json"))]
 
     # ── flow ─────────────────────────────────────────────────────────────────
     def create(self, prop: Proposal, requester: str | None = None) -> Request:
@@ -123,7 +139,7 @@ class Approvals:
             requester=requester or getpass.getuser(),
             action=prop.action, system=prop.grant.system, subject=prop.grant.subject,
             resource=prop.grant.resource, priv=prop.grant.priv, cmd=prop.cmd,
-            required={a: secrets.token_urlsafe(18) for a in who})
+            required={a: secrets.token_urlsafe(18) for a in who}, names=dict(self.names))
         self.save(req)
         return req
 
@@ -132,19 +148,36 @@ class Approvals:
 
     def notify(self, req: Request) -> list[str]:
         """DM private links; return delivery status only, never bearer tokens."""
+        chosen = self.slack_cfg.get("language", language.get())
+        token = language.set(chosen if chosen in LANGUAGES else language.get())
+        try:
+            return self._notify(req)
+        finally:
+            language.reset(token)
+
+    def _notify(self, req: Request) -> list[str]:
         lines = []
-        head = (f"[grantline] approval requested by {req.requester}: {req.action} "
-                f"{req.subject} {req.priv} on {req.resource} [{req.system}]\n`{req.cmd}`")
+        # User-supplied Slack text must not become links, mentions, or markup.
+        def plain(value: str) -> str:
+            return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("`", "ˋ").replace("\n", " ").replace("\r", " ")
+        resource = req.resource
+        if req.system == "s3" and resource.startswith("bucket:"):
+            resource = "s3://" + resource[len("bucket:"):]
+        fields = (("Requester", req.display_name(req.requester)),
+                  ("Account", req.display_name(req.subject)), ("Service", req.system),
+                  ("Resource", resource), ("Privilege", req.priv), ("Request ID", req.id))
+        head = t("[Grantline] Approval request: {0}", t(req.action)) + "\n" + "\n".join(
+            f"{t(label)}: `{plain(value)}`" for label, value in fields) + f"\n{t('Command')}: `{plain(req.cmd)}`"
         for a in req.required:
-            msg = f"{head}\napprove or deny: {self.link(req, a)}"
+            msg = f"{head}\n{t('Approve or deny')}: {self.link(req, a)}"
             # Approval credentials cannot be redirected into a pilot inbox.
             cfg = {k: v for k, v in self.slack_cfg.items() if k != "redirect_to"}
             r = slack.post(cfg, a, msg)
-            status = "sent" if r and not r.startswith("error") else "not delivered; contact the operator"
-            lines.append(f"{a}: {status}")
+            status = t("sent") if r and not r.startswith("error") else t("not delivered; contact the operator")
+            lines.append(f"{req.display_name(a)}: {status}")
         ch = self.slack_cfg.get("channel")
         if ch:
-            slack.post(self.slack_cfg, ch, f"{head}\nawaiting: {', '.join(req.required)}")
+            slack.post(self.slack_cfg, ch, f"{head}\n{t('Awaiting approval')}: {', '.join(plain(req.display_name(a)) for a in req.required)}")
         return lines
 
     def decide(self, rid: str, token: str, approve: bool) -> tuple[Request, str]:
