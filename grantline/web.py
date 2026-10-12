@@ -130,12 +130,27 @@ def render(observed: set[Grant], changes: list[Change], findings: list[Finding],
         rows.append(h('<tr><th scope="row"><a href="/s/{0}">{1}</a></th>{2}</tr>', quote(subj, safe=""), e(subj), "".join(tds)))
 
     if changes:
-        lines = "".join(
-            h('<code class="{0}">{1} [{2}] {3}</code>', "add" if c.action == "grant" else "rm", "+" if c.action == "grant" else "−", e(c.grant.system), e(c.cmd))
-            for c in changes[:200])
-        more = (h('<p class="ok">… {0} more</p>', len(changes) - 200)
-                if len(changes) > 200 else "")
-        plan_html = h('<div class="cmd">{0}</div>{1}', lines, more)
+        accounts: dict[str, dict[str, list[Change]]] = {}
+        for change in changes:
+            accounts.setdefault(change.grant.subject, {}).setdefault(change.grant.system, []).append(change)
+        groups = []
+        for subject, services in sorted(accounts.items()):
+            sections = []
+            total_added = total_removed = 0
+            for system, items in sorted(services.items()):
+                added = sum(len(c.all_grants) for c in items if c.action == "grant")
+                removed = sum(len(c.all_grants) for c in items if c.action == "revoke")
+                total_added += added
+                total_removed += removed
+                lines = "".join(
+                    h('<code class="{0}">{1} {2}</code>', "add" if c.action == "grant" else "rm",
+                      "+" if c.action == "grant" else "−", e(c.cmd)) for c in items)
+                sections.append(h('<h3>{0} · {1}</h3><div class="cmd">{2}</div>',
+                                  e(system), h('Add candidates: {0} · Revoke candidates: {1}', added, removed), lines))
+            groups.append(h('<details><summary>{0} · {1}</summary>{2}</details>', e(subject),
+                            h('Add candidates: {0} · Revoke candidates: {1}', total_added, total_removed),
+                            "".join(sections)))
+        plan_html = "".join(groups)
     elif unobserved:
         plan_html = h('<p class="ok">No changes planned. Some scopes could not be observed; convergence is unknown.</p>')
     else:
@@ -168,7 +183,8 @@ count of distinct resources behind each. Hover a cell for the list.
 {4}
 </section>
 <section class="glass">
-<h2>Plan &middot; native commands, nothing applied</h2>{5}
+<h2>Permission differences</h2>
+<p class="hint">Declared and actual permissions differ. Expand an account to review candidates; nothing is applied automatically here.</p>{5}
 </section>
 <section class="glass">
 <h2>Findings</h2>{6}
