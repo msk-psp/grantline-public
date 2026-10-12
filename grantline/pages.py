@@ -442,12 +442,12 @@ def queue_sections(reqs: list) -> list[str]:
         who = "".join(
             h('<span class="chip {0}" title="', "yes" if a in r.approved else "no")
             + (e(t("approved {0}", r.approved[a])) if a in r.approved else t("not yet"))
-            + h('">{0}</span>', e(a))
+            + h('">{0}</span>', e(r.display_name(a)))
             for a in r.required)
-        head = (h('<span class="st st-{0}">{1}</span> <b>{2}</b> {3} for <a href="/s/{4}">{5}</a> on <code>{6}</code> <span class="cnt">{7}</span>', e(r.status), e(t(r.status)), e(t(r.action)), e(r.priv), quote(r.subject, safe=""), e(r.subject), e(r.resource), e(r.system)))
-        meta = (e(t("{0} asked, {1}", r.requester, r.ts[:16].replace("T", " ")))
+        head = (h('<span class="st st-{0}">{1}</span> <b>{2}</b> {3} for <a href="/s/{4}">{5}</a> on <code>{6}</code> <span class="cnt">{7}</span>', e(r.status), e(t(r.status)), e(t(r.action)), e(r.priv), quote(r.subject, safe=""), e(r.display_name(r.subject)), e(r.resource), e(r.system)))
+        meta = (e(t("{0} asked, {1}", r.display_name(r.requester), r.ts[:16].replace("T", " ")))
                 + (' &middot; ' + e(t('waiting on {0}', len(waiting))) if waiting else '')
-                + (f' &middot; {e(r.note)}' if r.note else ''))
+                + (f' &middot; {e(r.display_note())}' if r.note else ''))
         return (h('<div class="req"><div class="req-h">{0}</div><div class="req-m">{1}</div><pre class="cmd">{2}</pre><div class="req-w">{3}<a class="chip" href="/approve/{4}">View request</a></div></div>', head, meta, e(r.cmd), who, quote(r.id, safe="")))
 
     body = []
@@ -490,11 +490,11 @@ leave a mark and live on the CLI only.</p></header>
 def render_approve(req, approver: str | None, error: str = "", done: str = "") -> str:
     """One request, seen through one approver's link. Approve and deny are POSTs; the
     page states plainly what will run and who still has to say yes."""
-    rows = "".join(h('<tr><td>{0}</td><td>{1}</td></tr>', e(a), "✓ " + e(stamp[:19]) if stamp else "&mdash; " + t("waiting"))
+    rows = "".join(h('<tr><td>{0}</td><td>{1}</td></tr>', e(req.display_name(a)), "✓ " + e(stamp[:19]) if stamp else "&mdash; " + t("waiting"))
                    for a, stamp in sorted((a, req.approved.get(a, "")) for a in req.required))
     form = ""
     if approver and req.status == "pending" and approver not in req.approved:
-        form = (h('<form method="post" action="/approve/{0}"><input type="hidden" name="t" value="{1}"><button class="chip go" name="decision" value="approve">approve as {2}</button> <button class="chip rm" name="decision" value="deny">deny</button></form>', quote(req.id, safe=""), e(req.required[approver]), e(approver)))
+        form = (h('<form method="post" action="/approve/{0}"><input type="hidden" name="t" value="{1}"><button class="chip go" name="decision" value="approve">approve as {2}</button> <button class="chip rm" name="decision" value="deny">deny</button></form>', quote(req.id, safe=""), e(req.required[approver]), e(req.display_name(approver))))
     msg = (h('<p class="ok">{0}</p>', e(t(done))) if done else "") + (h('<p class="rm">{0}</p>', e(t(error))) if error else "")
     if not approver and req.status == "pending":
         msg += h('<p class="hint">Viewing only. Use your personal approval link to approve or deny this request.</p>')
@@ -507,7 +507,7 @@ def render_approve(req, approver: str | None, error: str = "", done: str = "") -
 Every approver must approve this exact command. Execution also requires a write credential;
 denial prevents it from running.</p><pre>{8}</pre>{9}{10}</header>
 <section class="glass"><h2>Approvers</h2><div class="scroll"><table><thead><tr><th>who</th><th>decision</th></tr></thead>
-<tbody>{11}</tbody></table></div>{12}</section>""", e(t(req.action)), e(req.subject), e(req.priv), e(req.resource), e(req.system), e(req.requester), e(req.ts[:19]), e(t(req.status)), e(req.cmd), msg, form, rows, h('<p class="hint">{0}</p>', e(req.note)) if req.note else ''))
+<tbody>{11}</tbody></table></div>{12}</section>""", e(t(req.action)), e(req.display_name(req.subject)), e(req.priv), e(req.resource), e(req.system), e(req.display_name(req.requester)), e(req.ts[:19]), e(t(req.status)), e(req.cmd), msg, form, rows, h('<p class="hint">{0}</p>', e(req.display_note())) if req.note else ''))
 
 
 def render_requested(req, links: list[str]) -> str:
@@ -515,7 +515,7 @@ def render_requested(req, links: list[str]) -> str:
     return _shell(t("request {0}", req.id), _nav(""), h("""<header class="glass"><h1>Approval requested</h1>
 <p class="lede">{0} {1} {2} on {3} [{4}] &mdash;
 <code>{5}</code>. Each approver has their own link (sent by Slack when a bot token is
-configured). Delivery status:</p><ul>{6}</ul></header>""", e(t(req.action)), e(req.subject), e(req.priv), e(req.resource), e(req.system), e(req.cmd), items))
+configured). Delivery status:</p><ul>{6}</ul></header>""", e(t(req.action)), e(req.display_name(req.subject)), e(req.priv), e(req.resource), e(req.system), e(req.cmd), items))
 
 
 # ── F3 ────────────────────────────────────────────────────────────────────────

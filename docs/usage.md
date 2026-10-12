@@ -254,6 +254,15 @@ expose. Keys absent from an IAM API observation yield `unknown`.
 
 ## History and approvals
 
+On Routes, enter a number in **Recent changes (days)** (or open `/?days=7`) to
+show current routes involving grant changes observed during that period. Unchanged
+routes are hidden. Removed grants are counted but are not drawn as current access.
+The filter compares recorded snapshots and the current observation, so it reports
+incomplete history when no snapshot reaches the start of the period. Snapshot times
+are observation times, not exact server-side change times. Declared bridges and S3
+policy attachment changes have no snapshot history; they provide current route
+context, but are not independently dated changes. The default view shows all routes.
+
 `history --since 7d` compares observations; `snapshot` records one for an external timer.
 The console takes one snapshot per process, even while its observation cache refreshes
 in the background. Cached reads use the last complete observation; explicit refreshes and
@@ -263,6 +272,25 @@ writes read fresh. First access may still wait for the initial observation.
 matching `[[approvals.rules]]` choose approvers. Slack delivery is optional. Approver URLs
 are bearer credentials: deliver privately; a trusted operator uses `request --links ID`.
 Direct web execution is refused when approvals are enabled. See [SECURITY.md](../SECURITY.md).
+
+Display names do not change approval identities. Add `[approvals.names]` to show
+usernames instead of IDs, and set the console and notification language separately:
+
+```toml
+[web]
+default_language = "ko"
+
+[approvals.names]
+"U_EXAMPLE" = "@example"
+
+[notify.slack]
+bot_token_env = "ATLAS_SLACK_BOT_TOKEN"
+language = "ko"
+```
+
+Explicit language selection and a saved language cookie override the deployment
+default. Approval DMs include the target account, service, resource and privilege;
+private approval links remain limited to the intended approver's DM.
 
 Probe implementation references: [PostgreSQL privilege inquiry functions](https://www.postgresql.org/docs/current/functions-info.html)
 and [ClickHouse SHOW GRANTS](https://clickhouse.com/docs/reference/statements/show#show-grants).

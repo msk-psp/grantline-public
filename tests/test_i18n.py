@@ -10,7 +10,6 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -54,7 +53,8 @@ assert language.get() == "en"
 for locale in LANGUAGES:
     token = language.set(locale)
     try:
-        req = SimpleNamespace(id="request1", action="grant", subject="services", priv="Read", resource="bucket:Read",
+        from grantline.approvals import Request
+        req = Request(id="request1", action="grant", subject="services", priv="Read", resource="bucket:Read",
                               system="s3", requester="Read", ts="2026-10-02T12:00:00Z", status="pending",
                               cmd="MOCK GRANT Read TO services", required={"services": "test-token"}, approved={}, note="")
         approval = pages.render_approve(req, "services")

@@ -20,7 +20,7 @@ def supported(value: str) -> str:
     return value.split("-", 1)[0] if value.split("-", 1)[0] in LANGUAGES else ""
 
 
-def negotiate(explicit: str, cookie: str, accept: str) -> str:
+def negotiate(explicit: str, cookie: str, accept: str, default: str = "") -> str:
     if explicit in LANGUAGES:
         return explicit
     jar = SimpleCookie()
@@ -31,6 +31,8 @@ def negotiate(explicit: str, cookie: str, accept: str) -> str:
     saved = jar.get("grantline_lang")
     if saved and saved.value in LANGUAGES:
         return saved.value
+    if default in LANGUAGES:
+        return default
     choices = []
     for item in accept.split(","):
         name, _, params = item.strip().partition(";")

@@ -269,7 +269,8 @@ def cmd_serve(args):
     web.serve(lambda: _observe_and_plan(it, adaps, rec), args.port, lambda: bridges,
               adapters=adaps, audit_path=audit_path, recorder=rec, approvals=_approvals(args.config),
               graph_fn=_graph_builder(args.config, adaps, bridges),
-              trusted_hosts=web_cfg.get("trusted_hosts", []), auth=web_cfg.get("auth"), host=args.host)
+              trusted_hosts=web_cfg.get("trusted_hosts", []), auth=web_cfg.get("auth"), host=args.host,
+              default_language=web_cfg.get("default_language", ""))
     return 0
 
 

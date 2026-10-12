@@ -41,6 +41,12 @@ async function main() {
     return res.json();
   }
   let data;
+  const days = new URLSearchParams(location.search).get('days');
+  const daysInput = document.querySelector('#route-days');
+  if (daysInput && days) daysInput.value = days;
+  document.querySelector('.recent-filter')?.addEventListener('submit', event => {
+    if (!daysInput.value) { event.preventDefault(); location.assign('/'); }
+  });
   try { data = await readData('/api/graph.json' + location.search); }
   catch (err) { stop(tr('could not read the services: {0}', err)); return; }
   done();
@@ -48,12 +54,18 @@ async function main() {
   // lines into it looks exactly like a system nobody can reach. Say which, and why,
   // before the picture — the picture is incomplete and the reader must know it.
   const note = document.querySelector('.blind');
+  if (note && data.recent) {
+    const r = data.recent;
+    const message = tr('Routes with grant changes observed in the last {0} days. Removed grants: {1}; removed routes are not drawn.', r.days, r.removed);
+    const coverage = r.complete ? '' : tr(' Snapshot history does not cover the whole period; earlier changes are unknown.');
+    note.insertAdjacentHTML('beforebegin', `<p class="recent-summary">${esc(message + coverage)}</p>`);
+  }
   if (note && data.blind && data.blind.length) {
     note.innerHTML = '<div class="warn stop"><b>' + esc(tr('the map is incomplete')) + '</b>'
       + data.blind.map(b => esc(tr('{0} could not be read ({1})', b.system, b.note))).join('; ')
       + esc(tr('. No route into unread services is shown. This means unknown access, not no access.')) + '</div>';
   }
-  if (!data.nodes.length) { map.innerHTML = '<p class=ok>' + esc(tr('No multi-hop authority — every grant is direct.')) + '</p>'; return; }
+  if (!data.nodes.length) { map.innerHTML = '<p class=ok>' + esc(tr(data.recent ? 'No current routes with recorded changes in this period.' : 'No multi-hop authority — every grant is direct.')) + '</p>'; return; }
 
   // ── layout ───────────────────────────────────────────────────────────
   // Humans and declared services both *consume* authority — one column, with a
@@ -529,7 +541,8 @@ async function main() {
       this.instance = instance; this.open_ = new Set();
       if (!this.cache[instance]) {
         try {
-          const data = await readData('/api/resources.json?instance=' + encodeURIComponent(instance));
+          const data = await readData('/api/resources.json?instance=' + encodeURIComponent(instance)
+            + (days ? '&days=' + encodeURIComponent(days) : ''));
           this.cache[instance] = data.items.map(i => ({ ...i, parts: this.parts(i.res) }));
         } catch (err) {
           if (this.instance !== instance) return;

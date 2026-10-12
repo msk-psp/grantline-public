@@ -206,12 +206,15 @@ class _ObservationCache:
 
 def serve(observe_fn, port: int, bridges_fn=lambda: [], adapters: dict | None = None,
           audit_path: str | None = None, recorder=None, approvals=None, ttl_s: float = 60,
-          graph_fn=None, trusted_hosts=(), auth=None, host: str = "127.0.0.1") -> None:
+          graph_fn=None, trusted_hosts=(), auth=None, host: str = "127.0.0.1",
+          default_language: str = "") -> None:
     """GET renders, POST writes. That split is load-bearing, not convention: a GET
     that changed something would be triggered by a link, a prefetch, or a reload of
     the page that just wrote — and F3's whole claim is that only what the operator
     named is touched."""
     adaps = adapters or {}
+    if default_language and default_language not in LANGUAGES:
+        raise ValueError(f"Unsupported default language: {default_language}")
     from .auth import current, local_path, proxy_config, proxy_target, proxy_user
     auth_cfg = proxy_config(auth)
 
@@ -309,7 +312,7 @@ def serve(observe_fn, port: int, bridges_fn=lambda: [], adapters: dict | None = 
             user = proxy_user(self.headers, auth_cfg)
             locale_token = language.set(negotiate(_form(urlsplit(self.path).query).get("lang", ""),
                                                  self.headers.get("Cookie", ""),
-                                                 self.headers.get("Accept-Language", "")))
+                                                 self.headers.get("Accept-Language", ""), default_language))
             token = current.set({"enabled": auth_cfg is not None, "user": user,
                                  "path": local_path(self.path),
                                  "logout": proxy_target(auth_cfg["logout_url"], "/login") if auth_cfg else ""})
@@ -369,14 +372,38 @@ def serve(observe_fn, port: int, bridges_fn=lambda: [], adapters: dict | None = 
                 import json
                 data = observe("refresh" in query)
                 blind = data[5] if len(data) > 5 else ()
-                self._send_bytes(json.dumps(graph_data(data[-1], blind)).encode(),
+                graph = data[-1]
+                recent = None
+                if "days" in _form(query):
+                    from .recent_routes import filter_recent, parse_days
+                    try:
+                        days = parse_days(_form(query)["days"])
+                    except ValueError as exc:
+                        self._send_bytes(json.dumps({"error": str(exc)}).encode(), "application/json", status=400)
+                        return
+                    graph, recent = filter_recent(graph, data[0], blind,
+                                                  recorder.dir if recorder else None, days, systems=adaps or None)
+                payload = graph_data(graph, blind)
+                if recent is not None:
+                    payload["recent"] = recent
+                self._send_bytes(json.dumps(payload).encode(),
                                  "application/json")
                 return
             if path == "/api/resources.json":
                 import json
                 instance = html.unescape(_form(query).get("instance", ""))
                 data = observe()
-                self._send_bytes(json.dumps(resources_data(data[-1], instance)).encode(), "application/json")
+                graph = data[-1]
+                if "days" in _form(query):
+                    from .recent_routes import filter_recent, parse_days
+                    try:
+                        days = parse_days(_form(query)["days"])
+                    except ValueError as exc:
+                        self._send_bytes(json.dumps({"error": str(exc)}).encode(), "application/json", status=400)
+                        return
+                    graph, _ = filter_recent(graph, data[0], data[5],
+                                             recorder.dir if recorder else None, days, systems=adaps or None)
+                self._send_bytes(json.dumps(resources_data(graph, instance)).encode(), "application/json")
                 return
             page, args = parse_path(path)
             if page == "404":
@@ -430,7 +457,7 @@ def serve(observe_fn, port: int, bridges_fn=lambda: [], adapters: dict | None = 
         def do_POST(self):
             user = proxy_user(self.headers, auth_cfg)
             locale_token = language.set(negotiate("", self.headers.get("Cookie", ""),
-                                                 self.headers.get("Accept-Language", "")))
+                                                 self.headers.get("Accept-Language", ""), default_language))
             token = current.set({"enabled": auth_cfg is not None, "user": user,
                                  "path": local_path(self.path),
                                  "logout": proxy_target(auth_cfg["logout_url"], "/login") if auth_cfg else ""})
@@ -717,6 +744,11 @@ server holds, never theirs.</p>
 <section class="glass">
 <h2>Routes <span class="cnt">click a name &middot; scroll to zoom &middot; drag to pan</span></h2>
 <div class="tools">
+  <form class="grp recent-filter" method="get" action="/">
+    <label for="route-days">Recent changes (days)</label>
+    <input id="route-days" name="days" type="number" min="1" max="3650" step="1" placeholder="7" style="width:5em">
+    <button type="submit">Apply</button><a href="/">All routes</a>
+  </form>
   <div class="grp" role="group" aria-label="environment"><span class="lbl">environment</span>
     <span class="env"></span>
   </div>
