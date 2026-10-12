@@ -368,7 +368,7 @@ def serve(observe_fn, port: int, bridges_fn=lambda: [], adapters: dict | None = 
                 if "/" in name or not f.is_file():
                     self.send_error(404); return
                 ctype = {"css": "text/css; charset=utf-8", "js": "text/javascript; charset=utf-8",
-                         "png": "image/png"}.get(f.suffix[1:], "application/octet-stream")
+                         "png": "image/png", "svg": "image/svg+xml"}.get(f.suffix[1:], "application/octet-stream")
                 # versioned URLs (asset()) — safe to cache for a long time
                 self._send_bytes(f.read_bytes(), ctype, cache="max-age=31536000, immutable")
                 return

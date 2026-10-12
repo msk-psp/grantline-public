@@ -49,6 +49,7 @@ def _shell(title: str, *parts: str, wide: bool = False) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{0} &middot; Grantline</title>
 <link rel="stylesheet" href="{1}">
+<link rel="icon" type="image/svg+xml" href="{9}">
 <script id="i18n-messages" type="application/json">{6}</script>
 <script src="{7}" defer></script>
 <script src="{2}" defer></script></head><body>
@@ -56,7 +57,11 @@ def _shell(title: str, *parts: str, wide: bool = False) -> str:
 <main id="main" class="page{3}">{8}{4}
 <footer>grantline &middot; read-only observation &middot;
 every write is previewed as the native command first</footer>
-</main></body></html>""", e(title), asset("grantline.css"), asset("console.js"), ' wide' if wide else '', "".join(parts), language.get(), client_catalog(), asset("i18n.js"), picker)
+</main></body></html>""", e(title), asset("grantline.css"), asset("console.js"), ' wide' if wide else '', "".join(parts), language.get(), client_catalog(), asset("i18n.js"), picker, asset("grantline-icon.svg"))
+
+
+def _brand() -> str:
+    return h('<a class="brand" href="/"><img src="{0}" width="28" height="28" alt="">Grantline</a>', asset("grantline-icon.svg"))
 
 
 def render_error(status: int, message: str) -> str:
@@ -78,7 +83,7 @@ def render_login(cfg, destination="/") -> str:
     else:
         message = t('This local console does not require sign-in. Shared deployments use an authenticated proxy.')
         href, button = destination, "Explore the console"
-    return _shell(t('Access Grantline'), h('<header class="glass login"><a class="brand" href="/">Grantline</a><h1>Untangle access.<br>Follow the grants.</h1><p class="lede">Understand PostgreSQL, ClickHouse and S3 access in one place.</p><p class="login-state">{0}</p><a class="primary" href="{1}">{2} &rarr;</a><p class="hint">Observation and permission changes stay separate. Every change is previewed first.</p></header>', message, e(href), e(t(button))))
+    return _shell(t('Access Grantline'), h('<header class="glass login">{3}<h1>Untangle access.<br>Follow the grants.</h1><p class="lede">Understand PostgreSQL, ClickHouse and S3 access in one place.</p><p class="login-state">{0}</p><a class="primary" href="{1}">{2} &rarr;</a><p class="hint">Observation and permission changes stay separate. Every change is previewed first.</p></header>', message, e(href), e(t(button)), _brand()))
 
 PENDING_COUNT = 0     # serve() 가 매 요청 전에 채운다. 0 이면 큐 탭에 배지가 없다.
 # serve() 가 기동 때 한 번 채운다: 어느 어댑터든 쓰기 자격이 있으면 True, 하나도 없으면
@@ -108,7 +113,7 @@ def _nav(here: str) -> str:
         identity = (h('<span class="identity" title="{0}">{1}</span><a href="{2}">Sign out</a>', e(session["user"]), e(session["user"]), e(session["logout"])))
     else:
         identity = h('<a class="identity" href="/login">Sign in</a>') if session.get("enabled") else h('<a class="identity" href="/login">Local console</a>')
-    return h('<nav class="nav" aria-label="Main navigation"><a class="brand" href="/">Grantline</a>') + "".join(
+    return h('<nav class="nav" aria-label="Main navigation">') + _brand() + "".join(
         h('<a href="{0}" class="{1}"', href, "on" if href == here else "")
         + (' aria-current="page"' if href == here else '') + h(' title="{0}">{1}</a>', e(t(ti)), e(t(label))) for href, label, ti in items
     ) + h('<a class="refresh" href="?refresh" title="Re-read access from every service">&#x21bb; refresh</a>') + identity + h('</nav>')

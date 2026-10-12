@@ -38,7 +38,7 @@ empty = pages.render_inventory(set(), unobserved=[blind])
 assert "unknown access" in empty and "read timed out" in empty and "No observed grants" in empty
 assert "convergence is unknown" in web.render(set(), [], [], unobserved=[blind])
 assert "No grants were observed for this account" in pages.render_subject(set(), build(set(), []), "missing")
-assert "<img" not in pages.render_error(404, '<img src=x onerror="alert(1)">')
+assert '<img src=x onerror=' not in pages.render_error(404, '<img src=x onerror="alert(1)">')
 assert 'name="subject" value="alice" autocomplete="off" required' in pages.render_act(
     {"subject": "alice"}, set(), {})
 

@@ -162,7 +162,9 @@ td.unobs { color:var(--muted); font-weight:640; }
 .language select { font:inherit; border:1px solid var(--rule); border-radius:8px; padding:.35rem .5rem; }
 .language button { font-size:12px; }
 .login { max-width:640px; width:100%; align-self:center; margin:5vh 0 0; }
-.login .brand { display:block; margin-bottom:1.5rem; color:var(--ink); text-decoration:none; font-weight:650; }
+.brand { display:inline-flex; align-items:center; gap:.55rem; }
+.brand img { flex-shrink:0; }
+.login .brand { display:flex; margin-bottom:1.5rem; color:var(--ink); text-decoration:none; font-weight:650; }
 .login h1 { font-size:2.2rem; }
 .login-state { margin:1.5rem 0; overflow-wrap:anywhere; }
 .primary { display:inline-block; padding:.7rem 1.2rem; border-radius:10px; background:var(--accent); color:var(--node); font-weight:600; text-decoration:none; }

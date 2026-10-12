@@ -36,7 +36,8 @@ assert proxy_user(headers, cfg) == "", "ambiguous identity headers must be refus
 assert "Explore the console" in pages.render_login(None)
 token = current.set({"enabled": True, "user": '<img src=x onerror="bad()">', "logout": "/oauth2/sign_out"})
 try:
-    assert "<img" not in pages.render_login(cfg)
+    assert '&lt;img src=x onerror=' in pages.render_login(cfg)
+    assert '<img src=x onerror=' not in pages.render_login(cfg)
 finally:
     current.reset(token)
 
