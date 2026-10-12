@@ -148,4 +148,6 @@ def level(privs: set[str]) -> str:
         return "admin"
     if privs & WRITE_PRIVS:
         return "write"
+    if privs <= {"ListAllMyBuckets", "ListBucket", "GetBucketLocation"}:
+        return "list"
     return "read"

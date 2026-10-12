@@ -36,7 +36,13 @@ The current default branch is the supported version.
   limits for shared deployments; this small server is not an internet-facing service.
 - SQL writes accept the explicit privileges offered by each adapter, quote identifiers,
   and refuse unsupported privileges. They are not an arbitrary SQL interface.
-- IAM observation is not a complete AWS policy evaluator. Conditional and negative
+- IAM observation is not a complete AWS policy evaluator. Bucket discovery
+  (`ListAllMyBuckets`) is a service capability, not object access. Allow statements
+  using only `StringLike` on `s3:prefix`, literal bucket ARNs and `ListBucket` or
+  `GetBucketLocation` are shown as request-context capabilities. Prefix strings and
+  wildcard patterns are preserved; they do not become bucket-wide grants. These
+  capabilities are observation-only: no automatic IAM writes or probes are offered.
+  Conditional listings combined with any Deny remain unknown. Other conditional and negative
   statements, unsupported actions/resource wildcards, and non-exact/overlapping denies are
   reported as unknown. The S3 system is then unobserved for convergence planning;
   omitted grants must not be interpreted as denied access. Use the service's own policy
