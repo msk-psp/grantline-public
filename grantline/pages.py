@@ -544,7 +544,7 @@ def _field(label: str, name: str, value: str, options=None, listid: str = "") ->
 
 
 def render_act(params: dict, observed: set[Grant], adapters: dict,
-               error: str = "", done: str = "", requests: list | None = None) -> str:
+               error: str = "", done: str = "", requests: list | None = None, proposal_fn=None) -> str:
     """The one screen that writes: fill in, preview the native command, then run it.
 
     The preview is unconditional (N2) and it is the command itself, not a summary —
@@ -605,7 +605,7 @@ than typing it.</p></section>""", _field("direction", "action", action, options=
 
     if system and subject and resource and priv and not error:
         try:
-            prop = propose(action, system, subject, resource, priv, observed, adapters)
+            prop = (proposal_fn or propose)(action, system, subject, resource, priv, observed, adapters)
         except ActError as exc:
             blocks.append(h('<section class="glass"><h2>Cannot preview</h2><div class="warn stop"><b>refused</b><pre>{0}</pre></div></section>', e(t(str(exc)))))
         else:

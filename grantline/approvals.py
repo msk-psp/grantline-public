@@ -36,8 +36,9 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from . import slack
-from .act import ActError, Proposal, execute
+from .act import ActError, Proposal, execute, propose
 from .i18n import LANGUAGES, language, t
+from .model import Grant
 
 
 @dataclass
@@ -139,6 +140,19 @@ class Approvals:
         return [self._read(p) for p in sorted(self.store.glob("*.json"))]
 
     # ── flow ─────────────────────────────────────────────────────────────────
+    def propose(self, action, system, subject, resource, priv, observed, adapters):
+        if not self.writer:
+            return propose(action, system, subject, resource, priv, observed, adapters)
+        if system not in self.writer.systems or action != "grant":
+            raise ActError("This code writer does not support the requested service or action.")
+        if any(not isinstance(v, str) or not v.strip() for v in (subject, resource, priv)):
+            raise ActError("A code proposal requires an account, resource and privilege.")
+        grant = Grant(system, subject.strip(), resource.strip(), priv.strip())
+        # Native policy edits can differ from repository declarations; the writer
+        # validates the actual patch before a request is stored or notified.
+        cmd = f"code PR: {action} {grant.priv} on {grant.resource} to {grant.subject} ({system})"
+        return Proposal(action, grant, cmd, False, "Approval creates a repository PR.")
+
     def create(self, prop: Proposal, requester: str | None = None) -> Request:
         if not self.enabled:
             raise ActError("no [approvals] section in the config — nothing says who approves.")

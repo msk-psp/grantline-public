@@ -14,7 +14,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from grantline import web
 from grantline.act import ActError, Proposal
-from grantline.adapters import Adapter
+from grantline.adapters.s3 import S3ConfigAdapter
 from grantline.approvals import Approvals
 from grantline.model import Grant
 from grantline.pages import render_approve
@@ -73,25 +73,32 @@ with tempfile.TemporaryDirectory() as directory, patch("grantline.code_writer.su
     assert "View permission PR" in html and "Approval creates a PR" in html
 print("ok code writer approval boundary")
 
-class ReadOnly(Adapter):
-    privs = ("Read",)
-    def grant_cmd(self, grant): return "READ ONLY PREVIEW"
-    def apply(self, change): raise AssertionError("must never apply native permissions")
-
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *args): return None
 
 with tempfile.TemporaryDirectory() as directory, patch("grantline.code_writer.subprocess.run", writer):
     ap = Approvals(cfg, Path(directory))
+    iam = Path(directory) / "iam.json"
+    iam.write_text(json.dumps({"identities": [{"name":"demo-user", "policy":{"Statement":[
+        {"Effect":"Allow", "Action":"s3:ListBucket", "Resource":"arn:aws:s3:::demo",
+         "Condition":{"StringLike":{"s3:prefix":["existing/*"]}}}]}}]}))
+    adapter = S3ConfigAdapter({"enforced":"dynamic", "planes":{"dynamic":{"file":str(iam)}}})
+    observed, _, unknown = adapter.observe()
+    assert not unknown and observed
+    before = iam.read_bytes()
+    code_prop = ap.propose("grant", "s3", "demo-user", "bucket:demo/team", "Read", observed, {"s3":adapter})
+    denied(lambda: ap.propose("revoke", "s3", "demo-user", "bucket:demo/team", "Read", observed, {"s3":adapter}))
     servers = []
     original = web.HTTPServer
     def capture(addr, handler):
         server = original(("127.0.0.1", 0), handler)
         servers.append(server)
         return server
-    with patch.object(web, "HTTPServer", capture), patch("grantline.slack.post", return_value=None):
-        thread = threading.Thread(target=web.serve, args=(lambda: (set(), [], []), 0), daemon=True,
-            kwargs={"adapters": {"s3": ReadOnly()}, "approvals": ap,
+    with patch.object(web, "HTTPServer", capture), patch("grantline.slack.post", return_value=None), \
+            patch.object(adapter, "grant_cmd", side_effect=AssertionError("native preview must not run")), \
+            patch.object(adapter, "apply", side_effect=AssertionError("native apply must not run")):
+        thread = threading.Thread(target=web.serve, args=(lambda: (observed, [], []), 0), daemon=True,
+            kwargs={"adapters": {"s3": adapter}, "approvals": ap,
                     "auth": {"mode": "proxy"}})
         thread.start()
         deadline = time.monotonic() + 3
@@ -106,13 +113,20 @@ with tempfile.TemporaryDirectory() as directory, patch("grantline.code_writer.su
                 with opener.open(req, timeout=3) as response: return response.status
             except urllib.error.HTTPError as exc: return exc.code
         try:
+            preview_query = urllib.parse.urlencode({"action":"grant", "system":"s3", "subject":"demo-user",
+                "resource":"bucket:demo/team", "priv":"Read"})
+            preview = urllib.request.Request(url + "/act?" + preview_query,
+                headers={"X-Forwarded-Email":"requester"})
+            with opener.open(preview, timeout=3) as response:
+                assert code_prop.cmd in response.read().decode()
             assert post("/request", "requester", {"action":"grant", "system":"s3", "subject":"demo-user",
-                "resource":"bucket:demo/team", "priv":"Read", "cmd":"READ ONLY PREVIEW"}) == 303
+                "resource":"bucket:demo/team", "priv":"Read", "cmd":code_prop.cmd}) == 303
             req = ap.all()[0]
             fields = {"t":req.required["U_REVIEWER"], "decision":"approve"}
             assert post("/approve/" + req.id, "requester", fields) == 409
             assert post("/approve/" + req.id, "reviewer", fields) == 303
             assert ap.load(req.id).status == "proposed"
+            assert iam.read_bytes() == before
         finally:
             server.shutdown(); thread.join(timeout=3); server.server_close()
 print("ok authenticated web approval creates PR without native writes")

@@ -465,7 +465,8 @@ def serve(observe_fn, port: int, bridges_fn=lambda: [], adapters: dict | None = 
             elif page == "group":
                 html_ = render_group(observed, *args)
             elif page == "act":
-                html_ = render_act(_form(query), observed, adaps, requests=reqs())
+                html_ = render_act(_form(query), observed, adaps, requests=reqs(),
+                                   proposal_fn=approvals.propose if approvals and approvals.writer else None)
             else:
                 # F8. The recorder, not the request: this process snapshots once, so
                 # "since your previous run" keeps meaning the run and not the reload.
@@ -542,7 +543,7 @@ def serve(observe_fn, port: int, bridges_fn=lambda: [], adapters: dict | None = 
                 return
             if page == "request":
                 try:
-                    prop = propose(params.get("action", ""), params.get("system", ""), params.get("subject", ""),
+                    prop = approvals.propose(params.get("action", ""), params.get("system", ""), params.get("subject", ""),
                                    params.get("resource", ""), params.get("priv", ""), observed, adaps)
                     if not params.get("cmd") or params["cmd"] != prop.cmd:
                         raise ActError("preview the current command before requesting approval")
@@ -551,7 +552,8 @@ def serve(observe_fn, port: int, bridges_fn=lambda: [], adapters: dict | None = 
                     approvals.save(req)
                     self._redirect("/approve/" + quote(req.id, safe=""))
                 except ActError as exc:
-                    self._send(render_act(params, observed, adaps, error=str(exc), requests=reqs()), 409)
+                    self._send(render_act(params, observed, adaps, error=str(exc), requests=reqs(),
+                                          proposal_fn=approvals.propose if approvals.writer else None), 409)
                 return
             done = error = ""
             try:
