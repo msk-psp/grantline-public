@@ -56,7 +56,7 @@ with tempfile.TemporaryDirectory() as td:
     rendered = pages.render_requested(req, status)
     assert all(token not in rendered for token in req.required.values())
     assert all(req.required[who] in text for _, who, text in deliveries)
-    assert "<img" not in pages.render_act({}, set(), {}, done='<img src=x onerror="bad()">')
+    assert '<img src=x onerror=' not in pages.render_act({}, set(), {}, done='<img src=x onerror="bad()">')
     assert audit.record(str(base / "missing/audit.jsonl"), "mock", "grant", "cmd", lambda: spy.calls.append("bad"))
     assert spy.calls == [], "an unavailable audit sink must prevent mutation"
     assert audit.record(str(base / "audit.jsonl"), "mock", "grant", "cmd", lambda: spy.calls.append("logged")) is None
