@@ -33,7 +33,7 @@ State is disposable, private to the process and erased when it exits.
 | Stage | Implementation | Acceptance before promotion | Status |
 |---|---|---|---|
 | R2 | Typed config/intent, snapshots, findings, graph and offline plan CLI | Fixture decisions, diagnostics, PG/CH SQL previews, snapshot round trips and graph paths match Python; S3 commands/coalescing remain R3 | Merged in PR #16 |
-| R3 | PostgreSQL, ClickHouse and S3 native adapters, probes and writers | Existing regression cases ported; separately authorized live read/probe and reversible write validation per adapter | R3a/R3b merged; R3c PostgreSQL reads implemented; S3 readers/probes/writers pending |
+| R3 | PostgreSQL, ClickHouse and S3 native adapters, probes and writers | Existing regression cases ported; separately authorized live read/probe and reversible write validation per adapter | R3a–R3c merged; R3d S3 readers implemented; probes/writers pending |
 | R4 | Production sessions/OIDC, durable approval store, Slack signatures/DMs, code writer and GitHub PRs | Requester binding, all approvers, callback replay, immutable plan and repo scope verified end to end; approval/PR/applied access reported separately | Pending |
 | R5 | All console pages, Leptos hydration and interactive permission map | Repeated hover highlight/dimming, matrix scrolling, accessible dark mode, logs and four locales verified in browser | Pending |
 | R6 | Release image, migration/rollback and operating guide | Reproducible native/WASM builds, upgrade of persisted state, image smoke tests and explicitly authorized rollout | Pending |
@@ -70,14 +70,14 @@ keep Python as a development-only oracle until all stages pass.
 
 ## Next action
 
-Review R3c's PostgreSQL catalog reader and its isolated official-server tests;
-S3 network readers follow. Probes/writers and separately
+Review R3d's remote S3 readers and isolated SeaweedFS tests; read-only probes
+are the next review unit. Writers and separately
 authorized production/staging verification follow. Each
 review unit needs acceptance evidence before advancing; R3 is not yet complete.
 
 ## R3 — Native adapter migration {#R3}
 
-Status: R3a merged in PR #17; R3b merged in PR #18; R3c PostgreSQL reads implemented.
+Status: R3a merged in PR #17; R3b merged in PR #18; R3c merged in PR #19; R3d S3 reads implemented.
 The first review unit implements S3 file/dir
 planes, effective policy observation, group/inline routes and identity-scoped
 document previews. Plan commands remain previews; no IAM file, shared managed
@@ -190,6 +190,40 @@ DB exclusions/connect failures, partial-query discard, graph/snapshot contracts,
 TLS downgrade refusal and write refusal. The test uses only disposable loopback
 Docker resources. Positive TLS/private-CA integration, other versions/platforms,
 performance, production/staging and actual probes/writers remain unverified.
+
+### R3d — Remote S3 IAM observation
+
+Implement all three existing remote plane shapes under `--live`: JSON GET,
+SeaweedFS Filer IAM-tree GETs and SigV4 IAM Query List/Get calls. Reuse the native
+S3 policy evaluator, findings, graph and snapshot contracts. Scope excludes probes,
+actual writers, AWS effective-permission claims, production access and UI changes.
+
+Use only explicit per-plane reader variables and preserve remote-source priority;
+no local/admin/probe/AWS environment fallback. Require valid HTTP(S) endpoints,
+verified TLS, no redirects/proxies, bounded per-plane time/requests/bytes/items.
+Credentials must not reach output, snapshots or document previews. Remote sources
+cannot produce merged write previews. Filer reads discard raw credential fields.
+
+Require complete Filer directory and IAM marker pagination, path/name checks and
+strict JSON/XML envelopes. A listed file failure or incomplete collection obscures
+the plane. Optional absent Filer directories/index can be empty only under the
+complete-tree visibility assumption. IAM user-specific policy errors, boundaries
+and unknown native actions obscure that subject; shared collection errors obscure
+the whole plane. Preserve direct vs inherited routes and empty-policy precedence.
+
+Actual-server validation must include user inline/managed and group inline/managed
+policies. Extend the shared tree merger for identity `policy_names` and top-level
+`groupInlinePolicies`, which the Python reference omits, instead of silently
+coarsening native-action projections. Query API follows returned ARNs/default
+versions, rather than inventing names or accepting the first page only.
+
+Acceptance: isolated three-provider HTTP tests, signature oracle, source/credential
+isolation, truncation/errors/caps, unknown-scope decisions, graph/snapshot and a
+digest-pinned official SeaweedFS 4.48 container. Verify a separate IAM gateway with
+server read-only mode rejects a real write. Existing Rust/parity/Python/Node/lint
+and privacy checks must pass. Custom CA/positive TLS, other versions/platforms,
+performance and production/staging access remain unverified. Sequential reads
+are not atomic and do not prove target-user data access.
 
 ## R1 validation boundary
 

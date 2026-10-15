@@ -1,8 +1,9 @@
 # Grantline — Rust + Leptos migration
 
-Experimental **R1 + R2 + R3a/R3b/R3c foundation**, alongside the supported Python console.
+Experimental **R1 + R2 + R3a/R3b/R3c/R3d foundation**, alongside the supported Python console.
 This binary runs natively with no Python process. Commands are offline by default;
-native PostgreSQL/ClickHouse catalog observation requires explicit `--live` and a reader.
+native PostgreSQL/ClickHouse catalogs and remote S3 IAM require explicit `--live`
+and configured reader endpoints/credentials.
 The target is a complete Rust backend and Leptos UI, delivered in
 [six stages](../docs/prd/006-rust-leptos.md).
 
@@ -22,7 +23,7 @@ rust/target/debug/grantline-rs -c examples/demo/grantline.toml history --since 2
 `plan` reads PostgreSQL/ClickHouse JSON fixtures and local S3 IAM files/directories.
 It produces SQL previews, diagnostic levels/entities and per-identity/service
 counts. Without `--live`, no environment credentials are resolved or service contacted.
-The bundled S3 file provider is now observed. Remote-only providers remain unread.
+The bundled S3 file provider is now observed. Remote providers require `--live`.
 `plan --observed FILE.jsonl` imports a saved observation for any configured service; a service
 missing from its header remains unread. Unsupported command generation is
 reported per candidate. This CLI has no `apply` or `--write` command.
@@ -71,7 +72,7 @@ grant atoms do not model it. On older servers, `system.grants` can erase prefix
 wildcard information: bounded `SHOW GRANTS` batches check for it, and any prefix
 wildcard makes the instance unread. Global, DB, table and nested-role permissions
 remain distinct. Catalog reads across requests are not an atomic transaction;
-writer/probe support is still pending. S3 network readers remain unimplemented even with `--live`.
+writer/probe support is still pending.
 
 ### Read native PostgreSQL catalogs
 
@@ -129,6 +130,67 @@ MEMBER and grant atoms do not model them. These safeguards intentionally exceed
 the Python reader. The target is DB/schema/table/default-table ACLs and role
 memberships; sequence/function/type ACLs, effective RLS, owner powers, target-user
 login/data access and a cluster-wide atomic snapshot are not represented.
+
+### Read remote S3 IAM sources
+
+Each S3 plane can name exactly one remote reader. It takes precedence over a
+local file/dir; an unread remote source never falls back to that local data.
+Use `plan/graph/snapshot --live`; offline commands and `--observed` never resolve
+remote credentials or contact the service. The timeout is per plane (`1..120`
+seconds, default 30).
+
+```toml
+[adapters.object-store]
+type = "s3"
+enforced = "dynamic"
+read_timeout_seconds = 30
+
+[adapters.object-store.planes.dynamic]
+filer_url_env = "GRANTLINE_FILER_URL"
+# filer_auth_env = "GRANTLINE_FILER_READER_TOKEN" # optional bearer
+```
+
+Choose one of these shapes per plane:
+
+| Source | Reader fields | Behavior |
+|---|---|---|
+| JSON config | `url_env`, optional `auth_env` bearer | GET one complete identities document with actions/policies |
+| SeaweedFS Filer | `filer_url_env`, optional `filer_auth_env` bearer | GET `/etc/iam/` identities, groups, managed policies and policy index |
+| SeaweedFS IAM Query | `iam_url_env`, `iam_key_env`, `iam_secret_env`, optional `iam_session_token_env` | SigV4 POST of fixed List/Get operations, service `iam`, region `us-east-1` |
+
+URLs use HTTP(S) without userinfo, query or fragment; reverse proxy prefixes
+are retained. IAM endpoint paths use unescaped ASCII path characters. Credentials
+stay in headers, never URL parameters/output/snapshots. `admin_*`, probe and
+ambient AWS credentials are not consulted. Redirects and environment HTTP proxies
+are disabled. HTTPS verifies certificates against bundled Mozilla roots; custom
+`ca_bundle_env` is explicitly unsupported rather than ignored. Plain HTTP requires
+an explicitly configured HTTP URL. Positive TLS/private CA integration remains
+unverified.
+
+Filer listing pagination follows `ShouldDisplayLoadMore` and `LastFileName`,
+checks directory/entry paths, ordering and duplicates, and requires listed files
+to be readable JSON. Missing optional groups/policies directories or the policy
+index can be empty; a missing identities directory or listed file is a failure.
+This assumes the reader has visibility over the complete IAM tree. Native actions,
+user inline/managed policies and group inline/managed policies share the existing
+policy evaluator. Empty attached policies still shadow native actions. Missing
+managed documents obscure their users. Raw Filer credential fields are discarded.
+
+IAM lists paginate using `IsTruncated`/`Marker` and fetch actual attached ARNs and
+default policy versions. User policy failures, permissions boundaries and users
+without policies stay unknown: IAM does not return SeaweedFS native actions. A
+bootstrap account can be listed while its attached-policy API returns 404; that
+subject stays unknown without discarding other observed users. Collection/group
+failures obscure the whole plane. XML DTDs, duplicate fields and malformed/incomplete
+collections are rejected. Direct and inherited policy routes remain distinct.
+
+Limits are 4 MiB per response, 64 MiB total, 512 requests per plane and 10,000
+items per collection. A timeout/cap/partial collection cannot become empty access.
+Remote IAM is read-only: no merged document preview, PUT or policy mutation is
+available. The server must also enforce its own read/write separation. Sequential
+requests are not an atomic snapshot. These are SeaweedFS identity-policy reads,
+not AWS effective-access evaluation (SCPs, resource policies, role/session policies,
+permission boundaries and target-user login/data access are not established).
 
 ### S3 IAM files and previews
 
@@ -232,10 +294,11 @@ their own ports and are unaffected.
   with conservative policy evaluation, missing-policy and cross-plane diagnostics.
 - R3b reads native ClickHouse catalogs through an explicit reader with `--live`.
 - R3c reads PostgreSQL 16+ catalogs with per-DB unread scopes and read-only transactions.
+- R3d reads remote S3 JSON/Filer/IAM sources with bounded collections and no write preview.
 
 ## What remains
 
-S3 network observation, probes and native writes, production authentication,
+Probes and native writes, production authentication,
 durable approvals, real Slack/GitHub writers, all existing console pages,
 WASM map interactions, four-language UI and release images are later stages.
 Live S3 document writes and all probe paths remain in R3. Approval, a
@@ -256,6 +319,7 @@ python3 scripts/check_rust_core.py
 python3 scripts/check_rust_s3.py
 python3 scripts/check_rust_clickhouse.py --docker
 python3 scripts/check_rust_postgres.py --docker
+python3 scripts/check_rust_s3_network.py --docker
 ```
 
 The checks cover canonical grants, coverage, convergence actions, diagnostic
@@ -282,3 +346,11 @@ offline/import isolation, secret redaction and a digest-pinned official PostgreS
 roles, per-DB failures/exclusions, frozen ACLs, global/column/default boundaries,
 graphs, snapshots, TLS downgrade refusal and read-only DDL failure. Its disposable
 container is removed afterwards; no production/staging server is contacted.
+
+The S3 network suite checks three loopback HTTP readers, SigV4 against the Python
+oracle, Filer/IAM pagination, malformed/failed/truncated responses, source and
+credential isolation, visibility boundaries, graph paths and snapshots. Its
+immutable official SeaweedFS 4.48 image verifies actual IAM signatures, user/group
+inline and managed policies, Filer storage and server-enforced IAM write refusal.
+Only task-owned containers/fixtures are created and removed. The Python reference
+omits some policy attachment types; those cases have independent server assertions.

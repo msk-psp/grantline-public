@@ -1,4 +1,5 @@
-//! Offline S3 IAM interpretation and document previews. No credential or write path.
+//! S3 IAM interpretation and document previews. Remote reads require explicit opt-in.
+mod remote;
 use crate::{
     Result,
     config::{Adapter, relative},
@@ -21,6 +22,13 @@ pub struct Plane {
     // A configured remote provider must not silently fall back to a local file.
     pub iam_url_env: Option<String>,
     pub filer_url_env: Option<String>,
+    pub url_env: Option<String>,
+    pub auth_env: Option<String>,
+    pub filer_auth_env: Option<String>,
+    pub iam_key_env: Option<String>,
+    pub iam_secret_env: Option<String>,
+    pub iam_session_token_env: Option<String>,
+    pub ca_bundle_env: Option<String>,
 }
 #[derive(Clone, Debug, Deserialize)]
 struct Identity {
@@ -40,6 +48,7 @@ pub struct Observed {
     pub enforced: String,
     identities: BTreeMap<String, Identity>,
     tree: bool,
+    remote: bool,
     ready: bool,
 }
 #[derive(Default)]
@@ -478,12 +487,21 @@ fn files(root: &Path, required: bool) -> Result<BTreeMap<String, Value>> {
 fn tree(root: &Path, system: &str) -> Result<Document> {
     let raw_ids = files(&root.join("identities"), true)?;
     let groups = files(&root.join("groups"), false)?;
-    let mut policies = files(&root.join("policies"), false)?;
+    let policies = files(&root.join("policies"), false)?;
     let top = if root.join("policies.json").exists() {
         read_json(&root.join("policies.json"))?
     } else {
         json!({})
     };
+    merge_tree(raw_ids, groups, policies, top, system)
+}
+fn merge_tree(
+    raw_ids: BTreeMap<String, Value>,
+    groups: BTreeMap<String, Value>,
+    mut policies: BTreeMap<String, Value>,
+    top: Value,
+    system: &str,
+) -> Result<Document> {
     top.as_object().ok_or("Invalid IAM index")?;
     if let Some(p) = top.get("policies").filter(|v| !v.is_null()) {
         for (name, doc) in p.as_object().ok_or("Invalid policy index")? {
@@ -493,6 +511,10 @@ fn tree(root: &Path, system: &str) -> Result<Document> {
     let empty = serde_json::Map::new();
     let inline = match top.get("inlinePolicies").filter(|v| !v.is_null()) {
         Some(v) => v.as_object().ok_or("Invalid inline policy index")?,
+        None => &empty,
+    };
+    let group_inline = match top.get("groupInlinePolicies").filter(|v| !v.is_null()) {
+        Some(v) => v.as_object().ok_or("Invalid group inline policy index")?,
         None => &empty,
     };
     let mut doc = Document::default();
@@ -506,7 +528,19 @@ fn tree(root: &Path, system: &str) -> Result<Document> {
             .transpose()?
             .unwrap_or(&stem)
             .to_owned();
-        let pnames = listed(g.get("policy_names"))?;
+        let mut pnames = listed(g.get("policy_names"))?;
+        if let Some(inline) = group_inline.get(&name).filter(|v| !v.is_null()) {
+            for (pname, policy) in inline.as_object().ok_or("Invalid group inline policies")? {
+                let route_name = format!("group:{name}:inline:{pname}");
+                if policies
+                    .insert(route_name.clone(), policy.clone())
+                    .is_some()
+                {
+                    return Err("Conflicting group inline policy name".into());
+                }
+                pnames.push(route_name);
+            }
+        }
         for member in listed(g.get("members"))? {
             memberships.entry(member).or_default().push(name.clone());
         }
@@ -526,11 +560,27 @@ fn tree(root: &Path, system: &str) -> Result<Document> {
         policy_routes(&mut doc, name, p, system)?;
     }
     for (_, raw) in raw_ids {
+        let direct = listed(raw.get("policy_names"))?;
         let mut ident: Identity =
             serde_json::from_value(raw).map_err(|_| "Invalid IAM identity")?;
         let name = ident.name.clone();
         let mut ss = vec![];
         let mut attached_any = false;
+        for pname in direct {
+            attached_any = true;
+            doc.routes
+                .push([name.clone(), format!("policy:{pname}"), "attaches".into()]);
+            if let Some(policy) = policies.get(&pname) {
+                ss.extend(statements(policy)?.clone());
+            } else {
+                doc.gap_subjects.insert(name.clone());
+                doc.gaps.push((
+                    name.clone(),
+                    pname.clone(),
+                    format!("identity '{name}' attaches policy '{pname}' which has no document"),
+                ));
+            }
+        }
         if let Some(inline) = inline.get(&name).filter(|v| !v.is_null()) {
             for (pname, p) in inline
                 .as_object()
@@ -594,9 +644,17 @@ fn policy_routes(doc: &mut Document, name: &str, policy: &Value, system: &str) -
     }
     Ok(())
 }
-fn plane(p: &Plane, base: &Path, system: &str) -> Result<Document> {
-    if p.iam_url_env.is_some() || p.filer_url_env.is_some() {
-        return Err("Remote IAM providers are not implemented in R3a".into());
+impl Plane {
+    fn remote(&self) -> bool {
+        self.iam_url_env.is_some() || self.filer_url_env.is_some() || self.url_env.is_some()
+    }
+}
+fn plane(p: &Plane, base: &Path, system: &str, live: bool, timeout: u64) -> Result<Document> {
+    if p.remote() {
+        if !live {
+            return Err("Remote S3 observation requires --live".into());
+        }
+        return remote::read(p, system, timeout);
     }
     if let Some(dir) = &p.dir {
         return tree(&relative(base, dir)?, system);
@@ -606,6 +664,9 @@ fn plane(p: &Plane, base: &Path, system: &str) -> Result<Document> {
         .as_ref()
         .ok_or("No local IAM source; remote providers are not implemented in R3a")?;
     let v = read_json(&relative(base, path)?)?;
+    document(v, system)
+}
+fn document(v: Value, system: &str) -> Result<Document> {
     // Metadata from an already-merged source is not a substitute for a complete tree.
     if ["_gaps", "_gap_subjects", "_routes", "_kinds"]
         .iter()
@@ -623,21 +684,24 @@ fn plane(p: &Plane, base: &Path, system: &str) -> Result<Document> {
     Ok(doc)
 }
 pub fn observe(adapter: &Adapter, base: &Path, system: &str) -> Observed {
+    observe_with_live(adapter, base, system, false)
+}
+pub fn observe_with_live(adapter: &Adapter, base: &Path, system: &str, live: bool) -> Observed {
     let mut out = Observed {
         enforced: adapter.enforced.clone(),
         ..Default::default()
     };
     let mut docs = BTreeMap::new();
     for (name, p) in &adapter.planes {
-        match plane(p, base, system) {
+        match plane(p, base, system, live, adapter.read_timeout_seconds) {
             Ok(doc) => {
                 docs.insert(name.clone(), doc);
             }
-            Err(_) if name == &adapter.enforced => out.unknown.push(Unobserved {
+            Err(reason) if name == &adapter.enforced => out.unknown.push(Unobserved {
                 system: system.into(),
                 prefixes: vec![String::new()],
                 subjects: BTreeSet::new(),
-                note: format!("enforced plane '{name}' unreadable, invalid or unsupported in R3a"),
+                note: format!("enforced plane '{name}' unreadable: {reason}"),
             }),
             Err(_) => out.findings.push(Finding::new(
                 system,
@@ -658,6 +722,7 @@ pub fn observe(adapter: &Adapter, base: &Path, system: &str) -> Observed {
     if let Some(doc) = docs.get(&adapter.enforced) {
         out.ready = true;
         out.tree = adapter.planes[&adapter.enforced].dir.is_some();
+        out.remote = adapter.planes[&adapter.enforced].remote();
         out.identities = doc.identities.clone();
         out.kinds = doc.kinds.clone();
         let mut blind = doc.gap_subjects.clone();
@@ -854,6 +919,9 @@ impl Observed {
             let result: Result<(Value, Value)> = (|| {
                 if !self.ready {
                     return Err("S3 observation source unavailable".into());
+                }
+                if self.remote {
+                    return Err("Remote IAM observations are read-only; no local document write preview is available".into());
                 }
                 if self.tree {
                     return Err("IAM tree is read-only; edit the owning inline/group policy. Inherited grants must not become per-user policy writes".into());
