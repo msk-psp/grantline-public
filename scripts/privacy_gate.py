@@ -28,11 +28,13 @@ DEMO_HOME_NAMES = {"user", "alice", "bob", "jovyan"}
 
 def safe_email(value):
     domain = value.rsplit("@", 1)[-1].lower()
-    return value.lower() in {"noreply@openai.com", "noreply@anthropic.com"} or domain in {"example.com", "example.org", "example.net", "noreply.github.com"} or domain.endswith((".example", ".users.noreply.github.com")) or domain == "users.noreply.github.com"
+    return value.lower() in {"noreply@openai.com", "noreply@anthropic.com", "noreply@github.com"} or domain in {"example.com", "example.org", "example.net", "noreply.github.com"} or domain.endswith((".example", ".users.noreply.github.com")) or domain == "users.noreply.github.com"
 
 
 def safe_commit_email(email):
-    return email.lower().endswith(("@users.noreply.github.com", "@noreply.github.com"))
+    email = email.lower()
+    # GitHub web-flow uses this exact address for web-created merge commits.
+    return email == "noreply@github.com" or email.endswith(("@users.noreply.github.com", "@noreply.github.com"))
 
 
 def scan_text(path, text):

@@ -25,6 +25,10 @@ for category, signal in signals.items():
 safe = "alice@example.com bob@example.org U_REVIEWER @demo-reviewer localhost 127.0.0.1"
 assert not gate.scan_text("fixture.txt", safe)
 assert not gate.scan_text("fixture.txt", "123+demo@users.noreply.github.com")
+assert not gate.scan_text("fixture.txt", "noreply@github.com")
+assert gate.safe_commit_email("NOREPLY@GITHUB.COM")
+for email in ("person" + "@github.com", "noreply" + "@github.com.invalid", "person" + "@mail.invalid"):
+    assert not gate.safe_commit_email(email), "the web-flow exemption must stay exact"
 assert not gate.scan_text("fixture.txt", "Co-Authored-By: Codex <noreply@openai.com>")
 vector = "AKIA" + "IOSFODNN7EXAMPLE"
 assert not gate.scan_text("tests/test_n4_probe.py", vector)
@@ -83,6 +87,20 @@ with tempfile.TemporaryDirectory() as directory:
     run(root, "commit", "--allow-empty", "-qm", "safe metadata")
     clean_head = run(root, "rev-parse", "HEAD")
     assert not gate.inspect(root, "range", metadata_head, clean_head)
+    # Reproduce web-flow metadata: safe author + official GitHub committer.
+    run(root, "-c", "user.email=noreply@github.com", "commit", "--allow-empty",
+        "--author=Demo Contributor <demo@users.noreply.github.com>", "-qm", "web merge fixture")
+    web_head = run(root, "rev-parse", "HEAD")
+    assert not gate.inspect(root, "range", clean_head, web_head)
+    assert not gate.inspect(root, "staged")
+    run(root, "-c", "user.email=noreply@github.com", "commit", "--allow-empty",
+        f"--author=Demo Contributor <{signals['email']}>", "-qm", "private author fixture")
+    private_head = run(root, "rev-parse", "HEAD")
+    diagnostics = gate.inspect(root, "range", web_head, private_head)
+    assert diagnostics == [f"commit-email: {private_head} (author)"]
+    assert signals["email"] not in str(diagnostics)
+    # Exclude the intentional leak fixtures when checking a new branch's safe range.
+    run(root, "reset", "--hard", clean_head)
     run(root, "update-ref", "refs/remotes/origin/latest-feature", metadata_head)
     assert not gate.inspect(root, "unpushed", head=clean_head)
     push_hook = gate_path.parents[1] / ".githooks" / "pre-push"
