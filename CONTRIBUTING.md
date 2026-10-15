@@ -54,7 +54,12 @@ not done until the checks pass locally.
 | routes (hops, bridges, kinds) | `grantline/graph.py`; data for the map in `web.graph_data()` |
 | pages | `grantline/pages.py`, `grantline/web.py`; assets in `grantline/static/` |
 | decisions and their reasons | `docs/prd/` |
-| experimental native core and Leptos playground | `rust/` — [guide](rust/README.md), [migration stages](docs/prd/006-rust-leptos.md) |
+| experimental native core, offline CLI and Leptos playground | `rust/` — [guide](rust/README.md), [migration stages](docs/prd/006-rust-leptos.md) |
+
+For Rust changes run the native checks and both differential suites in the
+[Rust guide](rust/README.md#check-the-boundary). `plan` is read-only; only the
+explicit `snapshot` command records state. Real adapter connections/writers
+remain in the subsequent migration stage.
 
 ## Conventions
 
