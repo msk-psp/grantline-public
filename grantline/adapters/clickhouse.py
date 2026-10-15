@@ -60,6 +60,7 @@ def stale_grant_findings(grants: set[Grant], databases: list[str]):
             f"{subject} still holds {len(privs)} privilege(s) on {resource} but the "
             f"database is gone: {shown}{more}. ClickHouse keeps them; they re-apply if "
             f"the name returns. Revoke by name.",
+            entities=(subject, resource, *sorted(privs)[:6]),
         )
 
 
@@ -225,6 +226,7 @@ class ClickHouseAdapter(Adapter):
                 f"endpoint and that the credential belongs to *this* server "
                 f"(a credential from another environment authenticates nowhere and "
                 f"surfaces as 403).",
+                entities=(self.system,),
             )], [Unobserved(self.system, ("",), note)]
 
     def _observe(self):

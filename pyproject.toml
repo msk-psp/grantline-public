@@ -25,7 +25,7 @@ grantline = "grantline.cli:main"
 include = ["grantline*"]
 
 [tool.setuptools.package-data]
-grantline = ["static/*"]
+grantline = ["static/*", "locales/*.json"]
 
 [tool.ruff]
 line-length = 110
