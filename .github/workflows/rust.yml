@@ -31,3 +31,5 @@ jobs:
           python3 scripts/check_rust_parity.py
           python3 scripts/check_rust_core.py
           python3 scripts/check_rust_s3.py
+      - name: Verify native ClickHouse reader against isolated HTTP and official server
+        run: python3 scripts/check_rust_clickhouse.py --docker

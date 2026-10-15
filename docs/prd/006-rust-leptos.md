@@ -33,7 +33,7 @@ State is disposable, private to the process and erased when it exits.
 | Stage | Implementation | Acceptance before promotion | Status |
 |---|---|---|---|
 | R2 | Typed config/intent, snapshots, findings, graph and offline plan CLI | Fixture decisions, diagnostics, PG/CH SQL previews, snapshot round trips and graph paths match Python; S3 commands/coalescing remain R3 | Merged in PR #16 |
-| R3 | PostgreSQL, ClickHouse and S3 native adapters, probes and writers | Existing regression cases ported; separately authorized live read/probe and reversible write validation per adapter | R3a implemented offline; connections/probes/writers pending |
+| R3 | PostgreSQL, ClickHouse and S3 native adapters, probes and writers | Existing regression cases ported; separately authorized live read/probe and reversible write validation per adapter | R3a merged; R3b ClickHouse reads implemented; other readers/probes/writers pending |
 | R4 | Production sessions/OIDC, durable approval store, Slack signatures/DMs, code writer and GitHub PRs | Requester binding, all approvers, callback replay, immutable plan and repo scope verified end to end; approval/PR/applied access reported separately | Pending |
 | R5 | All console pages, Leptos hydration and interactive permission map | Repeated hover highlight/dimming, matrix scrolling, accessible dark mode, logs and four locales verified in browser | Pending |
 | R6 | Release image, migration/rollback and operating guide | Reproducible native/WASM builds, upgrade of persisted state, image smoke tests and explicitly authorized rollout | Pending |
@@ -70,14 +70,15 @@ keep Python as a development-only oracle until all stages pass.
 
 ## Next action
 
-Review R3a's offline S3 interpretation and document previews, then implement
-native PostgreSQL/ClickHouse/S3 service connections with isolated local adapter
-tests. Probes/writers and separately authorized live verification follow. Each
+Review R3b's ClickHouse catalog reader, then implement the PostgreSQL reader
+with isolated local adapter tests; S3 network readers follow. Probes/writers and separately
+authorized production/staging verification follow. Each
 review unit needs acceptance evidence before advancing; R3 is not yet complete.
 
 ## R3 — Native adapter migration {#R3}
 
-Status: R3a implemented offline. The first review unit implements S3 file/dir
+Status: R3a merged in PR #17; R3b ClickHouse reads implemented.
+The first review unit implements S3 file/dir
 planes, effective policy observation, group/inline routes and identity-scoped
 document previews. Plan commands remain previews; no IAM file, shared managed
 policy or live service is changed. Existing Python regressions are the oracle.
@@ -112,6 +113,43 @@ against Python, with the documented conservative unknown-scope extension. Five
 native S3 tests cover malformed/remote inputs, source immutability, credential
 non-disclosure, merged documents, unrepresentable revokes, shared policies,
 empty policy precedence, deny routes, cross-plane drift and snapshot boundaries.
+
+### R3b — ClickHouse catalog observation
+
+Implement opt-in `--live` observation for native ClickHouse adapters using only
+the configured `url_env` read credential. Offline commands, snapshots imported
+with `--observed`, admin credentials and all actual writers remain separate.
+Queries are fixed catalog/visibility reads with bounded rows, bytes and time;
+credentials travel in headers and redirects are refused. A failed query or
+incomplete result makes the whole instance unread, rather than an empty set.
+
+Preserve global/database/table scopes and user/role inheritance. Column grants,
+partial revokes and wildcard prefixes that cannot be represented must obscure
+affected subjects and role dependants. Require complete catalog visibility
+before planning. Use isolated HTTP failure tests and a disposable local official
+ClickHouse container to verify the actual SQL and read-only observer behavior.
+Production/staging reads, probes, writes and PostgreSQL/S3 network adapters are
+outside this review unit.
+
+R3b uses header credentials, verified TLS, no redirects/environment proxy,
+bounded named JSON rows and a per-instance total deadline. It requires global
+SHOW ACCESS/SHOW DATABASES before catalog planning and never falls back to
+`admin_url_env`. The server reader uses readonly=2, allowing query limits while
+still rejecting writes. A missing/failed/truncated catalog query discards all
+partial grants. Native ClickHouse type/kind must agree.
+
+Role-to-role memberships are preserved. Column/partial/parameterized scopes
+obscure the subject and transitive role dependants. SHOW GRANTS batches detect
+prefix wildcards erased by the 26.6 catalog; they conservatively obscure the
+entire instance. These safety boundaries exceed the Python observer, which
+coarsens column rows, ignores partial-revoke flags and omits role-to-role edges.
+Catalog requests are not an atomic snapshot or a target-user access probe.
+
+Validation includes loopback HTTP failures and actual SQL against an isolated
+official ClickHouse 26.6.2.160 container, pinned by multi-platform digest. The
+test verifies a reader-profile POST write refusal and removes the container.
+Positive HTTPS/private-CA integration, other server versions, performance and
+production/staging validation remain unverified.
 
 ## R1 validation boundary
 

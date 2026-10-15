@@ -17,9 +17,18 @@ fn json(value: &impl Serialize) -> Result<()> {
     );
     Ok(())
 }
-pub fn plan(path: &Path, imported: Option<&Path>, as_json: bool, verbose: bool) -> Result<()> {
+#[derive(clap::Args, Default)]
+pub struct Source {
+    #[arg(long, conflicts_with = "live")]
+    pub observed: Option<PathBuf>,
+    /// Read configured native ClickHouse catalogs; never applies changes.
+    #[arg(long)]
+    pub live: bool,
+}
+pub fn plan(path: &Path, source: &Source, as_json: bool, verbose: bool) -> Result<()> {
+    let imported = source.observed.as_deref();
     let loaded = config::load(path)?;
-    let obs = engine::observe(&loaded, imported)?;
+    let obs = engine::observe_with_live(&loaded, imported, source.live)?;
     let report = engine::plan(&loaded, &obs);
     if as_json {
         let mut output = serde_json::to_value(&report).map_err(|_| "Cannot encode plan")?;
@@ -27,7 +36,11 @@ pub fn plan(path: &Path, imported: Option<&Path>, as_json: bool, verbose: bool) 
         output["observation_source"] = serde_json::json!(
             imported
                 .map(|p| p.display().to_string())
-                .unwrap_or_else(|| "local fixtures and IAM files".into())
+                .unwrap_or_else(|| if source.live {
+                    "configured ClickHouse readers and local inputs".into()
+                } else {
+                    "local fixtures and IAM files".into()
+                })
         );
         output["unobserved"] = serde_json::to_value(&obs.snapshot.unobserved)
             .map_err(|_| "Cannot encode unread scopes")?;
@@ -39,6 +52,8 @@ pub fn plan(path: &Path, imported: Option<&Path>, as_json: bool, verbose: bool) 
         obs.snapshot.ts,
         if imported.is_some() {
             " (saved observation, not a live read)"
+        } else if source.live {
+            " (configured ClickHouse readers and local inputs)"
         } else {
             " (local fixtures and IAM files)"
         }
@@ -120,14 +135,9 @@ pub fn plan(path: &Path, imported: Option<&Path>, as_json: bool, verbose: bool) 
     }
     Ok(())
 }
-pub fn record(
-    path: &Path,
-    imported: Option<&Path>,
-    dir: Option<PathBuf>,
-    as_json: bool,
-) -> Result<()> {
+pub fn record(path: &Path, source: &Source, dir: Option<PathBuf>, as_json: bool) -> Result<()> {
     let loaded = config::load(path)?;
-    let obs = engine::observe(&loaded, imported)?;
+    let obs = engine::observe_with_live(&loaded, source.observed.as_deref(), source.live)?;
     let dir = match dir {
         Some(dir) => dir,
         None if loaded.config.snapshots.is_empty() => {
@@ -239,18 +249,19 @@ pub fn history(
 }
 pub fn graph(
     path: &Path,
-    imported: Option<&Path>,
+    source: &Source,
     subjects: &[String],
     resources: &[String],
     depth: &[String],
     limit: usize,
     as_json: bool,
 ) -> Result<()> {
+    let imported = source.observed.as_deref();
     if limit == 0 {
         return Err("Route limit must be positive".into());
     }
     let loaded = config::load(path)?;
-    let obs = engine::observe(&loaded, imported)?;
+    let obs = engine::observe_with_live(&loaded, imported, source.live)?;
     let graph = engine::graph(&loaded, &obs)?;
     let routes_from: BTreeMap<String, Paths> = subjects
         .iter()
