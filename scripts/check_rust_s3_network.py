@@ -278,12 +278,17 @@ def docker_test(binary, context):
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        seed = root / 's3.json'
+        fixtures = root / 'fixtures'
+        fixtures.mkdir(mode=0o755)
+        seed = fixtures / 's3.json'
         seed.write_text(json.dumps(dict(identities=[dict(name='observer', credentials=[dict(accessKey=KEY, secretKey=SECRET)], actions=['Admin'])])))
+        # The official entrypoint drops to seaweed; expose only these synthetic fixture files.
+        fixtures.chmod(0o755)
+        seed.chmod(0o644)
         try:
-            subprocess.run([*docker, 'run', '-d', '--rm', '--name', name, '--memory', '1g', '--cpus', '2',
+            subprocess.run([*docker, 'run', '-d', '--name', name, '--memory', '1g', '--cpus', '2',
                             '-p', '127.0.0.1::8888', '-p', '127.0.0.1::8333', '-p', '127.0.0.1::8334',
-                            '--mount', f'type=bind,source={root},target=/fixtures,readonly', IMAGE,
+                            '--mount', f'type=bind,source={fixtures},target=/fixtures,readonly', IMAGE,
                             'server', '-dir=/data', '-ip=127.0.0.1', '-ip.bind=0.0.0.0', '-filer', '-s3',
                             '-s3.config=/fixtures/s3.json', '-s3.iam.readOnly=false', '-master.telemetry=false',
                             '-master.volumeSizeLimitMB=8', '-volume.max=1', '-s3.port.iceberg=0', '-s3.port.lance=0'], check=True, stdout=subprocess.DEVNULL)
@@ -356,8 +361,13 @@ def docker_test(binary, context):
             assert 'forbidden' not in ET.tostring(call('ListUsers')).decode()
             assert writable != readonly
             print('SeaweedFS Docker: actual SigV4 IAM reads, nested policy routes, no-policy unknown, server-side IAM write refusal and direct Filer IAM tree passed')
+        except Exception:
+            logs = subprocess.run([*docker, 'logs', '--tail', '80', name], text=True, capture_output=True, timeout=10)
+            diagnostic = (logs.stdout + logs.stderr).replace(SECRET, '[redacted]').replace(MARKER, '[redacted]')
+            print(diagnostic[-10000:], file=sys.stderr)
+            raise
         finally:
-            subprocess.run([*docker, 'stop', name], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+            subprocess.run([*docker, 'rm', '-f', '-v', name], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
 
 
 def main():
