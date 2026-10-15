@@ -25,7 +25,8 @@ can be bypassed and are not an access control.
 
 Use fictional accounts and `example.com` addresses in fixtures. Use a GitHub
 `users.noreply.github.com` email for new commits; this does not rewrite existing
-history. Never paste approval tokens or real Slack IDs in examples. Diagnostics
+history. GitHub web-flow’s exact `noreply@github.com` committer address is
+also accepted; other `github.com` emails are not exempt. Never paste approval tokens or real Slack IDs in examples. Diagnostics
 show rule names and locations only, not matched values.
 
 In GitHub **Settings → Emails**, enable **Keep my email addresses private** and
