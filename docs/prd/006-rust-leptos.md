@@ -33,7 +33,7 @@ State is disposable, private to the process and erased when it exits.
 | Stage | Implementation | Acceptance before promotion | Status |
 |---|---|---|---|
 | R2 | Typed config/intent, snapshots, findings, graph and offline plan CLI | Fixture decisions, diagnostics, PG/CH SQL previews, snapshot round trips and graph paths match Python; S3 commands/coalescing remain R3 | Merged in PR #16 |
-| R3 | PostgreSQL, ClickHouse and S3 native adapters, probes and writers | Existing regression cases ported; separately authorized live read/probe and reversible write validation per adapter | R3a–R3d merged; R3e1 PostgreSQL probes implemented; remaining probes/writers pending |
+| R3 | PostgreSQL, ClickHouse and S3 native adapters, probes and writers | Existing regression cases ported; separately authorized live read/probe and reversible write validation per adapter | R3a–R3e1 merged; R3e2 ClickHouse probes implemented; S3 probes/writers pending |
 | R4 | Production sessions/OIDC, durable approval store, Slack signatures/DMs, code writer and GitHub PRs | Requester binding, all approvers, callback replay, immutable plan and repo scope verified end to end; approval/PR/applied access reported separately | Pending |
 | R5 | All console pages, Leptos hydration and interactive permission map | Repeated hover highlight/dimming, matrix scrolling, accessible dark mode, logs and four locales verified in browser | Pending |
 | R6 | Release image, migration/rollback and operating guide | Reproducible native/WASM builds, upgrade of persisted state, image smoke tests and explicitly authorized rollout | Pending |
@@ -70,14 +70,14 @@ keep Python as a development-only oracle until all stages pass.
 
 ## Next action
 
-Review R3e1's PostgreSQL read-only ACL probes and isolated server evidence;
-ClickHouse probes are the next review unit, followed by S3 probes. Writers and
+Review R3e2's ClickHouse read-only ACL probes and isolated server evidence;
+S3 probes are the next review unit. Writers and
 separately authorized production/staging verification follow. Each
 review unit needs acceptance evidence before advancing; R3 is not yet complete.
 
 ## R3 — Native adapter migration {#R3}
 
-Status: R3a merged in PR #17; R3b merged in PR #18; R3c merged in PR #19; R3d merged in PR #20; R3e1 PostgreSQL probes implemented.
+Status: R3a merged in PR #17; R3b merged in PR #18; R3c merged in PR #19; R3d merged in PR #20; R3e1 merged in PR #22; R3e2 ClickHouse probes implemented.
 The first review unit implements S3 file/dir
 planes, effective policy observation, group/inline routes and identity-scoped
 document previews. Plan commands remain previews; no IAM file, shared managed
@@ -283,3 +283,44 @@ isolation, deadlines and redaction. The disposable server uses trust auth; SCRAM
 positive TLS and production/staging verification are not claimed. ACLs do not
 establish schema traversal, RLS/data availability or SET ROLE behavior. Readers
 and probes are read-only; ClickHouse/S3 probes and writers remain subsequent units.
+
+
+### R3e2 — ClickHouse read-only ACL probes
+
+Scope: connect the existing tri-state native probe CLI to ClickHouse, resolving
+ACLs with SHOW GRANTS WITH IMPLICIT FINAL. Observer mode is not a login. Explicit
+probe_url_env overrides url_env without fallback on failure; probe_url_envs maps
+subject credentials and takes precedence over both. Subject HTTP login requires
+exact currentUser() identity, followed by server-resolved ACLs. Missing/bad
+credentials, mismatched identity and service/parse failures are unknown and
+never use admin credentials. No data rows, writes, SET ROLE or impersonation.
+
+FINAL flattens all granted roles, including non-default roles. Results therefore
+do not claim role activation or session/data access. Direct MEMBER is obtained
+from a separate plain SHOW GRANTS; FINAL removes membership rows on the tested
+server. Do not use CHECK GRANT INSERT with forced readonly=2: it can return0 even
+when the stored ACL contains INSERT. Keep this regression in the real-server test.
+
+Strict parsing preserves exact global/DB/table vs named-object scope, recipient
+identity and quoted names. Any unresolved REVOKE, columns, prefix wildcard,
+unknown grammar/escape or incomplete payload makes the subject unknown rather
+than using partial permissions. Exact known rights or ALL can allow; absence
+can deny only SELECT/INSERT/OPTIMIZE/TRUNCATE/dictGet. Other supported privilege
+groups remain unknown without exact coverage; group expansion is deferred.
+Unknown requested resources/privileges never inherit an ALL allow.
+
+Enforce explicit --live, source/service/subject filters, <=1,000 atoms and128
+subjects, shared verified-TLS/header/proxy/redirect safeguards, 10,000-row/16MiB
+responses, 64KiB statements, 1KiB identifiers, 10,000 parsed permissions/roles and
+server scan/result/time limits. One probe
+deadline spans all subject requests and discards partial outcomes. Observation
+has a separate deadline. Fixed metadata queries only; SHOW has no LIMIT syntax.
+
+Acceptance: native fmt/clippy/tests/build and existing differential suites;
+check_rust_clickhouse.py HTTP failure/identity/credential isolation, timeout after
+an earlier success, subject cap and redaction; isolated official ClickHouse
+26.6.2.160 for inherited/global/table ACLs, direct membership, partial/column
+unknowns, quoted identifiers, restricted/missing subjects, actual SHA256 password
+login, wrong credentials/identity, non-default roles and readonly INSERT semantics.
+No production/staging access or deployment. S3 probes and writers remain next;
+positive TLS/private CA, live row-policy/session behavior remain unverified.

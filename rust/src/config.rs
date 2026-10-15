@@ -40,6 +40,10 @@ pub struct Adapter {
     #[serde(default)]
     pub url_env: Option<String>,
     #[serde(default)]
+    pub probe_url_env: Option<String>,
+    #[serde(default)]
+    pub probe_url_envs: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
     pub dsn_env: Option<String>,
     #[serde(default)]
     pub probe_dsn_envs: std::collections::BTreeMap<String, String>,

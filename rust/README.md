@@ -1,6 +1,6 @@
 # Grantline — Rust + Leptos migration
 
-Experimental **R1 + R2 + R3a/R3b/R3c/R3d/R3e1 foundation**, alongside the supported Python console.
+Experimental **R1 + R2 + R3a/R3b/R3c/R3d/R3e1/R3e2 foundation**, alongside the supported Python console.
 This binary runs natively with no Python process. Commands are offline by default;
 native PostgreSQL/ClickHouse catalogs and remote S3 IAM require explicit `--live`
 and configured reader endpoints/credentials.
@@ -72,7 +72,7 @@ grant atoms do not model it. On older servers, `system.grants` can erase prefix
 wildcard information: bounded `SHOW GRANTS` batches check for it, and any prefix
 wildcard makes the instance unread. Global, DB, table and nested-role permissions
 remain distinct. Catalog reads across requests are not an atomic transaction;
-writer/probe support is still pending.
+read-only probes below resolve ACLs separately; writers remain pending.
 
 ### Read native PostgreSQL catalogs
 
@@ -183,8 +183,74 @@ The findings compare definite outcomes with the exact saved/observed grant
 atoms, as in Python. ACL checks do not establish schema traversal, RLS outcomes,
 row availability, owner DDL powers, SET ROLE behavior or end-to-end data access.
 Subject login is subject to the server's authentication configuration (the
-isolated integration server uses trust authentication). ClickHouse/S3 probes,
-writes and production/staging validation remain pending.
+isolated integration server uses trust authentication). S3 probes, writes and
+production/staging validation remain pending.
+
+### Verify ClickHouse ACLs (R3e2)
+
+Use the same `probe --live --system warehouse --subject demo-user --json` command.
+Without `--observed`, the selected services are observed first; with
+`--observed`, only probe requests use the saved atoms. Offline mode never resolves
+network credentials. Native ClickHouse probes resolve the ACLs with
+`SHOW GRANTS FOR <subject> WITH IMPLICIT FINAL` using `url_env`, or a separately
+named `probe_url_env`. Missing explicit probe credentials never fall back.
+`admin_url_env` is never consulted.
+
+```toml
+[adapters.warehouse]
+type = "clickhouse"
+url_env = "GRANTLINE_CH_READER_URL"
+# probe_url_env = "GRANTLINE_CH_PROBE_URL" # optional dedicated ACL observer
+read_timeout_seconds = 30
+
+[adapters.warehouse.probe_url_envs]
+"demo-user" = "GRANTLINE_CH_DEMO_USER_URL" # optional actual subject HTTP login
+```
+
+Observer mode needs permission to SHOW GRANTS for the named user/role (normally
+SHOW USERS / SHOW ROLES, or SHOW ACCESS). Its results explicitly say **not a login**.
+The dedicated observer credential is useful with a saved baseline, independently
+of catalog-reader visibility. A subject mapping takes precedence over both
+observer credentials. It must pass `SELECT currentUser() AS user LIMIT 1` with
+an exact identity match before any verdict; bad/missing credentials, identity
+mismatches and HTTP failures are unknown, without fallback. The integration test
+uses a real SHA256-password subject login.
+
+`FINAL` resolves all granted roles, including ones not enabled by default. This
+is a server-resolved ACL statement even after verifying a login; it is not proof
+of role activation, effective session restrictions, row policies or data access.
+`MEMBER` uses a separate plain SHOW GRANTS and means a **direct role grant**,
+not transitive membership or activation. No SET ROLE or EXECUTE AS is attempted.
+`CHECK GRANT INSERT` is deliberately not used: `readonly=2` can make it return 0
+for a stored INSERT grant. All requests remain read-only.
+
+The parser accepts only complete GRANT statements for the exact subject, handles
+quoted identifiers and keeps global/DB/table scopes separate from named engine
+or external-source scopes. Unresolved REVOKE, column grants, prefix wildcards,
+unknown grammar/escapes or partial responses make that subject unknown. No
+partially parsed permissions produce an allow. Exact supported privilege or ALL
+coverage can allow; absence can deny SELECT, INSERT, OPTIMIZE, TRUNCATE and dictGet.
+For other supported groups (ALTER/CREATE/DROP/SHOW/ALL), and concrete
+SHOW ACCESS/DATABASES/TABLES/COLUMNS/USERS/ROLES, ALTER UPDATE/DELETE and
+CREATE/DROP TABLE/DATABASE operations, absent exact coverage remains unknown because
+privilege-group expansion is not implemented. Unsupported resources/privileges
+remain unknown. Wildcards in requested resource names are not expanded.
+
+The shared HTTP client preserves explicit URL/TLS/header-credential/proxy/redirect
+safeguards and the 10,000-row / 16 MiB response limit. Queries have server scan,
+result and execution limits; SHOW grammar has no LIMIT clause. Each parsed
+statement is limited to 64 KiB, identifiers to 1 KiB and parsed permissions/roles
+to 10,000 each. A single `read_timeout_seconds` deadline spans
+all probe subjects and discards partial results on expiry, separately from
+observation. Selection is capped at 1,000 atoms and 128 subjects per adapter.
+Services and subject filters, summary, findings and exit status follow the
+PostgreSQL probe contract. No data, grants, roles or service config are changed.
+
+Run `python3 scripts/check_rust_clickhouse.py --docker` for HTTP failure guards,
+identity/credential isolation, partial-result deadlines, real inherited/scoped
+ACLs, partial/column unknowns, password login, default-role distinctions and
+independent server-side write refusal. Positive TLS integration, custom CA,
+production/staging connections and writers remain unverified/pending.
 
 ### Read remote S3 IAM sources
 
