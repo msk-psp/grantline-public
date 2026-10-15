@@ -23,10 +23,11 @@ def config_at(root):
     return config
 
 
-def run(binary, config, dsn, *command, live=True, check=True):
+def run(binary, config, dsn, *command, live=True, check=True, extra_env=None):
     env = dict(os.environ, GRANTLINE_R3C_ADMIN='host=127.0.0.1 port=1 user=admin dbname=postgres password=' + MARKER,
                PGHOST='invalid.example.com', PGUSER='admin', PGPASSWORD=MARKER, PGSERVICE='not-a-service',
                GRANTLINE_R3C_READER=dsn or '')
+    env.update(extra_env or {})
     if dsn is None:
         env.pop('GRANTLINE_R3C_READER', None)
     result = subprocess.run([binary, '-c', str(config), *command, *(['--live'] if live else [])],
@@ -36,6 +37,19 @@ def run(binary, config, dsn, *command, live=True, check=True):
         return result
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)
+
+
+
+def probe_baseline(root, rows):
+    path = root / 'probe-baseline.jsonl'
+    records = [dict(run=dict(ts='2026-10-01T00:00:00+00:00', user='demo', systems=['pg-test']))]
+    records += [dict(grant=dict(system='pg-test', subject=s, resource=r, priv=p)) for s, r, p in rows]
+    path.write_text(''.join(json.dumps(row) + '\n' for row in records))
+    return path
+
+
+def probe_rows(report):
+    return {(p['subject'], p['resource'], p['priv']): p for p in report['probes']}
 
 
 def blind(plan):
@@ -80,6 +94,14 @@ def boundary(binary):
                 start = time.monotonic()
                 blind(run(binary, config, dsn, 'plan', '--json'))
                 assert 2 <= time.monotonic() - start < 7 and len(calls) == 1
+                baseline = probe_baseline(root, [('reader', 'db:postgres', 'CONNECT')])
+                offline = run(binary, config, dsn, 'probe', '--observed', str(baseline), '--json', live=False)
+                assert offline['summary'] == dict(allow=0, deny=0, unknown=1)
+                start = time.monotonic()
+                timed = run(binary, config, dsn, 'probe', '--observed', str(baseline), '--json')
+                assert timed['summary'] == dict(allow=0, deny=0, unknown=1)
+                assert 2 <= time.monotonic() - start < 7
+                assert 'deadline' in timed['probes'][0]['how']
                 count = len(calls)
                 conflict = run(binary, config, dsn, 'plan', '--observed', 'unused', '--json', check=False)
                 assert conflict.returncode != 0 and len(calls) == count
@@ -96,6 +118,13 @@ def boundary(binary):
                 blind(json.loads(result.stdout))
             else:
                 assert 'type and kind' in result.stderr
+        config.write_text(original)
+        baseline = probe_baseline(root, [('reader', 'db:postgres', 'CONNECT')])
+        missing = run(binary, config, None, 'probe', '--observed', str(baseline), '--json')
+        assert missing['summary'] == dict(allow=0, deny=0, unknown=1)
+        capped = probe_baseline(root, [(f'reader-{i}', 'db:postgres', 'CONNECT') for i in range(1001)])
+        assert run(binary, config, None, 'probe', '--observed', str(capped), '--json', check=False).returncode != 0
+        assert run(binary, config, None, 'probe', '--system', 'not-configured', '--json', check=False).returncode != 0
         print('PostgreSQL boundaries: 9 invalid/unavailable DSNs, offline isolation, stalled authentication deadline, source conflict, config validation and secret redaction passed')
 
 
@@ -195,6 +224,56 @@ GRANT SELECT(a) ON columns.secrets TO gl_base;
             assert Path(saved['path']).stat().st_mode & 0o077 == 0
             imported = run(binary, config, 'invalid ' + MARKER, 'plan', '--observed', saved['path'], '--json', live=False)
             assert imported['observed'] == plan['observed'] and imported['unobserved'] == plan['unobserved']
+            # Probe a saved baseline: stale/wrong on-paper grants must yield definite denial.
+            cases = [('gl_subject', 'table:gl_data.public.events', 'SELECT'),
+                     ('gl_subject', 'table:gl_data.public.events', 'INSERT'),
+                     ('gl_subject', 'schema:gl_data.public', 'USAGE'),
+                     ('gl_subject', 'db:gl_data', 'CONNECT'),
+                     ('gl_subject', 'role:gl_nested', 'MEMBER'),
+                     ('gl_noinherit', 'table:gl_data.public.events', 'SELECT'),
+                     ('gl_descendant', 'table:gl_data.public.events', 'SELECT'),
+                     ('gl"quoted', 'table:gl_data.public.odd"table', 'SELECT'),
+                     ('gl_subject', 'table:gl_data.public.aaa_missing', 'SELECT'),
+                     ('gl_subject', 'default:gl_data.public@gl_owner', 'SELECT'),
+                     ('PUBLIC', 'db:gl_data', 'CONNECT'),
+                     ('missing-role', 'table:gl_data.public.events', 'SELECT'),
+                     ('gl_subject', 'table:gl_skip.public.events', 'SELECT'),
+                     ('gl_subject', 'table:gl_blocked.public.secret', 'SELECT')]
+            baseline = probe_baseline(root, cases)
+            command = ('probe', '--observed', str(baseline), '--json')
+            report = run(binary, config, dsn, *command)
+            probed = probe_rows(report)
+            expected = ['allow', 'deny', 'allow', 'allow', 'allow', 'deny', 'deny', 'allow',
+                        'unknown', 'unknown', 'unknown', 'unknown', 'unknown', 'unknown']
+            assert [probed[c]['verdict'] for c in cases] == expected, report
+            assert len(report['findings']) == 3 and all(f['title'] == 'granted on paper, denied on the path' for f in report['findings'])
+            assert all('not a login' in p['how'] for p in report['probes'] if p['verdict'] == 'allow')
+            # A missing object in the same transaction must not poison later success.
+            assert probed[cases[0]]['verdict'] == 'allow' and probed[cases[8]]['verdict'] == 'unknown'
+            live_report = run(binary, config, dsn, 'probe', '--subject', 'gl_base', '--json')
+            assert live_report['probes'] and live_report['summary']['allow'] > 0
+            assert all(p['subject'] == 'gl_base' for p in live_report['probes'])
+            original = config.read_text()
+            config.write_text(original + '[adapters.pg-test.probe_dsn_envs]\ngl_subject="GRANTLINE_R3E_SUBJECT"\n')
+            subject_dsn = dsn.replace('user=gl_observer', 'user=gl_subject')
+            login = run(binary, config, dsn, *command, '--subject', 'gl_subject',
+                        extra_env={'GRANTLINE_R3E_SUBJECT': subject_dsn})
+            assert probe_rows(login)[cases[0]]['verdict'] == 'allow'
+            assert 'subject TCP login' in probe_rows(login)[cases[0]]['how']
+            for credentials in ({'GRANTLINE_R3E_SUBJECT': ''},
+                                {'GRANTLINE_R3E_SUBJECT': dsn},
+                                {'GRANTLINE_R3E_SUBJECT': subject_dsn.replace('user=gl_subject', 'user=missing-role')}):
+                denied_login = run(binary, config, dsn, *command, '--subject', 'gl_subject', extra_env=credentials)
+                assert denied_login['summary']['allow'] == denied_login['summary']['deny'] == 0, denied_login
+                assert denied_login['summary']['unknown'] == len(denied_login['probes'])
+                assert not denied_login['findings'], 'connection/auth failure must be unknown, never denial'
+            config.write_text(original)
+            # Quoted schema lookup takes an exact name, while a table uses quoted regclass syntax.
+            sql('CREATE SCHEMA "odd""schema"; GRANT USAGE ON SCHEMA "odd""schema" TO gl_subject;', db='gl_data')
+            odd = probe_baseline(root, [('gl_subject', 'schema:gl_data.odd"schema', 'USAGE')])
+            odd_report = run(binary, config, dsn, 'probe', '--observed', str(odd), '--json')
+            assert odd_report['summary'] == dict(allow=1, deny=0, unknown=0), odd_report
+            print('PostgreSQL probes: actual allow/deny/unknown, inherited and non-inherited roles, quoted identifiers, stale baseline disagreements, SQL-error recovery, subject TCP login/mismatch, missing credentials and no admin fallback passed')
             # Excluding a database must never look like an empty database.
             original = config.read_text()
             config.write_text(original + 'databases=["postgres"]\n')

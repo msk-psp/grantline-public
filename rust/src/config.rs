@@ -41,6 +41,8 @@ pub struct Adapter {
     pub url_env: Option<String>,
     #[serde(default)]
     pub dsn_env: Option<String>,
+    #[serde(default)]
+    pub probe_dsn_envs: std::collections::BTreeMap<String, String>,
     #[serde(default = "all_databases")]
     pub databases: Vec<String>,
     #[serde(default)]

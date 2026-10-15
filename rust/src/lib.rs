@@ -8,6 +8,7 @@ pub mod graph;
 pub mod model;
 pub mod planner;
 pub mod postgres;
+pub mod probe;
 pub mod s3;
 pub mod snapshot;
 pub mod web;
