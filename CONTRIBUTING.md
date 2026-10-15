@@ -70,3 +70,16 @@ not done until the checks pass locally.
   part a reader can't get from the diff.
 - The console is read-only by default. A write path needs the config to name a write
   credential *and* the environment to carry it; keep that split.
+
+## Try approvals locally
+
+```bash
+python3 examples/approval-demo/run.py
+```
+
+Open **http://127.0.0.1:8422/demo** to switch between fictional requester and
+reviewer roles, inspect a simulated Slack inbox, and approve or deny a sample
+request. The real approval backend runs against disposable local fixtures; PRs
+are simulated and no external credentials or accounts are required. See the
+[approval playground guide](examples/approval-demo/README.md) for the steps and
+what this does and does not verify. Restart the command for a fresh test state.
