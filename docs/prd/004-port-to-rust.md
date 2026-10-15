@@ -1,6 +1,8 @@
 # PRD 004 — Porting to Rust / Dioxus: plan, and what it would and would not buy
 
-Status: **plan only** (2026-09-04). Nothing here is scheduled.
+Status: **superseded by [PRD 006](006-rust-leptos.md)** (2026-10-15).
+The measurements and recommendation below record the 2026-09-04 investigation;
+the accepted target is now a staged full Rust backend + Leptos UI migration.
 
 ## 1. Why this was raised
 
@@ -91,3 +93,10 @@ Startup warming and concurrent adapter observation are implemented. Observations
 refresh in the background; cached requests use a completed result while refresh runs.
 The first observation and an explicitly fresh read still wait. Rust/Dioxus remains an
 unscheduled option, not required implementation work. Current live latency is unverified.
+
+## Decision update — 2026-10-15
+
+The user selected a complete Rust + Leptos migration in stages. Follow PRD 006
+for current scope and acceptance. The Python implementation remains the reference
+until functional and live parity is verified; the historical latency measurements
+above do not predict the new implementation's performance.

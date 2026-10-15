@@ -54,6 +54,7 @@ not done until the checks pass locally.
 | routes (hops, bridges, kinds) | `grantline/graph.py`; data for the map in `web.graph_data()` |
 | pages | `grantline/pages.py`, `grantline/web.py`; assets in `grantline/static/` |
 | decisions and their reasons | `docs/prd/` |
+| experimental native core and Leptos playground | `rust/` — [guide](rust/README.md), [migration stages](docs/prd/006-rust-leptos.md) |
 
 ## Conventions
 
