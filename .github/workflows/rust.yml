@@ -35,3 +35,5 @@ jobs:
         run: python3 scripts/check_rust_clickhouse.py --docker
       - name: Verify native PostgreSQL reader against isolated official server
         run: python3 scripts/check_rust_postgres.py --docker
+      - name: Verify native S3 readers against isolated HTTP and official SeaweedFS
+        run: python3 scripts/check_rust_s3_network.py --docker

@@ -137,7 +137,7 @@ pub fn observe_with_live(
             continue;
         }
         if adapter.typ(system) == "s3" {
-            let mut obs = crate::s3::observe(adapter, &loaded.base, system);
+            let mut obs = crate::s3::observe_with_live(adapter, &loaded.base, system, live);
             snapshot.grants.append(&mut obs.grants);
             snapshot.unobserved.append(&mut obs.unknown);
             findings.append(&mut obs.findings);
