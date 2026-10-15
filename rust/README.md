@@ -1,8 +1,8 @@
 # Grantline — Rust + Leptos migration
 
-Experimental **R1 + R2 + R3a/R3b foundation**, alongside the supported Python console.
+Experimental **R1 + R2 + R3a/R3b/R3c foundation**, alongside the supported Python console.
 This binary runs natively with no Python process. Commands are offline by default;
-native ClickHouse catalog observation requires explicit `--live` and a reader.
+native PostgreSQL/ClickHouse catalog observation requires explicit `--live` and a reader.
 The target is a complete Rust backend and Leptos UI, delivered in
 [six stages](../docs/prd/006-rust-leptos.md).
 
@@ -71,8 +71,64 @@ grant atoms do not model it. On older servers, `system.grants` can erase prefix
 wildcard information: bounded `SHOW GRANTS` batches check for it, and any prefix
 wildcard makes the instance unread. Global, DB, table and nested-role permissions
 remain distinct. Catalog reads across requests are not an atomic transaction;
-writer/probe support is still pending. PostgreSQL and S3 network readers remain
-unimplemented even with `--live`.
+writer/probe support is still pending. S3 network readers remain unimplemented even with `--live`.
+
+### Read native PostgreSQL catalogs
+
+PostgreSQL **16+** uses only the explicitly named `dsn_env` reader. Put a libpq
+key/value DSN or PostgreSQL URI in that environment variable, outside the repo.
+Specify one TCP host, user and maintenance database; Unix sockets, multi-host,
+`hostaddr`, service files and caller-supplied `options` are unsupported. `PG*`
+environment credentials, `admin_dsn_env`, probe credentials and `env_file` are
+never consulted. Database names are passed through the driver's config API.
+
+```toml
+[adapters.database]
+type = "postgres"
+dsn_env = "GRANTLINE_PG_DSN"
+databases = ["*"]
+exclude_databases = ["scratch_*"]
+read_timeout_seconds = 30
+```
+
+Use the same `plan/graph/snapshot --live` commands as above. TLS is required by
+default (including `sslmode=prefer`) and verifies the host certificate with
+bundled Mozilla roots. `sslmode=disable` explicitly permits plaintext, for
+example on the disposable loopback test server. Libpq `verify-full` spelling,
+private CA/client certificates and positive TLS integration are not supported
+in this unit; there is no certificate-verification bypass.
+
+The reader should have catalog SELECT and CONNECT to the maintenance/target
+DBs, without data or write grants. Provision it through the service owner.
+Each connection runs a repeatable-read, read-only transaction with a fixed
+`pg_catalog` search path, statement/lock/idle limits and a total per-instance
+client deadline (`1..120` seconds). Read-only session defaults are requested,
+not a replacement for server-side least privilege. Only fixed catalog SELECTs
+are issued. No arbitrary SQL, login probe, GRANT/REVOKE or data query runs.
+
+The observer materializes implicit PUBLIC DB permissions and owner ACLs,
+retains grantor/source metadata, nested role memberships and schema-specific
+default table privileges keyed by creating role. Empty table ACLs produce the
+owner-lockout finding using `cardinality(relacl)=0`; PostgreSQL can store an
+empty ACL with array dimensions that make equality to `'{}'` false. Raw role
+names come from catalog joins, avoiding the quoting introduced by `regrole`.
+
+An unread/excluded DB obscures its table/schema/default scopes and discards any
+partial rows from that DB. A maintenance failure, total deadline or catalog cap
+failure at the cluster level obscures the entire instance. Limits are 10,000
+rows/16 MiB per query, 128 DBs and 100,000 aggregate grants. The protocol driver
+may buffer an individual wire message before the row byte check; this is not a
+memory-isolation boundary against a malicious server.
+
+Unrepresentable dotted/`@`/wildcard resource components obscure the affected DB
+(or the cluster for DB identifiers). Column ACLs obscure table scopes in their
+schema. Global default table ACLs obscure all default scopes in that DB.
+Superusers, predefined roles and memberships with disabled INHERIT/SET options,
+including their dependants, remain unknown. Delegation options get findings;
+MEMBER and grant atoms do not model them. These safeguards intentionally exceed
+the Python reader. The target is DB/schema/table/default-table ACLs and role
+memberships; sequence/function/type ACLs, effective RLS, owner powers, target-user
+login/data access and a cluster-wide atomic snapshot are not represented.
 
 ### S3 IAM files and previews
 
@@ -175,10 +231,11 @@ their own ports and are unaffected.
 - R3a interprets local S3 IAM planes and produces grouped document previews,
   with conservative policy evaluation, missing-policy and cross-plane diagnostics.
 - R3b reads native ClickHouse catalogs through an explicit reader with `--live`.
+- R3c reads PostgreSQL 16+ catalogs with per-DB unread scopes and read-only transactions.
 
 ## What remains
 
-PostgreSQL/S3 live observation, probes and native writes, production authentication,
+S3 network observation, probes and native writes, production authentication,
 durable approvals, real Slack/GitHub writers, all existing console pages,
 WASM map interactions, four-language UI and release images are later stages.
 Live S3 document writes and all probe paths remain in R3. Approval, a
@@ -198,6 +255,7 @@ python3 scripts/check_rust_parity.py
 python3 scripts/check_rust_core.py
 python3 scripts/check_rust_s3.py
 python3 scripts/check_rust_clickhouse.py --docker
+python3 scripts/check_rust_postgres.py --docker
 ```
 
 The checks cover canonical grants, coverage, convergence actions, diagnostic
@@ -217,3 +275,10 @@ unsupported scopes, stale grants, visibility and a server-refused POST write;
 the container is removed afterwards. `--docker-context NAME` selects an explicit
 local Unix-socket context; remote Docker hosts are refused. Without `--docker`,
 only the HTTP protocol suite runs.
+
+The PostgreSQL suite checks missing/invalid DSNs, stalled authentication deadlines,
+offline/import isolation, secret redaction and a digest-pinned official PostgreSQL
+17.11 server. It verifies PUBLIC/owner ACLs, raw quoted names and grantors, nested
+roles, per-DB failures/exclusions, frozen ACLs, global/column/default boundaries,
+graphs, snapshots, TLS downgrade refusal and read-only DDL failure. Its disposable
+container is removed afterwards; no production/staging server is contacted.

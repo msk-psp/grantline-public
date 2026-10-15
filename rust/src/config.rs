@@ -39,8 +39,17 @@ pub struct Adapter {
     pub planes: indexmap::IndexMap<String, crate::s3::Plane>,
     #[serde(default)]
     pub url_env: Option<String>,
+    #[serde(default)]
+    pub dsn_env: Option<String>,
+    #[serde(default = "all_databases")]
+    pub databases: Vec<String>,
+    #[serde(default)]
+    pub exclude_databases: Vec<String>,
     #[serde(default = "read_timeout")]
     pub read_timeout_seconds: u64,
+}
+fn all_databases() -> Vec<String> {
+    vec!["*".into()]
 }
 fn read_timeout() -> u64 {
     30
@@ -170,10 +179,10 @@ pub fn load(path: &Path) -> Result<Loaded> {
                 "Fixture {system} needs a postgres/clickhouse kind and a fixture path"
             ));
         }
-        if adapter.typ(system) == "clickhouse" && adapter.kind(system) != "clickhouse" {
-            return Err(format!(
-                "Native ClickHouse adapter {system} must use clickhouse kind"
-            ));
+        if matches!(adapter.typ(system), "clickhouse" | "postgres")
+            && adapter.kind(system) != adapter.typ(system)
+        {
+            return Err(format!("Native adapter {system} type and kind must agree"));
         }
     }
     let input: IntentFile = read_toml(&relative(&base, &config.intent)?)?;

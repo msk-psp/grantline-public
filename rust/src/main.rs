@@ -20,7 +20,7 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
-    /// Print a read-only plan; native ClickHouse observation requires --live.
+    /// Print a read-only plan; native PostgreSQL/ClickHouse observation requires --live.
     Plan {
         #[command(flatten)]
         source: cli::Source,

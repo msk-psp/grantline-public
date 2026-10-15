@@ -58,10 +58,11 @@ not done until the checks pass locally.
 
 For Rust changes run the native checks and all three differential suites in the
 [Rust guide](rust/README.md#check-the-boundary). `plan` is read-only; only the
-explicit `snapshot` command records state. Native ClickHouse reads require
-`--live` and a separately configured reader; PostgreSQL/S3 network adapters and
-actual writers remain pending. Run `python3 scripts/check_rust_clickhouse.py --docker`
-for isolated HTTP and real-server checks. Local S3 IAM files/trees support observation
+explicit `snapshot` command records state. Native PostgreSQL/ClickHouse reads require
+`--live` and separately configured readers; S3 network adapters and actual writers
+remain pending. Run `python3 scripts/check_rust_clickhouse.py --docker` and
+`python3 scripts/check_rust_postgres.py --docker` for isolated boundary and
+real-server checks. Local S3 IAM files/trees support observation
 and grouped previews; directory-backed shared policies cannot be rewritten from
 a per-user change.
 
