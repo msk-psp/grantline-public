@@ -30,3 +30,4 @@ jobs:
         run: |
           python3 scripts/check_rust_parity.py
           python3 scripts/check_rust_core.py
+          python3 scripts/check_rust_s3.py

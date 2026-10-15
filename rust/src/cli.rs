@@ -27,7 +27,7 @@ pub fn plan(path: &Path, imported: Option<&Path>, as_json: bool, verbose: bool) 
         output["observation_source"] = serde_json::json!(
             imported
                 .map(|p| p.display().to_string())
-                .unwrap_or_else(|| "local fixtures".into())
+                .unwrap_or_else(|| "local fixtures and IAM files".into())
         );
         output["unobserved"] = serde_json::to_value(&obs.snapshot.unobserved)
             .map_err(|_| "Cannot encode unread scopes")?;
@@ -40,7 +40,7 @@ pub fn plan(path: &Path, imported: Option<&Path>, as_json: bool, verbose: bool) 
         if imported.is_some() {
             " (saved observation, not a live read)"
         } else {
-            " (local fixtures)"
+            " (local fixtures and IAM files)"
         }
     );
     if !report.observation_complete {
@@ -74,6 +74,25 @@ pub fn plan(path: &Path, imported: Option<&Path>, as_json: bool, verbose: bool) 
                     change.command_error.as_deref().unwrap_or("unsupported")
                 ),
             }
+        }
+    }
+    for preview in &report.s3_previews {
+        println!(
+            "\n[S3 {} / {}] {} grouped change(s) — preview only",
+            preview.system,
+            preview.subject,
+            preview.changes.len()
+        );
+        if let Some(reason) = &preview.blocked {
+            println!("  Blocked: {reason}");
+        } else {
+            println!(
+                "  Before: {}\n  After: {}",
+                serde_json::to_string_pretty(&preview.before)
+                    .map_err(|_| "Cannot encode preview")?,
+                serde_json::to_string_pretty(&preview.after)
+                    .map_err(|_| "Cannot encode preview")?
+            );
         }
     }
     println!("\nUnverified intent: {} grant(s).", report.unverified.len());

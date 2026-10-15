@@ -1,6 +1,6 @@
 # Grantline — Rust + Leptos migration
 
-Experimental **R1 + R2 foundation**, alongside the supported Python console.
+Experimental **R1 + R2 + R3a foundation**, alongside the supported Python console.
 This binary runs natively with no Python process or external credentials.
 The target is a complete Rust backend and Leptos UI, delivered in
 [six stages](../docs/prd/006-rust-leptos.md).
@@ -18,13 +18,44 @@ rust/target/debug/grantline-rs -c examples/demo/grantline.toml graph --subject a
 rust/target/debug/grantline-rs -c examples/demo/grantline.toml history --since 2026-08-25
 ```
 
-`plan` reads PostgreSQL/ClickHouse JSON fixtures and produces SQL previews,
-diagnostic levels/entities and per-identity/service counts. No credentials are
-resolved. Native service connections and S3 IAM parsing are R3, so the bundled
-config's S3 provider is explicitly **unobserved**, not empty.
+`plan` reads PostgreSQL/ClickHouse JSON fixtures and local S3 IAM files/directories.
+It produces SQL previews, diagnostic levels/entities and per-identity/service
+counts. No environment credentials are resolved and no service is contacted.
+The bundled S3 file provider is now observed. Remote-only providers remain unread.
 `plan --observed FILE.jsonl` imports a saved observation for any configured service; a service
 missing from its header remains unread. Unsupported command generation is
 reported per candidate. This CLI has no `apply` or `--write` command.
+
+### S3 IAM files and previews
+
+Existing `[adapters.NAME]` sections with `type = "s3"`, `enforced = "dynamic"`
+and `[adapters.NAME.planes.dynamic] file = "iam.json"` work unchanged. A plane
+can instead use `dir = "iam-mirror"`, containing `identities/`, optional
+`groups/`, `policies/` and `policies.json`. Paths follow the selected config.
+Only the enforced plane supplies grants. Other readable planes identify accounts
+that exist where the gateway does not consult them. Unread/invalid planes remain
+unknown and their source contents are not included in errors.
+
+IAM policy takes precedence over native actions. Exact Deny pairs are subtracted;
+unsupported conditions, negative policies and overlapping denies remain unknown.
+Bucket discovery and `StringLike s3:prefix` listings are observation-only
+capabilities, never recursive object grants. Group and inline policy routes are
+retained; unknown identities and identities with cancelled allows do not expose
+misleading membership paths. Malformed trees or conflicting policy route names
+remain unread. An attached empty policy still shadows native actions.
+
+JSON `s3_previews` contains one final `before`/`after` document per identity,
+combining all grant/revoke candidates. It contains policy or action data, never
+the identity's credential records. `changes` indexes refer to the report's
+permission candidates. `creates_identity` marks a new identity; credentials
+would still need separate provisioning. These documents are review previews,
+not shell commands or applied changes. Text output prints the same documents.
+
+Directory trees are read-only: no per-user preview may rewrite a group's shared
+policy or turn inherited grants into an inline copy. Unsupported capabilities,
+prefix-List writes and transformations that cannot reproduce the requested
+normalized grants exactly are blocked with a reason. Snapshots lack original
+policy documents, so imported observations generate no S3 document previews.
 
 `-c` defaults to `grantline.toml`; no subcommand defaults to `plan`. Config and
 intent paths resolve against the config directory, including `~/` paths.
@@ -93,14 +124,15 @@ their own ports and are unaffected.
   Axum handles the HTTP workflow. No browser JavaScript or WASM is needed for R1.
 - R2 loads TOML intent, reads offline observations, explains drift and produces
   fixture SQL previews, interoperable snapshots and authorization graphs.
+- R3a interprets local S3 IAM planes and produces grouped document previews,
+  with conservative policy evaluation, missing-policy and cross-plane diagnostics.
 
 ## What remains
 
 Live observation, probes, native service adapters and writes, production authentication,
 durable approvals, real Slack/GitHub writers, all existing console pages,
 WASM map interactions, four-language UI and release images are later stages.
-S3 policy document command generation/coalescing belongs to R3; R2's identity
-groups are display summaries, not grouped executable commands. Approval, a
+Live S3 document writes and all probe paths remain in R3. Approval, a
 simulated PR and effective IAM access are separate states. This experimental app
 never changes live access and is not ready to replace a production deployment.
 
@@ -115,11 +147,17 @@ cargo test --manifest-path rust/Cargo.toml --locked
 cargo build --manifest-path rust/Cargo.toml --locked
 python3 scripts/check_rust_parity.py
 python3 scripts/check_rust_core.py
+python3 scripts/check_rust_s3.py
 ```
 
 The checks cover canonical grants, coverage, convergence actions, diagnostic
 levels/entities, deterministic fixture explanations, PG/CH SQL previews,
 Python/native snapshot round trips, history and graph structure/paths. Python's
 arbitrary choice among equally covering grants is compared by the requested
-atom, not the incidental wording naming one covering grant. Live observation,
-S3 command coalescing, performance and production integration remain unverified.
+atom, not the incidental wording naming one covering grant. S3 checks add native
+actions, policy precedence, Deny, prefix capabilities, IAM trees, document grouping
+and unchanged source files. Rust additionally marks capabilities unknown when a
+policy is incomplete/missing, keeps empty attached policies authoritative and
+blocks previews that cannot exactly realize the requested grant set. Those safety
+boundaries intentionally exceed the Python oracle. Live observation, actual
+writes, performance and production integration remain unverified.
