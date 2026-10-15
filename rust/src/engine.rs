@@ -120,6 +120,14 @@ pub fn observe_with_live(
         });
     }
     for (system, adapter) in &loaded.config.adapters {
+        if adapter.typ(system) == "postgres" && live {
+            let obs = crate::postgres::observe(adapter, system);
+            snapshot.grants.extend(obs.grants);
+            snapshot.unobserved.extend(obs.unknown);
+            findings.extend(obs.findings);
+            kinds.extend(obs.kinds);
+            continue;
+        }
         if adapter.typ(system) == "clickhouse" && live {
             let obs = crate::clickhouse::observe(adapter, system);
             snapshot.grants.extend(obs.grants);
@@ -179,7 +187,11 @@ pub fn observe_with_live(
             .collect();
         if adapter.kind(system) == "postgres" {
             for table in fixture.facts.tables.iter().filter(|t| t.acl_empty) {
-                findings.push(Finding::new("postgres","frozen ACL (owner locked out)",format!("{} (owner {}): ACL is an empty array, so even the owner has no privileges. Recover with an explicit GRANT ALL ON {} TO \"{}\";",table.name,table.owner,table.name,table.owner),vec![table.name.clone(),table.owner.clone()]));
+                findings.push(crate::postgres::frozen_finding(
+                    "postgres",
+                    &table.name,
+                    &table.owner,
+                ));
             }
         } else if adapter.kind(system) == "clickhouse" {
             findings.extend(crate::clickhouse::stale_findings(

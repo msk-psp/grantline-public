@@ -33,7 +33,7 @@ State is disposable, private to the process and erased when it exits.
 | Stage | Implementation | Acceptance before promotion | Status |
 |---|---|---|---|
 | R2 | Typed config/intent, snapshots, findings, graph and offline plan CLI | Fixture decisions, diagnostics, PG/CH SQL previews, snapshot round trips and graph paths match Python; S3 commands/coalescing remain R3 | Merged in PR #16 |
-| R3 | PostgreSQL, ClickHouse and S3 native adapters, probes and writers | Existing regression cases ported; separately authorized live read/probe and reversible write validation per adapter | R3a merged; R3b ClickHouse reads implemented; other readers/probes/writers pending |
+| R3 | PostgreSQL, ClickHouse and S3 native adapters, probes and writers | Existing regression cases ported; separately authorized live read/probe and reversible write validation per adapter | R3a/R3b merged; R3c PostgreSQL reads implemented; S3 readers/probes/writers pending |
 | R4 | Production sessions/OIDC, durable approval store, Slack signatures/DMs, code writer and GitHub PRs | Requester binding, all approvers, callback replay, immutable plan and repo scope verified end to end; approval/PR/applied access reported separately | Pending |
 | R5 | All console pages, Leptos hydration and interactive permission map | Repeated hover highlight/dimming, matrix scrolling, accessible dark mode, logs and four locales verified in browser | Pending |
 | R6 | Release image, migration/rollback and operating guide | Reproducible native/WASM builds, upgrade of persisted state, image smoke tests and explicitly authorized rollout | Pending |
@@ -70,14 +70,14 @@ keep Python as a development-only oracle until all stages pass.
 
 ## Next action
 
-Review R3b's ClickHouse catalog reader, then implement the PostgreSQL reader
-with isolated local adapter tests; S3 network readers follow. Probes/writers and separately
+Review R3c's PostgreSQL catalog reader and its isolated official-server tests;
+S3 network readers follow. Probes/writers and separately
 authorized production/staging verification follow. Each
 review unit needs acceptance evidence before advancing; R3 is not yet complete.
 
 ## R3 — Native adapter migration {#R3}
 
-Status: R3a merged in PR #17; R3b ClickHouse reads implemented.
+Status: R3a merged in PR #17; R3b merged in PR #18; R3c PostgreSQL reads implemented.
 The first review unit implements S3 file/dir
 planes, effective policy observation, group/inline routes and identity-scoped
 document previews. Plan commands remain previews; no IAM file, shared managed
@@ -150,6 +150,46 @@ official ClickHouse 26.6.2.160 container, pinned by multi-platform digest. The
 test verifies a reader-profile POST write refusal and removes the container.
 Positive HTTPS/private-CA integration, other server versions, performance and
 production/staging validation remain unverified.
+
+### R3c — PostgreSQL catalog observation
+
+Implement native PostgreSQL 16+ observation behind the existing `--live` opt-in,
+using only `dsn_env`. Maintain offline/import isolation and existing grant,
+snapshot and graph contracts. Scope is DB/schema/table/default-table ACLs and
+role membership. No probe/writer, production connection, UI or deployment change.
+
+A maintenance transaction reads role kinds, membership options and DB ACLs.
+Separate repeatable-read, read-only transactions read each configured target DB.
+Preserve implicit PUBLIC/owner ACLs, raw role names, source/grantor metadata,
+nested membership and creator-specific per-schema defaults. Frozen ACL detection
+uses zero cardinality instead of array equality, which misses dimensional empty
+ACLs on the actual server. Unread/excluded DBs must discard partial per-DB data
+and obscure table/schema/default scopes. A maintenance or total-deadline failure
+must discard all instance grants. DB filters must not make skipped DBs look empty.
+
+Only a named explicit TCP reader is accepted; no PG environment, admin/probe,
+service-file or options fallback. TLS verifies certificates and upgrades prefer
+to require; plaintext needs explicit disable. Catalog SQL has a fixed search path,
+server statement/lock/idle limits, 10,000-row/16-MiB query caps, 128-DB and
+100,000-grant bounds and a configurable total deadline. Error bodies/DSNs are
+withheld. These client safeguards do not provision a least-privilege DB role or
+isolate memory from a malicious wire peer.
+
+Column ACLs obscure a schema's table scopes; global table defaults obscure that
+DB's default scopes. Unsupported resource identifiers obscure their DB/cluster.
+Superuser/predefined-role privileges and membership INHERIT/SET restrictions,
+including transitive dependants, remain unknown. Grant/admin options are findings.
+These conservative boundaries and raw-name/frozen-ACL fixes exceed Python parity.
+Sequence/function/type ACLs, effective RLS/owner powers and user login/data access
+are not claimed. Per-connection snapshots are not cluster-atomic.
+
+Acceptance: native lint/tests and existing Python differential/regression suites;
+isolated invalid DSN/deadline/config cases; actual official PostgreSQL 17.11 tests for
+catalog visibility, metadata, defaults, memberships, frozen/column/global scopes,
+DB exclusions/connect failures, partial-query discard, graph/snapshot contracts,
+TLS downgrade refusal and write refusal. The test uses only disposable loopback
+Docker resources. Positive TLS/private-CA integration, other versions/platforms,
+performance, production/staging and actual probes/writers remain unverified.
 
 ## R1 validation boundary
 

@@ -21,7 +21,7 @@ fn json(value: &impl Serialize) -> Result<()> {
 pub struct Source {
     #[arg(long, conflicts_with = "live")]
     pub observed: Option<PathBuf>,
-    /// Read configured native ClickHouse catalogs; never applies changes.
+    /// Read configured native PostgreSQL/ClickHouse catalogs; never applies changes.
     #[arg(long)]
     pub live: bool,
 }
@@ -37,7 +37,7 @@ pub fn plan(path: &Path, source: &Source, as_json: bool, verbose: bool) -> Resul
             imported
                 .map(|p| p.display().to_string())
                 .unwrap_or_else(|| if source.live {
-                    "configured ClickHouse readers and local inputs".into()
+                    "configured PostgreSQL/ClickHouse readers and local inputs".into()
                 } else {
                     "local fixtures and IAM files".into()
                 })
@@ -53,7 +53,7 @@ pub fn plan(path: &Path, source: &Source, as_json: bool, verbose: bool) -> Resul
         if imported.is_some() {
             " (saved observation, not a live read)"
         } else if source.live {
-            " (configured ClickHouse readers and local inputs)"
+            " (configured PostgreSQL/ClickHouse readers and local inputs)"
         } else {
             " (local fixtures and IAM files)"
         }

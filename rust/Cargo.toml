@@ -25,6 +25,9 @@ uuid = { version = "1", features = ["v4"] }
 ureq = { version = "3.4", default-features = false, features = ["rustls"] }
 url = "2"
 percent-encoding = "2"
+futures-util = "0.3"
+tokio-postgres = "0.7"
+tokio-postgres-rustls = { version = "0.14", features = ["ring", "webpki-roots"] }
 
 [dev-dependencies]
 http-body-util = "0.1"
