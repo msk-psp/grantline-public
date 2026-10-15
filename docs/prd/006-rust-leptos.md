@@ -8,7 +8,8 @@ decision, not a claim that a language change removes network or SVG latency.
 
 ## R1 — Native core and approval playground {#R1}
 
-Status: implemented locally; review and Linux CI pending. Acceptance:
+Status: implemented and locally verified; review pending. Linux validation is
+tracked by the PR's Rust native CI check. Acceptance:
 
 - Native Rust grant identity/canonicalization, privilege coverage and convergence
   decisions match the Python reference on shared fictional fixtures.
@@ -55,6 +56,7 @@ tests (5 domain + 3 HTTP), and a locked native build passed. The differential
 check passed 172 scenarios including 1,062 coverage pairs. Existing Python
 regression tests passed 36/36; the map hover test and Ruff also passed.
 The browser exercised requester switching, request creation, reviewer switching
-and approval into a simulated PR. No external Slack, GitHub or IAM adapter ran.
-Linux CI, full UI parity, production integration and performance remain separate
-verification work. See the native guide for reproducible commands.
+and approval into a simulated PR, plus denial without a PR. No external Slack,
+GitHub or IAM adapter ran. Full UI parity, production integration and performance
+remain separate verification work. See the native guide for reproducible commands
+and the PR checks for the current Linux result.
