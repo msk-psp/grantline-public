@@ -33,6 +33,13 @@ pub struct Adapter {
     pub kind: Option<String>,
     #[serde(default)]
     pub fixture: Option<String>,
+    #[serde(default = "enforced_plane")]
+    pub enforced: String,
+    #[serde(default)]
+    pub planes: indexmap::IndexMap<String, crate::s3::Plane>,
+}
+fn enforced_plane() -> String {
+    "static".into()
 }
 impl Adapter {
     pub fn typ<'a>(&'a self, system: &'a str) -> &'a str {

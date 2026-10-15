@@ -62,6 +62,7 @@ pub struct Observation {
     pub findings: Vec<Finding>,
     pub kinds: BTreeMap<String, String>,
     pub routes: Vec<Route>,
+    pub s3: BTreeMap<String, crate::s3::Observed>,
 }
 fn unread(system: &str, note: &str) -> Unobserved {
     Unobserved {
@@ -77,6 +78,7 @@ pub fn observe(loaded: &Loaded, imported: Option<&Path>) -> Result<Observation> 
     let mut findings = Vec::new();
     let mut kinds = BTreeMap::new();
     let mut routes = Vec::new();
+    let mut s3 = BTreeMap::new();
     if let Some(path) = imported {
         snapshot = Snapshot::load(path, &loaded.kinds)?;
         snapshot
@@ -104,9 +106,20 @@ pub fn observe(loaded: &Loaded, imported: Option<&Path>) -> Result<Observation> 
             findings,
             kinds,
             routes,
+            s3,
         });
     }
     for (system, adapter) in &loaded.config.adapters {
+        if adapter.typ(system) == "s3" {
+            let mut obs = crate::s3::observe(adapter, &loaded.base, system);
+            snapshot.grants.append(&mut obs.grants);
+            snapshot.unobserved.append(&mut obs.unknown);
+            findings.append(&mut obs.findings);
+            kinds.append(&mut obs.kinds);
+            routes.append(&mut obs.routes);
+            s3.insert(system.clone(), obs);
+            continue;
+        }
         if adapter.typ(system) != "fixture" {
             snapshot.unobserved.push(unread(system,"Native service observation is not implemented in R2; use a saved snapshot or the Python console"));
             continue;
@@ -197,16 +210,24 @@ pub fn observe(loaded: &Loaded, imported: Option<&Path>) -> Result<Observation> 
         findings,
         kinds,
         routes,
+        s3,
     })
 }
 pub fn plan(loaded: &Loaded, observation: &Observation) -> Report {
-    planner::build(
+    let mut report = planner::build(
         &loaded.intent,
         &observation.snapshot.grants,
         &observation.snapshot.unobserved,
         &loaded.kinds,
         observation.findings.clone(),
-    )
+    );
+    for (system, obs) in &observation.s3 {
+        report
+            .s3_previews
+            .extend(obs.previews(system, &mut report.changes));
+    }
+    report.commands_complete = report.changes.iter().all(|c| c.cmd.is_some());
+    report
 }
 pub fn graph(loaded: &Loaded, observation: &Observation) -> Result<Graph> {
     Graph::build(

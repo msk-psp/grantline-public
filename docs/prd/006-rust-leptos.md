@@ -32,8 +32,8 @@ State is disposable, private to the process and erased when it exits.
 
 | Stage | Implementation | Acceptance before promotion | Status |
 |---|---|---|---|
-| R2 | Typed config/intent, snapshots, findings, graph and offline plan CLI | Fixture decisions, diagnostics, PG/CH SQL previews, snapshot round trips and graph paths match Python; S3 commands/coalescing remain R3 | Implemented offline |
-| R3 | PostgreSQL, ClickHouse and S3 native adapters, probes and writers | Existing regression cases ported; separately authorized live read/probe and reversible write validation per adapter | Pending |
+| R2 | Typed config/intent, snapshots, findings, graph and offline plan CLI | Fixture decisions, diagnostics, PG/CH SQL previews, snapshot round trips and graph paths match Python; S3 commands/coalescing remain R3 | Merged in PR #16 |
+| R3 | PostgreSQL, ClickHouse and S3 native adapters, probes and writers | Existing regression cases ported; separately authorized live read/probe and reversible write validation per adapter | R3a implemented offline; connections/probes/writers pending |
 | R4 | Production sessions/OIDC, durable approval store, Slack signatures/DMs, code writer and GitHub PRs | Requester binding, all approvers, callback replay, immutable plan and repo scope verified end to end; approval/PR/applied access reported separately | Pending |
 | R5 | All console pages, Leptos hydration and interactive permission map | Repeated hover highlight/dimming, matrix scrolling, accessible dark mode, logs and four locales verified in browser | Pending |
 | R6 | Release image, migration/rollback and operating guide | Reproducible native/WASM builds, upgrade of persisted state, image smoke tests and explicitly authorized rollout | Pending |
@@ -70,10 +70,48 @@ keep Python as a development-only oracle until all stages pass.
 
 ## Next action
 
-Review R2, then implement R3: file-backed S3 IAM interpretation and document
-commands/coalescing first, followed by native PostgreSQL/ClickHouse/S3 service
-connections and separately authorized live verification. Each stage needs its
-own reviewable change and acceptance evidence before advancing.
+Review R3a's offline S3 interpretation and document previews, then implement
+native PostgreSQL/ClickHouse/S3 service connections with isolated local adapter
+tests. Probes/writers and separately authorized live verification follow. Each
+review unit needs acceptance evidence before advancing; R3 is not yet complete.
+
+## R3 — Native adapter migration {#R3}
+
+Status: R3a implemented offline. The first review unit implements S3 file/dir
+planes, effective policy observation, group/inline routes and identity-scoped
+document previews. Plan commands remain previews; no IAM file, shared managed
+policy or live service is changed. Existing Python regressions are the oracle.
+
+Acceptance: preserve policy-over-native precedence, exact Deny subtraction,
+literal prefix-listing capabilities, conservative unread scopes, cross-plane
+identity drift and missing-policy diagnostics. Merge all previewed changes for
+one identity into one final document. Directory-backed inherited policy changes
+must be blocked rather than presented as per-user writes to a shared policy.
+Malformed source documents must never look like an empty service; output must
+not include credentials or read environment credentials. Native connections,
+probes and actual writers require a subsequent review unit and separately
+authorized live verification.
+
+R3a adds one structured final document preview per identity, combining both
+grant and revoke candidates. This is preview coalescing, not an implemented
+writer. Credentials never enter document output. A simulated transformation is
+re-evaluated and blocked unless it produces exactly the intended normalized
+grant set; prefix-List writes and capability writes are unsupported. Original
+policy documents are required, so imported snapshots cannot generate them.
+
+Safety differences from the Python oracle: missing/incomplete policies obscure
+discovery and prefix capabilities too; empty attached policies still shadow
+native actions; malformed trees and conflicting policy route names stay unread;
+cancelled allows do not leave identity-to-policy graph paths. Native action
+revokes remove equivalent original `/*` spellings. These guards are tested
+separately from unchanged Python semantics.
+
+Validation: run the native checks and all three `scripts/check_rust_*.py` suites.
+The S3 suite compares 27 fictional policy/action cases and two IAM-tree scenarios
+against Python, with the documented conservative unknown-scope extension. Five
+native S3 tests cover malformed/remote inputs, source immutability, credential
+non-disclosure, merged documents, unrepresentable revokes, shared policies,
+empty policy precedence, deny routes, cross-plane drift and snapshot boundaries.
 
 ## R1 validation boundary
 

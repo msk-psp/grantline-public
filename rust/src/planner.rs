@@ -62,6 +62,7 @@ pub struct Report {
     pub findings: Vec<Finding>,
     pub unverified: Vec<Grant>,
     pub groups: Vec<Group>,
+    pub s3_previews: Vec<crate::s3::Preview>,
 }
 fn where_(gs: &[&Grant]) -> (String, Vec<String>) {
     let resources: BTreeSet<_> = gs.iter().map(|g| g.resource.clone()).collect();
@@ -244,5 +245,6 @@ pub fn build(
         findings,
         unverified,
         groups: groups.into_values().collect(),
+        s3_previews: Vec::new(),
     }
 }

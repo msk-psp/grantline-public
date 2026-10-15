@@ -56,10 +56,12 @@ not done until the checks pass locally.
 | decisions and their reasons | `docs/prd/` |
 | experimental native core, offline CLI and Leptos playground | `rust/` — [guide](rust/README.md), [migration stages](docs/prd/006-rust-leptos.md) |
 
-For Rust changes run the native checks and both differential suites in the
+For Rust changes run the native checks and all three differential suites in the
 [Rust guide](rust/README.md#check-the-boundary). `plan` is read-only; only the
 explicit `snapshot` command records state. Real adapter connections/writers
-remain in the subsequent migration stage.
+remain in subsequent migration work. Local S3 IAM files/trees support observation
+and grouped previews; directory-backed shared policies cannot be rewritten from
+a per-user change.
 
 ## Conventions
 

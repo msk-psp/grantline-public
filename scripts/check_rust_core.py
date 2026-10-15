@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT))
 from check_rust_parity import Commands, atom, cases  # noqa: E402
 
 from grantline import diff, graph, intent, snapshot  # noqa: E402
-from grantline.adapters import FixtureAdapter, clickhouse, postgres  # noqa: E402
+from grantline.adapters import FixtureAdapter, clickhouse, postgres, s3  # noqa: E402
 from grantline.model import KINDS, Grant, Unobserved  # noqa: E402
 
 
@@ -92,8 +92,7 @@ def main():
                 assert change["cmd"] == expected, (case["name"], change)
                 assert expected is not None or change["command_error"]
 
-        # Existing bundled config, with only fixture providers observed. Native
-        # service providers intentionally remain unread until R3.
+        # Bundled fixtures and local S3 IAM planes; no native service connections.
         config_path = ROOT / "grantline.toml"
         cfg = tomllib.loads(config_path.read_text())
         KINDS.clear()
@@ -109,16 +108,25 @@ def main():
                 facts += fs
                 unknown += us
                 adapters[system] = adapter
+            elif acfg["type"] == "s3":
+                acfg = dict(acfg, planes={n: dict(p, file=str(ROOT / p["file"])) for n, p in acfg["planes"].items()})
+                adapter = s3.S3ConfigAdapter(acfg, system)
+                gs, fs, us = adapter.observe()
+                observed |= gs
+                facts += fs
+                unknown += us
+                adapters[system] = adapter
             else:
                 unknown.append(Unobserved(system, ("",), "Native service observation is not implemented in R2; use a saved snapshot or the Python console"))
                 adapters[system] = Commands()
         changes, findings, unverified = diff.plan(intent.load(ROOT / cfg["intent"]), observed, adapters, unknown)
         actual = native(config_path, "plan", "--json")
+        assert sorted((c["action"], key(c["grant"])) for c in actual["changes"]) == sorted((c.action, key(g)) for c in changes for g in c.all_grants)
         assert sorted(map(finding, actual["findings"])) == sorted(map(finding, facts + findings))
         # Deterministic fixture diagnostics preserve their full explanation.
         for title in ("frozen ACL (owner locked out)", "stale grants on dropped database", "default privileges on a group role", "naming drift"):
             assert sorted(f["detail"] for f in actual["findings"] if f["title"] == title) == sorted(f.detail for f in facts + findings if f.title == title)
-        assert sorted(c["cmd"] for c in actual["changes"]) == sorted(c.cmd for c in changes)
+        assert sorted(c["cmd"] for c in actual["changes"] if c["grant"]["system"] != "s3") == sorted(c.cmd for c in changes if c.grant.system != "s3")
 
         # Python-written snapshots load natively; native copies load in Python.
         declaration.write_text("")
