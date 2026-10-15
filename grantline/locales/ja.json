@@ -342,6 +342,11 @@
   "Information": "情報",
   "Warning": "警告",
   "Error": "エラー",
+  "proposed": "PR 作成済み",
+  "Approved code plan": "承認するコード変更",
+  "Approval creates a PR, not a permission change.": "承認すると PR を作成します。権限はまだ変更しません。",
+  "View permission PR": "権限変更 PR を表示",
+  "Permission PR created; merge and application are still required.": "権限変更 PR を作成しました。マージと適用は別途必要です。",
   "{0} This is the first run recorded, so there is nothing to compare it with. Nothing here runs on a schedule — the next comparison will cover however long it happens to be until you run this again.": "{0} 初回の記録なので比較対象はありません。定期実行ではなく、次に実行するまでの変化を比較します。",
   "{0} Nothing changed. Unchanged access is omitted.": "{0} 変更はありません。同じ権限は省略しています。",
   "{0} Information · {1} Requires review · {2} Observation or verification failed": "{0} 情報 · {1} 要確認 · {2} 観測または検証の失敗"

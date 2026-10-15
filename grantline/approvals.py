@@ -24,6 +24,7 @@ channel is told. Without Slack, a trusted operator securely relays links using
 from __future__ import annotations
 
 import datetime
+import fcntl
 import fnmatch
 import getpass
 import json
@@ -35,8 +36,9 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from . import slack
-from .act import ActError, Proposal, execute
+from .act import ActError, Proposal, execute, propose
 from .i18n import LANGUAGES, language, t
+from .model import Grant
 
 
 @dataclass
@@ -55,6 +57,8 @@ class Request:
     status: str = "pending"                        # pending | approved | executed | denied | failed
     note: str = ""
     names: dict = field(default_factory=dict)       # display names only; identity stays unchanged
+    code_plan: dict = field(default_factory=dict)
+    pr_url: str = ""
 
     def display_name(self, identity: str) -> str:
         return self.names.get(identity, identity)
@@ -62,7 +66,7 @@ class Request:
     def display_note(self) -> str:
         if self.note.startswith("denied by "):
             return t("Denied by {0}", self.display_name(self.note[len("denied by "):]))
-        return self.note
+        return t(self.note)
 
     @property
     def missing(self) -> list[str]:
@@ -79,6 +83,17 @@ class Approvals:
         self.rules = list(cfg.get("rules", []))
         self.names = dict(cfg.get("names", {}))
         self.slack_cfg = slack_cfg or {}
+        self.identities = dict(cfg.get("identities", {}))
+        if (any(not isinstance(k, str) or not k or not isinstance(v, str) or not v
+                for k, v in self.identities.items())
+                or len(set(self.identities.values())) != len(self.identities)):
+            raise ValueError("approval identities must map unique signed-in users to approvers")
+        self.writer = None
+        if cfg.get("code_writer"):
+            from .code_writer import CodeWriter
+            if not self.identities:
+                raise ValueError("code proposals require authenticated approval identities")
+            self.writer = CodeWriter(cfg["code_writer"])
 
     # ── who ──────────────────────────────────────────────────────────────────
     def approvers_for(self, system: str, resource: str) -> list[str]:
@@ -125,6 +140,19 @@ class Approvals:
         return [self._read(p) for p in sorted(self.store.glob("*.json"))]
 
     # ── flow ─────────────────────────────────────────────────────────────────
+    def propose(self, action, system, subject, resource, priv, observed, adapters):
+        if not self.writer:
+            return propose(action, system, subject, resource, priv, observed, adapters)
+        if system not in self.writer.systems or action != "grant":
+            raise ActError("This code writer does not support the requested service or action.")
+        if any(not isinstance(v, str) or not v.strip() for v in (subject, resource, priv)):
+            raise ActError("A code proposal requires an account, resource and privilege.")
+        grant = Grant(system, subject.strip(), resource.strip(), priv.strip())
+        # Native policy edits can differ from repository declarations; the writer
+        # validates the actual patch before a request is stored or notified.
+        cmd = f"code PR: {action} {grant.priv} on {grant.resource} to {grant.subject} ({system})"
+        return Proposal(action, grant, cmd, False, "Approval creates a repository PR.")
+
     def create(self, prop: Proposal, requester: str | None = None) -> Request:
         if not self.enabled:
             raise ActError("no [approvals] section in the config — nothing says who approves.")
@@ -140,6 +168,13 @@ class Approvals:
             action=prop.action, system=prop.grant.system, subject=prop.grant.subject,
             resource=prop.grant.resource, priv=prop.grant.priv, cmd=prop.cmd,
             required={a: secrets.token_urlsafe(18) for a in who}, names=dict(self.names))
+        if self.writer:
+            if req.requester not in self.identities:
+                raise ActError("Sign in with a configured requester identity.")
+            req.requester = self.identities[req.requester]
+            if req.requester in req.required:
+                raise ActError("You cannot approve your own permission request.")
+            req.code_plan = self.writer.call(req, "preview")
         self.save(req)
         return req
 
@@ -168,6 +203,8 @@ class Approvals:
                   ("Resource", resource), ("Privilege", req.priv), ("Request ID", req.id))
         head = t("[Grantline] Approval request: {0}", t(req.action)) + "\n" + "\n".join(
             f"{t(label)}: `{plain(value)}`" for label, value in fields) + f"\n{t('Command')}: `{plain(req.cmd)}`"
+        if req.code_plan:
+            head += f"\n{t('Approved code plan')}: {plain(req.code_plan['summary'])}\npatch: `{req.code_plan['patch_sha256']}`\n{t('Approval creates a PR, not a permission change.')}"
         for a in req.required:
             msg = f"{head}\n{t('Approve or deny')}: {self.link(req, a)}"
             # Approval credentials cannot be redirected into a pilot inbox.
@@ -180,12 +217,22 @@ class Approvals:
             slack.post(self.slack_cfg, ch, f"{head}\n{t('Awaiting approval')}: {', '.join(plain(req.display_name(a)) for a in req.required)}")
         return lines
 
-    def decide(self, rid: str, token: str, approve: bool) -> tuple[Request, str]:
+    def decide(self, rid: str, token: str, approve: bool, actor: str | None = None) -> tuple[Request, str]:
+        self.store.mkdir(parents=True, exist_ok=True, mode=0o700)
+        with self._path(rid).with_suffix(".lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            return self._decide(rid, token, approve, actor)
+
+    def _decide(self, rid, token, approve, actor):
         req = self.load(rid)
         who = next((a for a, t in req.required.items() if secrets.compare_digest(t, token)), None)
         if who is None:
             raise ActError("that link is not one of this request's approver links.")
-        if req.status in ("executed", "denied", "failed"):
+        if self.identities and (actor not in self.identities or self.identities[actor] != who):
+            raise ActError("Sign in as this request's named approver.")
+        if (self.identities or self.writer) and req.requester == who:
+            raise ActError("You cannot approve your own permission request.")
+        if req.status in ("executed", "denied", "failed", "proposed"):
             raise ActError(f"request {rid} is already {req.status}.")
         if not approve:
             req.status = "denied"; req.note = f"denied by {who}"
@@ -196,10 +243,32 @@ class Approvals:
         self.save(req)
         return req, who
 
+    def submit(self, req: Request) -> Request:
+        with self._path(req.id).with_suffix(".lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            stored = self.load(req.id)
+            if stored.status == "proposed":
+                return stored
+            return self._submit(stored)
+
+    def _submit(self, req):
+        if not self.writer or not req.code_plan or req.status != "approved" or req.missing:
+            raise ActError("An approved code plan is required before creating a PR.")
+        # Re-preview before any external write; a changed base/patch requires a new request.
+        if self.writer.call(req, "preview") != req.code_plan:
+            raise ActError("The approved code plan changed. Create a new approval request.")
+        req.pr_url = self.writer.call(req, "submit")
+        req.status = "proposed"
+        req.note = "Permission PR created; merge and application are still required."
+        self.save(req)
+        return req
+
     def run(self, req: Request, adapters: dict, audit_path: str | None, observed) -> Request:
         """Execute an approved request — the stored command, nothing else (N2). Refuses
         while approvals are missing, and records failure instead of pretending."""
         from .act import propose
+        if req.code_plan:
+            raise ActError("Code proposals cannot execute native permission changes.")
         if req.status != "approved":
             raise ActError(f"request {req.id} is {req.status}; missing: {', '.join(req.missing) or '—'}")
         prop = propose(req.action, req.system, req.subject, req.resource, req.priv, observed, adapters)
