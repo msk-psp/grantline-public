@@ -29,6 +29,20 @@ enum Command {
         #[arg(long)]
         verbose: bool,
     },
+    /// Read-only native ACL checks. Network activity requires --live; no writes or data reads.
+    Probe {
+        #[arg(long)]
+        live: bool,
+        /// Use a saved baseline while probing the current server; may be combined with --live.
+        #[arg(long)]
+        observed: Option<PathBuf>,
+        #[arg(long)]
+        system: Vec<String>,
+        #[arg(long)]
+        subject: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Explicitly save a private JSONL snapshot; never applies IAM.
     Snapshot {
         #[command(flatten)]
@@ -85,6 +99,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             json,
             verbose,
         } => cli::plan(&args.config, &source, json, verbose)?,
+        Command::Probe {
+            live,
+            observed,
+            system,
+            subject,
+            json,
+        } => cli::probe(
+            &args.config,
+            live,
+            observed.as_deref(),
+            &system,
+            &subject,
+            json,
+        )?,
         Command::Snapshot {
             source,
             directory,

@@ -33,7 +33,7 @@ State is disposable, private to the process and erased when it exits.
 | Stage | Implementation | Acceptance before promotion | Status |
 |---|---|---|---|
 | R2 | Typed config/intent, snapshots, findings, graph and offline plan CLI | Fixture decisions, diagnostics, PG/CH SQL previews, snapshot round trips and graph paths match Python; S3 commands/coalescing remain R3 | Merged in PR #16 |
-| R3 | PostgreSQL, ClickHouse and S3 native adapters, probes and writers | Existing regression cases ported; separately authorized live read/probe and reversible write validation per adapter | R3a–R3c merged; R3d S3 readers implemented; probes/writers pending |
+| R3 | PostgreSQL, ClickHouse and S3 native adapters, probes and writers | Existing regression cases ported; separately authorized live read/probe and reversible write validation per adapter | R3a–R3d merged; R3e1 PostgreSQL probes implemented; remaining probes/writers pending |
 | R4 | Production sessions/OIDC, durable approval store, Slack signatures/DMs, code writer and GitHub PRs | Requester binding, all approvers, callback replay, immutable plan and repo scope verified end to end; approval/PR/applied access reported separately | Pending |
 | R5 | All console pages, Leptos hydration and interactive permission map | Repeated hover highlight/dimming, matrix scrolling, accessible dark mode, logs and four locales verified in browser | Pending |
 | R6 | Release image, migration/rollback and operating guide | Reproducible native/WASM builds, upgrade of persisted state, image smoke tests and explicitly authorized rollout | Pending |
@@ -70,14 +70,14 @@ keep Python as a development-only oracle until all stages pass.
 
 ## Next action
 
-Review R3d's remote S3 readers and isolated SeaweedFS tests; read-only probes
-are the next review unit. Writers and separately
-authorized production/staging verification follow. Each
+Review R3e1's PostgreSQL read-only ACL probes and isolated server evidence;
+ClickHouse probes are the next review unit, followed by S3 probes. Writers and
+separately authorized production/staging verification follow. Each
 review unit needs acceptance evidence before advancing; R3 is not yet complete.
 
 ## R3 — Native adapter migration {#R3}
 
-Status: R3a merged in PR #17; R3b merged in PR #18; R3c merged in PR #19; R3d S3 reads implemented.
+Status: R3a merged in PR #17; R3b merged in PR #18; R3c merged in PR #19; R3d merged in PR #20; R3e1 PostgreSQL probes implemented.
 The first review unit implements S3 file/dir
 planes, effective policy observation, group/inline routes and identity-scoped
 document previews. Plan commands remain previews; no IAM file, shared managed
@@ -254,3 +254,32 @@ Run `cargo fmt --check`, `cargo clippy --locked --all-targets -- -D warnings`,
 The existing Python suite and privacy gate still apply. Live service reads,
 S3 policy coalescing, writes, production auth/Slack/GitHub, full console pages,
 WASM, performance and production deployment are outside this verification.
+
+
+### R3e1 — PostgreSQL read-only ACL probes
+
+Scope: native `probe` CLI, three-state results, exact baseline disagreements,
+PostgreSQL fixed privilege inquiry SELECTs and optional explicitly mapped subject
+TCP credentials. It does not read application rows or execute permission writes.
+Default reader evaluations say "not a login". Mapped subject credentials must
+verify session/current user; missing credentials, identity mismatch, connection/
+SQL/null failures and unsupported targets are unknown with redacted reasons.
+No reader/admin fallback occurs for a configured subject credential.
+
+Use observed atoms only, not intent expansion. `--live` is mandatory for network
+activity. `--observed` can accompany `--live` for stale-baseline checks, unlike
+plan/graph/snapshot source selection. Service filters apply before observation.
+Keep unread baseline scopes visible. Enforce 1,000 selected atoms, 128 connection
+groups, DB inclusion/exclusion, verified TLS and inherited read-only session/
+transaction limits. The probe deadline is separate from observation and discards
+partial results. Savepoints isolate per-atom SQL errors. Unsupported PUBLIC,
+default resources, wildcards and ALL remain unknown.
+
+Acceptance evidence: Rust format/clippy/tests/build, existing differential suites,
+and `scripts/check_rust_postgres.py --docker` for definite allow/deny, nested vs
+non-inherited role ACLs, quoted names, stale baseline findings, failed query
+recovery, actual subject TCP login/identity mismatch, missing credentials, offline
+isolation, deadlines and redaction. The disposable server uses trust auth; SCRAM,
+positive TLS and production/staging verification are not claimed. ACLs do not
+establish schema traversal, RLS/data availability or SET ROLE behavior. Readers
+and probes are read-only; ClickHouse/S3 probes and writers remain subsequent units.

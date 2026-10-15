@@ -318,3 +318,82 @@ pub fn graph(
     }
     Ok(())
 }
+
+/// Probe only selected services and observed atoms, never guessed or expanded grants.
+pub fn probe(
+    path: &Path,
+    live: bool,
+    imported: Option<&Path>,
+    systems: &[String],
+    subjects: &[String],
+    as_json: bool,
+) -> Result<()> {
+    use crate::probe::{self, Probe, Verdict};
+    let mut loaded = config::load(path)?;
+    for system in systems {
+        if !loaded.config.adapters.contains_key(system) {
+            return Err("Unknown selected probe system".into());
+        }
+    }
+    if !systems.is_empty() {
+        loaded.config.adapters.retain(|s, _| systems.contains(s));
+    }
+    let obs = engine::observe_with_live(&loaded, imported, live && imported.is_none())?;
+    let selected: Vec<_> = obs
+        .snapshot
+        .grants
+        .iter()
+        .filter(|g| subjects.is_empty() || subjects.contains(&g.subject))
+        .cloned()
+        .collect();
+    if selected.len() > 1000 {
+        return Err("Probe selection exceeds 1000 atoms; select a subject/system".into());
+    }
+    let mut probes = Vec::new();
+    for (system, adapter) in &loaded.config.adapters {
+        let grants: Vec<_> = selected
+            .iter()
+            .filter(|g| &g.system == system)
+            .cloned()
+            .collect();
+        if grants.is_empty() {
+            continue;
+        }
+        if live && adapter.typ(system) == "postgres" {
+            probes.extend(crate::postgres::probe::run(adapter, &grants));
+        } else {
+            let why = if !live {
+                "Network probes disabled; pass --live to opt in"
+            } else {
+                "Native probes for this adapter are not implemented"
+            };
+            probes.extend(grants.iter().map(|g| Probe::new(g, Verdict::Unknown, why)));
+        }
+    }
+    let findings = probe::compare(&probes, &obs.snapshot.grants);
+    let counts = probe::summary(&probes);
+    if as_json {
+        return json(
+            &serde_json::json!({"probes":probes,"summary":counts,"findings":findings,"observed_at":obs.snapshot.ts,"unobserved":obs.snapshot.unobserved,"baseline_source":if imported.is_some(){"saved observation"}else if live{"configured readers and local inputs"}else{"local inputs"}}),
+        );
+    }
+    println!(
+        "Probed {} atoms — allow {}, deny {}, unknown {} (unknown is not no access)",
+        probes.len(),
+        counts["allow"],
+        counts["deny"],
+        counts["unknown"]
+    );
+    for p in probes {
+        println!(
+            "[{}] {} {} on {}: {:?} — {}",
+            p.system, p.subject, p.privilege, p.resource, p.verdict, p.how
+        );
+    }
+    println!(
+        "{} baseline unread scopes; {} disagreement finding(s). No data read or permission write attempted.",
+        obs.snapshot.unobserved.len(),
+        findings.len()
+    );
+    Ok(())
+}

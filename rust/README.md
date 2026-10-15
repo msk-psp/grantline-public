@@ -1,6 +1,6 @@
 # Grantline — Rust + Leptos migration
 
-Experimental **R1 + R2 + R3a/R3b/R3c/R3d foundation**, alongside the supported Python console.
+Experimental **R1 + R2 + R3a/R3b/R3c/R3d/R3e1 foundation**, alongside the supported Python console.
 This binary runs natively with no Python process. Commands are offline by default;
 native PostgreSQL/ClickHouse catalogs and remote S3 IAM require explicit `--live`
 and configured reader endpoints/credentials.
@@ -130,6 +130,61 @@ MEMBER and grant atoms do not model them. These safeguards intentionally exceed
 the Python reader. The target is DB/schema/table/default-table ACLs and role
 memberships; sequence/function/type ACLs, effective RLS, owner powers, target-user
 login/data access and a cluster-wide atomic snapshot are not represented.
+
+### Verify PostgreSQL ACLs (R3e1)
+
+`probe --live` checks observed atoms using fixed `has_*_privilege` and
+`pg_has_role(..., 'MEMBER')` queries. Without `--live`, all probes are unknown
+and no network credentials are resolved. It never reads application rows or
+executes DML, DDL, GRANT, REVOKE or SET ROLE. Checking an INSERT/DELETE privilege
+is a SELECT of ACL metadata, not an attempted write.
+
+```sh
+rust/target/debug/grantline-rs -c /path/to/grantline.toml probe --live --system database --subject demo-user --json
+rust/target/debug/grantline-rs -c /path/to/grantline.toml probe --live --observed /path/to/baseline.jsonl --system database --json
+```
+
+The first command observes the selected services before checking their atoms.
+The second uses the saved baseline and only contacts the configured probe
+connections: it can expose grants that were revoked after the snapshot. No
+candidate is invented from intent, wildcard expansion or an empty observation.
+`--system` filters services before observation; `--subject` filters observed atoms.
+Probe selection is capped at 1,000 atoms and 128 connection groups per adapter.
+An unread baseline remains visible in `unobserved`; an empty probe list proves
+no access outcome. All CLI results are informational; an unknown/deny verdict
+does not make the process exit nonzero. Inspect `summary` and `findings` in CI.
+
+By default the named reader asks the server about a subject's ACLs. Results say
+**server-evaluated, not a login**: they do not prove that subject can authenticate.
+To verify an actual subject TCP login as well, explicitly map its DSN:
+
+```toml
+[adapters.database.probe_dsn_envs]
+"demo-user" = "GRANTLINE_DEMO_USER_DSN"
+```
+
+The connection must report both `session_user` and `current_user` as that exact
+subject before any allow/deny is reported. A missing/bad mapped credential or
+identity mismatch remains unknown; it never falls back to the reader or admin.
+The same TCP/TLS/DSN restrictions apply as for observation. Database selection
+and exclusions are honored; schema/table checks use their own DB and a subject
+CONNECT check logs into the target DB. Reader CONNECT checks use its maintenance DB.
+
+`allow`/`deny` mean a definite ACL evaluator result; connection, auth, SQL, null,
+and unsupported cases are **unknown**. PUBLIC, default ACL resources, wildcard
+resources and composite `ALL` requests have no evaluator in this unit. Quoted
+identifiers are handled as exact parameters, not executable SQL. Savepoints keep
+one missing role/object from poisoning later checks. Each probe adapter has a
+separate total deadline using `read_timeout_seconds`; an expired deadline discards
+partial results. Observation has its own deadline. Both use read-only transactions,
+fixed catalog search paths and existing statement/lock limits.
+
+The findings compare definite outcomes with the exact saved/observed grant
+atoms, as in Python. ACL checks do not establish schema traversal, RLS outcomes,
+row availability, owner DDL powers, SET ROLE behavior or end-to-end data access.
+Subject login is subject to the server's authentication configuration (the
+isolated integration server uses trust authentication). ClickHouse/S3 probes,
+writes and production/staging validation remain pending.
 
 ### Read remote S3 IAM sources
 

@@ -1,4 +1,5 @@
-//! Opt-in PostgreSQL catalog reads. Fixed queries, explicit reader, no data probes or writes.
+//! Opt-in PostgreSQL catalog reads and ACL probes. No data reads or permission writes.
+pub mod probe;
 use crate::{
     Result,
     config::Adapter,
