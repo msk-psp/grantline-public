@@ -1,5 +1,7 @@
 # Grantline
 
+[English](README.md) · [한국어](docs/README.ko.md) · [日本語](docs/README.ja.md) · [简体中文](docs/README.zh-CN.md)
+
 **Untangle access. Follow the grants.**
 
 An open-source **permission management and access control dashboard** for
@@ -27,6 +29,25 @@ grantline -c examples/demo/grantline.toml serve
 Open **http://127.0.0.1:8420/**. The map is the first page; **Services** lists
 resources by service, **Matrix** compares permissions, and **Changes** previews
 explicit grants and revokes. Selecting a subject shows their access and routes.
+
+The console supports **English, 한국어, 日本語 and 简体中文**. Select a language
+at the top of any page; your choice is saved in a cookie. On your first visit,
+Grantline uses your browser language. Account names, resource paths and native
+commands retain their original spelling.
+
+## Run with Docker
+
+Published GitHub Releases provide `linux/amd64` and `linux/arm64` images on GHCR.
+Stable releases also update `latest`; pre-releases keep their own version tag.
+
+```bash
+docker run --rm -p 127.0.0.1:8420:8420 ghcr.io/msk-psp/grantline-public:latest
+```
+
+Open **http://127.0.0.1:8420/** for the built-in demo. No credentials are needed.
+For real systems, mount your own configuration and persist runtime state; see
+[container configuration](docs/usage.md#containers). Pin a release tag or digest
+for deployments. The image includes the PostgreSQL driver.
 
 ## Common commands
 

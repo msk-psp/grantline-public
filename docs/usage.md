@@ -164,7 +164,7 @@ privs = ["Write"]
 
 Read [SECURITY.md](../SECURITY.md) before sharing a console or enabling writes. Shared
 deployments require an authenticated reverse proxy and trusted Host configuration;
-the built-in server does not authenticate users.
+the built-in server does not validate passwords or OIDC sessions itself.
 
 - **Read-only by default** — `plan` never writes; `apply` is a dry-run without
   `--write`, and `--write` asks for confirmation (`--yes` to skip). `serve`
@@ -181,6 +181,50 @@ the built-in server does not authenticate users.
   subjects are reported. A trusted operator can also explicitly name a single write.
 - **Audit log** — an attempt is recorded before every write; its result appends
   `{ts, user, system, cmd, ok}` to `audit.jsonl`.
+
+## Console sign-in
+
+Without authentication configuration, `/login` is a local console landing page.
+For a shared console, an authenticated reverse proxy owns OIDC, sessions and the
+allowed users or groups. Enable the proxy identity gate in the external configuration:
+
+```toml
+[web]
+trusted_hosts = ["console.example.com"]
+
+[web.auth]
+mode = "proxy"
+identity_header = "X-Forwarded-Email"
+login_url = "/oauth2/start"
+logout_url = "/oauth2/sign_out"
+```
+
+The backend must remain reachable only by the trusted proxy, through loopback or
+network isolation. The proxy must strip client-supplied identity headers and inject
+one validated identity. For an ingress `auth_request` setup, use its validated
+`X-Auth-Request-Email` header instead. Setting this table alone does not make a
+publicly reachable backend safe: Grantline trusts the configured header.
+
+Route `/login` and static assets to Grantline, the configured sign-in/sign-out
+endpoints to the proxy, and all other console traffic through authentication.
+Preserve API authentication failures as HTTP 401 rather than a 200 HTML sign-in
+page. Unauthenticated page requests return to `/login`; API and write requests
+fail with 401. Grantline accepts only local return paths. Restrict redirect domains
+at the proxy as well.
+
+The account appears in navigation, and new approval requests record that identity.
+Signing in does not grant access to PostgreSQL, ClickHouse or S3, and approval
+tokens still authorize their individual approval decisions. Sign-out clears the
+proxy session; the identity provider may still have its own active session.
+See OAuth2 Proxy's official [endpoints](https://oauth2-proxy.github.io/oauth2-proxy/features/endpoints/)
+and [configuration](https://oauth2-proxy.github.io/oauth2-proxy/configuration/overview/).
+
+The console has searchable inventories and an account matrix. Detail links retain
+all account chips, including those behind “more.” Focusing a change field preserves
+its value; changing service retains the account and clears resource/privilege fields
+because they belong to that service. Editing a proposal hides the previous preview
+until you preview again. Successful writes and requests redirect to a read-only
+detail page, so refreshing it does not submit the operation again.
 
 ## Login and permission probes
 
@@ -210,6 +254,15 @@ expose. Keys absent from an IAM API observation yield `unknown`.
 
 ## History and approvals
 
+On Routes, enter a number in **Recent changes (days)** (or open `/?days=7`) to
+show current routes involving grant changes observed during that period. Unchanged
+routes are hidden. Removed grants are counted but are not drawn as current access.
+The filter compares recorded snapshots and the current observation, so it reports
+incomplete history when no snapshot reaches the start of the period. Snapshot times
+are observation times, not exact server-side change times. Declared bridges and S3
+policy attachment changes have no snapshot history; they provide current route
+context, but are not independently dated changes. The default view shows all routes.
+
 `history --since 7d` compares observations; `snapshot` records one for an external timer.
 The console takes one snapshot per process, even while its observation cache refreshes
 in the background. Cached reads use the last complete observation; explicit refreshes and
@@ -220,7 +273,92 @@ matching `[[approvals.rules]]` choose approvers. Slack delivery is optional. App
 are bearer credentials: deliver privately; a trusted operator uses `request --links ID`.
 Direct web execution is refused when approvals are enabled. See [SECURITY.md](../SECURITY.md).
 
+Display names do not change approval identities. Add `[approvals.names]` to show
+usernames instead of IDs, and set the console and notification language separately:
+
+```toml
+[web]
+default_language = "ko"
+
+[approvals.names]
+"U_EXAMPLE" = "@example"
+
+[notify.slack]
+bot_token_env = "ATLAS_SLACK_BOT_TOKEN"
+language = "ko"
+```
+
+Explicit language selection and a saved language cookie override the deployment
+default. Approval DMs include the target account, service, resource and privilege;
+private approval links remain limited to the intended approver's DM.
+
 Probe implementation references: [PostgreSQL privilege inquiry functions](https://www.postgresql.org/docs/current/functions-info.html)
 and [ClickHouse SHOW GRANTS](https://clickhouse.com/docs/reference/statements/show#show-grants).
 ClickHouse login identity checks return one row and bound execution time, following
 `clickhouse-best-practices/agent-query-safety`; they do not scan data tables.
+
+## Console language
+
+The console and README support English (`en`), Korean (`ko`), Japanese (`ja`) and
+Simplified Chinese (`zh-CN`). Select a language at the top of any console page.
+The selection is saved in the `grantline_lang` cookie. On a first visit, the
+`Accept-Language` header determines the language; unsupported languages fall back
+to English. A supported `?lang=` value overrides the cookie for that request.
+
+Only interface text is translated. Account names, resource identifiers, SQL,
+CLI commands and native service diagnostics retain their original spelling.
+The CLI and detailed operational documentation are in their original language.
+Translation catalogs live in `grantline/locales/`; English source text is the
+fallback. Templates are translated before service data is interpolated.
+
+## Containers
+
+GitHub Release publication triggers `.github/workflows/release.yml`: the Python
+matrix and container smoke test run first, then an `amd64`/`arm64` image is pushed
+to `ghcr.io/msk-psp/grantline-public`. Use a version tag such as `v0.1.0`, or pin
+the digest reported in the workflow summary. Stable releases update `latest`;
+pre-releases do not. The first published GHCR package must be made **public** in
+its package settings to allow anonymous pulls. Release publishing uses the
+repository's `GITHUB_TOKEN`; no personal registry token is required.
+
+The image defaults to a fictional, credential-free demo. PostgreSQL's binary
+driver is included. It runs as UID/GID `10001:10001`; the demo's writable files
+are disposable when the container is removed.
+
+For real systems, keep configuration and credentials outside the image. Mount
+configuration read-only at `/config`, and a persistent writable directory at
+`/data` for snapshots, audit records and approval requests. The container user
+must be able to read the mounted files; secret files retain mode `0600`. Use
+absolute container paths in your configuration, for example:
+
+```toml
+intent = "/config/intent.toml"
+env_file = "/config/credentials.env"
+audit_log = "/data/audit.jsonl"
+snapshots = "/data/snapshots"
+
+[approvals]
+store = "/data/approvals"
+```
+
+After preparing your external files and granting UID `10001` access to the state
+directory, start the console:
+
+```bash
+docker run --rm -p 127.0.0.1:8420:8420 \
+  --mount type=bind,src="$HOME/.config/grantline",dst=/config,readonly \
+  --mount type=bind,src="$HOME/.local/state/grantline",dst=/data \
+  ghcr.io/msk-psp/grantline-public:v0.1.0 \
+  -c /config/prod.toml serve --host 0.0.0.0 --port 8420
+```
+
+`--host 0.0.0.0` exposes the container listener; the published host port above
+remains on loopback. Outside Docker, `serve` still defaults to `127.0.0.1`.
+Host/Origin validation and proxy authentication apply unchanged. When using a
+reverse proxy or a different public port, set `[web] trusted_hosts` to the exact
+external `host:port` and follow [Security](../SECURITY.md).
+
+Publish a release only from a reviewed commit on `main` after its checks pass.
+Keep credentials out of release notes and build arguments. To roll back, run the
+previous image tag or digest with the same external configuration and state;
+never replace your configuration or observations with the bundled demo files.

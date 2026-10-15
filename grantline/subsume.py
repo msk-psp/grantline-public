@@ -52,6 +52,9 @@ def _scope_covers(system: str, held: str, wanted: str) -> bool:
         return False
 
     if kind_of(system) == "s3":
+        # Request-context capabilities are exact atoms, not object path prefixes.
+        if not held.startswith("bucket:") or not wanted.startswith("bucket:"):
+            return False
         # Policy resources are path prefixes. `bucket:*` is the whole store;
         # `bucket:warehouse` covers everything under it.
         h = held.removeprefix("bucket:").rstrip("*").rstrip("/")

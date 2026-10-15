@@ -6,10 +6,17 @@ The current default branch is the supported version.
 
 ## Trust boundaries
 
-- Grantline is an operator tool. The HTTP server binds to loopback and has no login
-  system. Before sharing it, put an authenticated reverse proxy in front of it, restrict
+- Grantline is an operator tool. The HTTP server binds to loopback by default. `serve --host 0.0.0.0`
+  listens on all container/network interfaces; this does not enable authentication. Before sharing
+  it, put an authenticated reverse proxy in front of it, restrict
   network access, and set `[web] trusted_hosts = ["console.example.com"]` in the external
   configuration. This allowlist and same-origin POST checks do not authenticate users.
+- Optional `[web.auth] mode = "proxy"` requires one validated proxy identity header
+  for console data and writes. Grantline does not validate OIDC sessions itself.
+  Strip untrusted client identity headers at the proxy and keep the backend reachable
+  only by that proxy. A header from a directly reachable backend can be forged.
+  Without this configuration the local console remains unauthenticated. See
+  [console sign-in setup](docs/usage.md#console-sign-in).
 - Reading and writing use separate configured credentials. Keep write credentials out
   of observation-only deployments. The CLI, config, process environment, and local files
   belong to trusted operators; approval rules govern the web console, not operator CLI
@@ -29,7 +36,13 @@ The current default branch is the supported version.
   limits for shared deployments; this small server is not an internet-facing service.
 - SQL writes accept the explicit privileges offered by each adapter, quote identifiers,
   and refuse unsupported privileges. They are not an arbitrary SQL interface.
-- IAM observation is not a complete AWS policy evaluator. Conditional and negative
+- IAM observation is not a complete AWS policy evaluator. Bucket discovery
+  (`ListAllMyBuckets`) is a service capability, not object access. Allow statements
+  using only `StringLike` on `s3:prefix`, literal bucket ARNs and `ListBucket` or
+  `GetBucketLocation` are shown as request-context capabilities. Prefix strings and
+  wildcard patterns are preserved; they do not become bucket-wide grants. These
+  capabilities are observation-only: no automatic IAM writes or probes are offered.
+  Conditional listings combined with any Deny remain unknown. Other conditional and negative
   statements, unsupported actions/resource wildcards, and non-exact/overlapping denies are
   reported as unknown. The S3 system is then unobserved for convergence planning;
   omitted grants must not be interpreted as denied access. Use the service's own policy
@@ -45,3 +58,25 @@ client timeout alone does not stop server work. See the official
 
 Demo identities, organizations, hostnames, and data in this repository are fictional.
 The license does not establish permission to publish someone else's code or assets.
+
+## Public-source privacy gate
+
+Tracked hooks and the CI `privacy` job check newly published commit ranges for
+realistic Slack user IDs, non-example email addresses, private-key/token patterns,
+private IPv4 addresses, internal hosts and personal home paths. Author/committer
+emails must use GitHub's noreply domain. A narrowly scoped exception preserves
+the official AWS SigV4 example access key in its existing regression test; test
+directories are not generally exempt.
+
+The gate does not identify every person, secret, username or sensitive value.
+Binary images/GIFs, unrecognized identifiers in arbitrary prose and PR descriptions still
+need human review. Existing history is not rewritten or audited on every PR.
+For a staged-index audit use `python3 scripts/privacy_gate.py --tracked`; for a
+specific new range use `python3 scripts/privacy_gate.py --range BASE HEAD`.
+If CI has no valid base (initial push or reusable invocation), it scans all history
+instead of silently skipping. That fallback can report historical findings;
+ordinary PR/push ranges do not recheck their baseline. CI runs on PRs and main
+pushes, only after publication. A direct push or web-created merge on another
+branch is not covered by this workflow; use hooks and GitHub email privacy settings.
+Never suppress a finding merely because the identifier belongs to another
+workspace: it can still link a person to operational context.

@@ -39,6 +39,7 @@ _POLICY_ACTION = {  # IAM action -> normalized priv (observation)
     "s3:CompleteMultipartUpload": "Write", "s3:AbortMultipartUpload": "Write",
     "s3:ListMultipartUploadParts": "List", "s3:ListBucketMultipartUploads": "List",
     "s3:GetObjectTagging": "Tagging", "s3:PutObjectTagging": "Tagging",
+    "s3:ListAllMyBuckets": "ListAllMyBuckets",
     "s3:*": "Admin", "*": "Admin",
 }
 _PRIV_ACTIONS = {  # normalized priv -> IAM actions (policy writes)
@@ -109,6 +110,37 @@ def _policy_scopes(policy: dict) -> tuple[str, ...]:
     return tuple(sorted(scopes)) or ("bucket:",)
 
 
+def _prefix_capabilities(statement: dict) -> set[str] | None:
+    """Preserve request-prefix patterns; they are not recursive object grants."""
+    condition = statement.get("Condition")
+    if not isinstance(condition, dict) or set(condition) != {"StringLike"}:
+        return None
+    body = condition["StringLike"]
+    if not isinstance(body, dict) or set(body) != {"s3:prefix"}:
+        return None
+    if any(not isinstance(value, (str, list)) for value in
+           (statement.get("Action"), statement.get("Resource"), body["s3:prefix"])):
+        return None
+    actions = _listed(statement.get("Action"))
+    resources = _listed(statement.get("Resource"))
+    prefixes = _listed(body["s3:prefix"])
+    if (statement.get("Effect") != "Allow" or not actions or not resources or not prefixes
+            or any(not isinstance(action, str) for action in actions)
+            or not set(actions) <= {"s3:ListBucket", "s3:GetBucketLocation"}
+            or any(not isinstance(p, str) or "${" in p for p in prefixes)):
+        return None
+    buckets = []
+    for resource in resources:
+        if not isinstance(resource, str) or not resource.startswith("arn:aws:s3:::"):
+            return None
+        bucket = resource.removeprefix("arn:aws:s3:::")
+        if not bucket or any(c in bucket for c in "/:*?[${"):
+            return None
+        buckets.append(bucket)
+    return {f"{action.removeprefix('s3:')} bucket={bucket} prefix={prefix!r}"
+            for action in actions for bucket in buckets for prefix in prefixes}
+
+
 def effective_grants(doc: dict, system: str = "s3", *, unobserved=None) -> tuple[set[Grant], list[Finding]]:
     """What one plane actually enforces: policy wins over native actions."""
     grants: set[Grant] = set()
@@ -122,6 +154,7 @@ def effective_grants(doc: dict, system: str = "s3", *, unobserved=None) -> tuple
                     f"identity '{name}' has both an IAM policy and native actions "
                     f"{ident['actions']}; the policy wins and the actions are ignored. "
                     f"The matrix shows the policy (what is enforced).",
+                    entities=(name, *ident["actions"]),
                 ))
             # ⚠ Deny 를 건너뛰면 **막혀 있는 접근이 허용으로 렌더된다.** 재고 화면에서
             #    그건 그냥 틀린 답이다 — 관리자가 "이 사람은 못 본다" 를 확인하려고
@@ -133,10 +166,18 @@ def effective_grants(doc: dict, system: str = "s3", *, unobserved=None) -> tuple
             allowed: set[tuple[str, str]] = set()
             denied: set[tuple[str, str]] = set()
             unsupported = False
+            prefix_capabilities: set[str] = set()
             for st in ident["policy"].get("Statement", []):
                 effect = st.get("Effect")
-                if any(k in st for k in ("Condition", "NotAction", "NotResource", "Principal", "NotPrincipal")):
+                if any(k in st for k in ("NotAction", "NotResource", "Principal", "NotPrincipal")):
                     unsupported = True
+                    continue
+                if "Condition" in st:
+                    capabilities = _prefix_capabilities(st)
+                    if capabilities is None:
+                        unsupported = True
+                    else:
+                        prefix_capabilities.update(capabilities)
                     continue
                 if effect not in ("Allow", "Deny"):
                     unsupported = True
@@ -144,6 +185,7 @@ def effective_grants(doc: dict, system: str = "s3", *, unobserved=None) -> tuple
                         system, "policy statement with an unknown effect",
                         f"identity '{name}' has a statement whose Effect is "
                         f"{effect!r} — neither Allow nor Deny. Access is unknown.",
+                        entities=(name,),
                     ))
                     continue
                 # IAM lets a single value stand without brackets: `"Action": "s3:ListBucket"`.
@@ -159,10 +201,15 @@ def effective_grants(doc: dict, system: str = "s3", *, unobserved=None) -> tuple
                     if scope != "*" and any(c in pattern for c in "*?["):
                         unsupported = True
                     for p in privs:
+                        if p == "s3:ListAllMyBuckets" and scope != "*":
+                            unsupported = True
                         bucket.add((scope, p))
 
             # ponytail: only exact Deny subtraction; a full IAM evaluator belongs
             # in the storage service. Overlapping wildcard/partial denies stay unknown.
+            # Conditional listings plus Deny need a request-context evaluator.
+            if prefix_capabilities and denied:
+                unsupported = True
             for ds, da in denied:
                 for scope, action in allowed:
                     if (ds, da) != (scope, action) and (
@@ -176,7 +223,8 @@ def effective_grants(doc: dict, system: str = "s3", *, unobserved=None) -> tuple
             if unsupported:
                 findings.append(Finding(system, "policy evaluation incomplete",
                                         f"identity '{name}': conditional, negative, or overlapping policy "
-                                        "is unsupported; access is unknown, not absent. No grants are inferred."))
+                                        "is unsupported; access is unknown, not absent. No grants are inferred.",
+                                        entities=(name,)))
                 if unobserved is not None:
                     unobserved.append(Unobserved(system, _policy_scopes(ident["policy"]),
                                                  "unsupported IAM policy", (name,)))
@@ -186,7 +234,10 @@ def effective_grants(doc: dict, system: str = "s3", *, unobserved=None) -> tuple
                 # Policy ARNs spell prefixes `x/y/*`; native actions spell the same
                 # scope `x/y`. One canonical form, or the diff sees a difference
                 # that is only spelling.
-                grants.add(Grant(system, name, f"bucket:{scope}", _POLICY_ACTION.get(p, p), "policy"))
+                resource = "capability:s3/ListAllMyBuckets" if p == "s3:ListAllMyBuckets" else f"bucket:{scope}"
+                grants.add(Grant(system, name, resource, _POLICY_ACTION.get(p, p), "policy"))
+            grants.update(Grant(system, name, f"capability:s3/{priv}", priv.split(" ", 1)[0], "policy")
+                          for priv in prefix_capabilities)
 
             overridden = sorted(allowed & denied)
             if overridden:
@@ -197,6 +248,7 @@ def effective_grants(doc: dict, system: str = "s3", *, unobserved=None) -> tuple
                     f"explicit Deny — {shown}"
                     f"{' …' if len(overridden) > 4 else ''}. The matrix shows the "
                     f"enforced result (denied), not the Allow statement.",
+                    entities=(name, *(value for pair in overridden[:4] for value in pair)),
                 ))
             deny_only = sorted(denied - allowed)
             if deny_only:
@@ -205,6 +257,7 @@ def effective_grants(doc: dict, system: str = "s3", *, unobserved=None) -> tuple
                     f"identity '{name}' has {len(deny_only)} Deny statement(s) that "
                     f"cancel nothing — no Allow grants them. Harmless today, but the "
                     f"policy reads as if it restricts something it does not.",
+                    entities=(name,),
                 ))
         else:
             for action in ident.get("actions", []):
@@ -214,6 +267,8 @@ def effective_grants(doc: dict, system: str = "s3", *, unobserved=None) -> tuple
 
 def policy_with(policy: dict, g: Grant, add: bool) -> dict:
     """Pure old-policy -> new-policy transform for one grant atom."""
+    if not g.resource.startswith("bucket:"):
+        raise ValueError("S3 capabilities are observation-only; use the IAM client")
     if any(any(k in st for k in ("NotAction", "NotResource", "Principal", "NotPrincipal"))
            for st in policy.get("Statement", [])):
         raise ValueError("negative or principal-based policy writes are unsupported")
@@ -344,6 +399,7 @@ def merge_iam_tree(root) -> dict:
         for m in g.get("members", []):
             member_of.setdefault(m, []).append(g.get("name", stem))
     gaps: list[str] = []
+    gap_entities: dict[str, tuple[str, str]] = {}
     identities = []
     gap_subjects: set[str] = set()
     # Map-only structure: the grant set is flat on purpose (what is *enforced*), but
@@ -373,7 +429,9 @@ def merge_iam_tree(root) -> dict:
                 doc = pol_docs.get(pname)
                 if doc is None:
                     gap_subjects.add(name)
-                    gaps.append(f"group '{g}' attaches policy '{pname}' which has no document")
+                    gap = f"group '{g}' attaches policy '{pname}' which has no document"
+                    gaps.append(gap)
+                    gap_entities[gap] = (g, pname)
                     continue
                 statements += list(doc.get("Statement", []))
         out = {"name": name, "actions": ident.get("actions", []),
@@ -391,7 +449,7 @@ def merge_iam_tree(root) -> dict:
                 {"name": pname, "policy": inline[name][pname] or {}}]})
             for grant in evaluated:
                 routes.append((f"policy:{pname}", grant.resource, "allows"))
-    return {"identities": identities, "_gaps": sorted(set(gaps)),
+    return {"identities": identities, "_gaps": sorted(set(gaps)), "_gap_entities": gap_entities,
             "_gap_subjects": sorted(gap_subjects),
             "_kinds": kinds, "_routes": sorted(set(routes))}
 
@@ -732,6 +790,7 @@ class S3ConfigAdapter(Adapter):
                         self.system, "auth plane unreachable",
                         f"plane '{name}' could not be read ({exc}); cross-plane "
                         f"identity check skipped this run.",
+                        entities=(name,),
                     ))
 
         grants: set[Grant] = set()
@@ -744,7 +803,8 @@ class S3ConfigAdapter(Adapter):
             findings += shadow
             gaps = doc.get("_gaps", [])
             for gap in gaps:
-                findings.append(Finding(self.system, "policy document missing", gap))
+                findings.append(Finding(self.system, "policy document missing", gap,
+                                        entities=tuple(doc.get("_gap_entities", {}).get(gap, ()))))
             if gaps:
                 # Old/mirrored documents without affected identities remain system-wide unknown.
                 unobserved.append(Unobserved(self.system, ("bucket:",), "policy documents missing",
@@ -782,10 +842,13 @@ class S3ConfigAdapter(Adapter):
                         f"{' …' if len(orphans) > 8 else ''}. Their keys authenticate "
                         f"nowhere — the failure surfaces as a misleading "
                         f"403/SignatureDoesNotMatch, not 'unknown user'.",
+                        entities=(plane, self.enforced, *orphans[:8]),
                     ))
         return grants, findings, unobserved
 
     def _cmd(self, g: Grant, add: bool) -> str:
+        if not g.resource.startswith("bucket:"):
+            return "S3 capability is observation-only; use the IAM client for this change"
         verb = "+=" if add else "-="
         action = f"{g.priv}:{g.resource.removeprefix('bucket:')}"
         try:
@@ -843,6 +906,8 @@ class S3ConfigAdapter(Adapter):
 
     def _cmd_many(self, subject: str, grants: tuple, add: bool) -> str:
         """The command for several grants on one identity: the document, once."""
+        if any(not g.resource.startswith("bucket:") for g in grants):
+            return "S3 capability is observation-only; use the IAM client for this change"
         ident = self._identity(subject)
         if not (ident and ident.get("policy")):
             return self._cmd(grants[0], add)
@@ -876,11 +941,18 @@ class S3ConfigAdapter(Adapter):
         # exactly that — reading implied writing.
         return self.planes[self.enforced].write_ready()
 
+    def refuse_write(self, g: Grant, action: str) -> str:
+        if not g.resource.startswith("bucket:"):
+            return "S3 capabilities are observation-only; use the IAM client"
+        return super().refuse_write(g, action)
+
     def apply(self, change):
         add = change.action == "grant"
         # coalesce() 가 묶었으면 여러 개, 아니면 하나. 테스트 더블처럼 Change 가 아닌
         # 것이 와도 grant 하나로 동작한다.
         grants = getattr(change, "all_grants", None) or (change.grant,)
+        if any(not g.resource.startswith("bucket:") for g in grants):
+            raise ValueError("S3 capabilities are observation-only; use the IAM client")
         subject = grants[0].subject
         plane = self.planes[self.enforced]
         doc = plane.read()  # re-read: apply against current state, not the plan's snapshot
