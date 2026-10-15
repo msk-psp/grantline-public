@@ -74,6 +74,16 @@ fn unread(system: &str, note: &str) -> Unobserved {
 }
 
 pub fn observe(loaded: &Loaded, imported: Option<&Path>) -> Result<Observation> {
+    observe_with_live(loaded, imported, false)
+}
+pub fn observe_with_live(
+    loaded: &Loaded,
+    imported: Option<&Path>,
+    live: bool,
+) -> Result<Observation> {
+    if live && imported.is_some() {
+        return Err("--live cannot be combined with --observed".into());
+    }
     let mut snapshot = Snapshot::new(loaded.config.adapters.keys().cloned().collect());
     let mut findings = Vec::new();
     let mut kinds = BTreeMap::new();
@@ -110,6 +120,14 @@ pub fn observe(loaded: &Loaded, imported: Option<&Path>) -> Result<Observation> 
         });
     }
     for (system, adapter) in &loaded.config.adapters {
+        if adapter.typ(system) == "clickhouse" && live {
+            let obs = crate::clickhouse::observe(adapter, system);
+            snapshot.grants.extend(obs.grants);
+            snapshot.unobserved.extend(obs.unknown);
+            findings.extend(obs.findings);
+            kinds.extend(obs.kinds);
+            continue;
+        }
         if adapter.typ(system) == "s3" {
             let mut obs = crate::s3::observe(adapter, &loaded.base, system);
             snapshot.grants.append(&mut obs.grants);
@@ -164,29 +182,11 @@ pub fn observe(loaded: &Loaded, imported: Option<&Path>) -> Result<Observation> 
                 findings.push(Finding::new("postgres","frozen ACL (owner locked out)",format!("{} (owner {}): ACL is an empty array, so even the owner has no privileges. Recover with an explicit GRANT ALL ON {} TO \"{}\";",table.name,table.owner,table.name,table.owner),vec![table.name.clone(),table.owner.clone()]));
             }
         } else if adapter.kind(system) == "clickhouse" {
-            let mut stale: BTreeMap<(&str, &str), Vec<String>> = BTreeMap::new();
-            for g in &grants {
-                if let Some(db) = g.resource.strip_prefix("db:")
-                    && !fixture.facts.databases.iter().any(|d| d == db)
-                {
-                    stale
-                        .entry((&g.subject, &g.resource))
-                        .or_default()
-                        .push(g.privilege.clone());
-                }
-            }
-            for ((subject, resource), mut privs) in stale {
-                privs.sort();
-                let shown = privs.iter().take(6).cloned().collect::<Vec<_>>();
-                let more = if privs.len() > 6 {
-                    format!(" (+{} more)", privs.len() - 6)
-                } else {
-                    String::new()
-                };
-                let mut entities = vec![subject.into(), resource.into()];
-                entities.extend(shown.clone());
-                findings.push(Finding::new("clickhouse","stale grants on dropped database",format!("{subject} still holds {} privilege(s) on {resource} but the database is gone: {}{more}. ClickHouse keeps them; they re-apply if the name returns. Revoke by name.",privs.len(),shown.join(", ")),entities));
-            }
+            findings.extend(crate::clickhouse::stale_findings(
+                "clickhouse",
+                &grants,
+                &fixture.facts.databases,
+            ));
         }
         snapshot.grants.extend(grants);
         snapshot

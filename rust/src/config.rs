@@ -37,6 +37,13 @@ pub struct Adapter {
     pub enforced: String,
     #[serde(default)]
     pub planes: indexmap::IndexMap<String, crate::s3::Plane>,
+    #[serde(default)]
+    pub url_env: Option<String>,
+    #[serde(default = "read_timeout")]
+    pub read_timeout_seconds: u64,
+}
+fn read_timeout() -> u64 {
+    30
 }
 fn enforced_plane() -> String {
     "static".into()
@@ -161,6 +168,11 @@ pub fn load(path: &Path) -> Result<Loaded> {
         {
             return Err(format!(
                 "Fixture {system} needs a postgres/clickhouse kind and a fixture path"
+            ));
+        }
+        if adapter.typ(system) == "clickhouse" && adapter.kind(system) != "clickhouse" {
+            return Err(format!(
+                "Native ClickHouse adapter {system} must use clickhouse kind"
             ));
         }
     }

@@ -11,7 +11,7 @@ use std::{
 };
 
 #[derive(Parser)]
-#[command(about = "Grantline native Rust migration — experimental, local only")]
+#[command(about = "Grantline native Rust migration — experimental, read-only planning")]
 struct Cli {
     #[arg(short = 'c', long, global = true, default_value = "grantline.toml")]
     config: PathBuf,
@@ -20,10 +20,10 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
-    /// Read local fixtures or a saved observation and print a read-only plan.
+    /// Print a read-only plan; native ClickHouse observation requires --live.
     Plan {
-        #[arg(long)]
-        observed: Option<PathBuf>,
+        #[command(flatten)]
+        source: cli::Source,
         #[arg(long)]
         json: bool,
         #[arg(long)]
@@ -31,8 +31,8 @@ enum Command {
     },
     /// Explicitly save a private JSONL snapshot; never applies IAM.
     Snapshot {
-        #[arg(long)]
-        observed: Option<PathBuf>,
+        #[command(flatten)]
+        source: cli::Source,
         #[arg(long)]
         directory: Option<PathBuf>,
         #[arg(long)]
@@ -51,8 +51,8 @@ enum Command {
     },
     /// Inspect authorization paths, including role hops and declared bridges.
     Graph {
-        #[arg(long)]
-        observed: Option<PathBuf>,
+        #[command(flatten)]
+        source: cli::Source,
         #[arg(long)]
         subject: Vec<String>,
         #[arg(long)]
@@ -76,20 +76,20 @@ enum Command {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Cli::parse();
     match args.command.unwrap_or(Command::Plan {
-        observed: None,
+        source: cli::Source::default(),
         json: false,
         verbose: false,
     }) {
         Command::Plan {
-            observed,
+            source,
             json,
             verbose,
-        } => cli::plan(&args.config, observed.as_deref(), json, verbose)?,
+        } => cli::plan(&args.config, &source, json, verbose)?,
         Command::Snapshot {
-            observed,
+            source,
             directory,
             json,
-        } => cli::record(&args.config, observed.as_deref(), directory, json)?,
+        } => cli::record(&args.config, &source, directory, json)?,
         Command::History {
             from,
             to,
@@ -103,7 +103,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             json,
         )?,
         Command::Graph {
-            observed,
+            source,
             subject,
             resource,
             depth,
@@ -111,7 +111,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             json,
         } => cli::graph(
             &args.config,
-            observed.as_deref(),
+            &source,
             &subject,
             &resource,
             &depth,

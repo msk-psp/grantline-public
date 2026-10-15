@@ -1,7 +1,8 @@
 # Grantline — Rust + Leptos migration
 
-Experimental **R1 + R2 + R3a foundation**, alongside the supported Python console.
-This binary runs natively with no Python process or external credentials.
+Experimental **R1 + R2 + R3a/R3b foundation**, alongside the supported Python console.
+This binary runs natively with no Python process. Commands are offline by default;
+native ClickHouse catalog observation requires explicit `--live` and a reader.
 The target is a complete Rust backend and Leptos UI, delivered in
 [six stages](../docs/prd/006-rust-leptos.md).
 
@@ -20,11 +21,58 @@ rust/target/debug/grantline-rs -c examples/demo/grantline.toml history --since 2
 
 `plan` reads PostgreSQL/ClickHouse JSON fixtures and local S3 IAM files/directories.
 It produces SQL previews, diagnostic levels/entities and per-identity/service
-counts. No environment credentials are resolved and no service is contacted.
+counts. Without `--live`, no environment credentials are resolved or service contacted.
 The bundled S3 file provider is now observed. Remote-only providers remain unread.
 `plan --observed FILE.jsonl` imports a saved observation for any configured service; a service
 missing from its header remains unread. Unsupported command generation is
 reported per candidate. This CLI has no `apply` or `--write` command.
+
+### Read a native ClickHouse catalog
+
+Use the existing configuration shape, with the reader URL supplied in the named
+environment variable outside the repository (including its HTTP/HTTPS port).
+URL user/password values must be percent-encoded. Paths for a reverse proxy are
+preserved; query strings and fragments are rejected. Standard HTTP/HTTPS default
+ports apply when omitted. The client moves credentials from URL userinfo to
+ClickHouse headers, refuses redirects and does not use environment proxies.
+
+```toml
+[adapters.warehouse]
+type = "clickhouse"
+url_env = "GRANTLINE_CH_URL"
+read_timeout_seconds = 30
+```
+
+```sh
+rust/target/debug/grantline-rs -c /path/to/grantline.toml plan --live --json
+rust/target/debug/grantline-rs -c /path/to/grantline.toml graph --live --subject demo-user --json
+rust/target/debug/grantline-rs -c /path/to/grantline.toml snapshot --live --json
+```
+
+The reader needs global `SHOW ACCESS`, `SHOW DATABASES` and catalog SELECT on
+`system.grants`, `system.role_grants` and `system.databases`. Provision it through
+the owner of the service. Use a server-enforced `readonly=2` profile so bounded
+per-query settings can be applied. The client requests `readonly=2` and sends
+only catalog reads, never GRANT/REVOKE or arbitrary SQL. `admin_url_env`, probe
+credentials and `env_file` are not resolved. `--observed` conflicts with `--live`.
+This is catalog observation, not a target user's login/data-access probe.
+
+The whole instance remains unknown if visibility cannot be established or any
+query fails, has invalid/incomplete JSON, or exceeds 10,000 rows / 16 MiB. The
+total observation deadline is 30 seconds by default (`1..120` configurable).
+Queries cap execution, scan and result size; they never accept partial results.
+Responses and transport errors are withheld from diagnostics to prevent echoing
+credentials. HTTPS uses verified rustls certificates with bundled Mozilla roots;
+private CA configuration and positive HTTPS integration are not yet covered.
+
+Column grants, partial revokes, parameterized/ambiguous scopes and their role
+dependants remain unknown. GRANT/ADMIN delegation is reported separately because
+grant atoms do not model it. On older servers, `system.grants` can erase prefix
+wildcard information: bounded `SHOW GRANTS` batches check for it, and any prefix
+wildcard makes the instance unread. Global, DB, table and nested-role permissions
+remain distinct. Catalog reads across requests are not an atomic transaction;
+writer/probe support is still pending. PostgreSQL and S3 network readers remain
+unimplemented even with `--live`.
 
 ### S3 IAM files and previews
 
@@ -126,10 +174,11 @@ their own ports and are unaffected.
   fixture SQL previews, interoperable snapshots and authorization graphs.
 - R3a interprets local S3 IAM planes and produces grouped document previews,
   with conservative policy evaluation, missing-policy and cross-plane diagnostics.
+- R3b reads native ClickHouse catalogs through an explicit reader with `--live`.
 
 ## What remains
 
-Live observation, probes, native service adapters and writes, production authentication,
+PostgreSQL/S3 live observation, probes and native writes, production authentication,
 durable approvals, real Slack/GitHub writers, all existing console pages,
 WASM map interactions, four-language UI and release images are later stages.
 Live S3 document writes and all probe paths remain in R3. Approval, a
@@ -148,6 +197,7 @@ cargo build --manifest-path rust/Cargo.toml --locked
 python3 scripts/check_rust_parity.py
 python3 scripts/check_rust_core.py
 python3 scripts/check_rust_s3.py
+python3 scripts/check_rust_clickhouse.py --docker
 ```
 
 The checks cover canonical grants, coverage, convergence actions, diagnostic
@@ -159,5 +209,11 @@ actions, policy precedence, Deny, prefix capabilities, IAM trees, document group
 and unchanged source files. Rust additionally marks capabilities unknown when a
 policy is incomplete/missing, keeps empty attached policies authoritative and
 blocks previews that cannot exactly realize the requested grant set. Those safety
-boundaries intentionally exceed the Python oracle. Live observation, actual
-writes, performance and production integration remain unverified.
+boundaries intentionally exceed the Python oracle. Production/staging observation,
+actual writers, performance and production integration remain unverified. The ClickHouse
+suite uses loopback HTTP failure scenarios and a disposable official 26.6.2.160
+server pinned by multi-platform image digest. It checks actual SQL, nested roles,
+unsupported scopes, stale grants, visibility and a server-refused POST write;
+the container is removed afterwards. `--docker-context NAME` selects an explicit
+local Unix-socket context; remote Docker hosts are refused. Without `--docker`,
+only the HTTP protocol suite runs.
