@@ -2,9 +2,9 @@ name: Rust native
 on:
   push:
     branches: [main]
-    paths: ["rust/**", "grantline/**", "scripts/check_rust_parity.py", ".github/workflows/rust.yml"]
+    paths: ["rust/**", "grantline/**", "grantline.toml", "examples/**", "scripts/check_rust_*.py", ".github/workflows/rust.yml"]
   pull_request:
-    paths: ["rust/**", "grantline/**", "scripts/check_rust_parity.py", ".github/workflows/rust.yml"]
+    paths: ["rust/**", "grantline/**", "grantline.toml", "examples/**", "scripts/check_rust_*.py", ".github/workflows/rust.yml"]
 
 permissions:
   contents: read
@@ -27,4 +27,6 @@ jobs:
           cargo test --locked
           cargo build --locked
       - name: Compare native permission decisions with Python
-        run: python3 scripts/check_rust_parity.py
+        run: |
+          python3 scripts/check_rust_parity.py
+          python3 scripts/check_rust_core.py

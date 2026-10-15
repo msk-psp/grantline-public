@@ -1,0 +1,219 @@
+use crate::{
+    Result,
+    config::{Loaded, relative},
+    graph::{Graph, Route},
+    model::{Grant, Unobserved},
+    planner::{self, Finding, Report},
+    snapshot::Snapshot,
+};
+use serde::Deserialize;
+use std::{collections::BTreeMap, fs, path::Path};
+
+#[derive(Deserialize)]
+struct Atom {
+    subject: String,
+    resource: String,
+    #[serde(rename = "priv")]
+    privilege: String,
+    #[serde(default = "explicit")]
+    source: String,
+    #[serde(default)]
+    grantor: Option<String>,
+}
+fn explicit() -> String {
+    "explicit".into()
+}
+#[derive(Default, Deserialize)]
+struct Fixture {
+    #[serde(default)]
+    grants: Vec<Atom>,
+    #[serde(default)]
+    kinds: BTreeMap<String, String>,
+    #[serde(default)]
+    unobserved: Vec<Unread>,
+    #[serde(default)]
+    facts: Facts,
+    #[serde(default)]
+    routes: Vec<[String; 3]>,
+}
+#[derive(Default, Deserialize)]
+struct Facts {
+    #[serde(default)]
+    tables: Vec<Table>,
+    #[serde(default)]
+    databases: Vec<String>,
+}
+#[derive(Deserialize)]
+struct Table {
+    name: String,
+    owner: String,
+    #[serde(default)]
+    acl_empty: bool,
+}
+#[derive(Deserialize)]
+struct Unread {
+    prefixes: Vec<String>,
+    note: String,
+    #[serde(default)]
+    subjects: std::collections::BTreeSet<String>,
+}
+pub struct Observation {
+    pub snapshot: Snapshot,
+    pub findings: Vec<Finding>,
+    pub kinds: BTreeMap<String, String>,
+    pub routes: Vec<Route>,
+}
+fn unread(system: &str, note: &str) -> Unobserved {
+    Unobserved {
+        system: system.into(),
+        prefixes: vec![String::new()],
+        subjects: Default::default(),
+        note: note.into(),
+    }
+}
+
+pub fn observe(loaded: &Loaded, imported: Option<&Path>) -> Result<Observation> {
+    let mut snapshot = Snapshot::new(loaded.config.adapters.keys().cloned().collect());
+    let mut findings = Vec::new();
+    let mut kinds = BTreeMap::new();
+    let mut routes = Vec::new();
+    if let Some(path) = imported {
+        snapshot = Snapshot::load(path, &loaded.kinds)?;
+        snapshot
+            .grants
+            .retain(|g| loaded.config.adapters.contains_key(&g.system));
+        snapshot
+            .unobserved
+            .retain(|u| loaded.config.adapters.contains_key(&u.system));
+        snapshot
+            .systems
+            .retain(|s| loaded.config.adapters.contains_key(s));
+        for system in loaded
+            .config
+            .adapters
+            .keys()
+            .filter(|s| !snapshot.systems.contains(*s))
+        {
+            snapshot.unobserved.push(unread(
+                system,
+                "System absent from imported snapshot; not observed",
+            ));
+        }
+        return Ok(Observation {
+            snapshot,
+            findings,
+            kinds,
+            routes,
+        });
+    }
+    for (system, adapter) in &loaded.config.adapters {
+        if adapter.typ(system) != "fixture" {
+            snapshot.unobserved.push(unread(system,"Native service observation is not implemented in R2; use a saved snapshot or the Python console"));
+            continue;
+        }
+        let path = relative(
+            &loaded.base,
+            adapter
+                .fixture
+                .as_deref()
+                .ok_or("Fixture path is missing")?,
+        )?;
+        let fixture: Fixture = match fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+        {
+            Some(f) => f,
+            None => {
+                snapshot.unobserved.push(unread(
+                    system,
+                    "Fixture is unreadable or invalid JSON/schema",
+                ));
+                continue;
+            }
+        };
+        let grants: std::collections::BTreeSet<_> = fixture
+            .grants
+            .into_iter()
+            .map(|g| {
+                Grant {
+                    system: system.clone(),
+                    subject: g.subject,
+                    resource: g.resource,
+                    privilege: g.privilege,
+                    source: g.source,
+                    grantor: g.grantor,
+                }
+                .normalized(&loaded.kinds)
+            })
+            .collect();
+        if adapter.kind(system) == "postgres" {
+            for table in fixture.facts.tables.iter().filter(|t| t.acl_empty) {
+                findings.push(Finding::new("postgres","frozen ACL (owner locked out)",format!("{} (owner {}): ACL is an empty array, so even the owner has no privileges. Recover with an explicit GRANT ALL ON {} TO \"{}\";",table.name,table.owner,table.name,table.owner),vec![table.name.clone(),table.owner.clone()]));
+            }
+        } else if adapter.kind(system) == "clickhouse" {
+            let mut stale: BTreeMap<(&str, &str), Vec<String>> = BTreeMap::new();
+            for g in &grants {
+                if let Some(db) = g.resource.strip_prefix("db:")
+                    && !fixture.facts.databases.iter().any(|d| d == db)
+                {
+                    stale
+                        .entry((&g.subject, &g.resource))
+                        .or_default()
+                        .push(g.privilege.clone());
+                }
+            }
+            for ((subject, resource), mut privs) in stale {
+                privs.sort();
+                let shown = privs.iter().take(6).cloned().collect::<Vec<_>>();
+                let more = if privs.len() > 6 {
+                    format!(" (+{} more)", privs.len() - 6)
+                } else {
+                    String::new()
+                };
+                let mut entities = vec![subject.into(), resource.into()];
+                entities.extend(shown.clone());
+                findings.push(Finding::new("clickhouse","stale grants on dropped database",format!("{subject} still holds {} privilege(s) on {resource} but the database is gone: {}{more}. ClickHouse keeps them; they re-apply if the name returns. Revoke by name.",privs.len(),shown.join(", ")),entities));
+            }
+        }
+        snapshot.grants.extend(grants);
+        snapshot
+            .unobserved
+            .extend(fixture.unobserved.into_iter().map(|u| Unobserved {
+                system: system.clone(),
+                prefixes: u.prefixes,
+                note: crate::snapshot::redact(&u.note),
+                subjects: u.subjects,
+            }));
+        kinds.extend(fixture.kinds);
+        routes.extend(
+            fixture
+                .routes
+                .into_iter()
+                .map(|[src, dst, label]| [system.clone(), src, dst, label]),
+        );
+    }
+    Ok(Observation {
+        snapshot,
+        findings,
+        kinds,
+        routes,
+    })
+}
+pub fn plan(loaded: &Loaded, observation: &Observation) -> Report {
+    planner::build(
+        &loaded.intent,
+        &observation.snapshot.grants,
+        &observation.snapshot.unobserved,
+        &loaded.kinds,
+        observation.findings.clone(),
+    )
+}
+pub fn graph(loaded: &Loaded, observation: &Observation) -> Result<Graph> {
+    Graph::build(
+        &observation.snapshot.grants,
+        &loaded.config.bridges,
+        &observation.kinds,
+        &observation.routes,
+        &loaded.config.graph,
+    )
+}

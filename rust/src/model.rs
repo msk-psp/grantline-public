@@ -76,7 +76,7 @@ impl Hash for Grant {
         self.identity().hash(state);
     }
 }
-fn kind<'a>(system: &'a str, kinds: &'a Kinds) -> &'a str {
+pub fn kind<'a>(system: &'a str, kinds: &'a Kinds) -> &'a str {
     kinds.get(system).map(String::as_str).unwrap_or(system)
 }
 
