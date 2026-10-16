@@ -40,6 +40,8 @@ pub struct Adapter {
     #[serde(default)]
     pub url_env: Option<String>,
     #[serde(default)]
+    pub admin_url_env: Option<String>,
+    #[serde(default)]
     pub endpoint_env: Option<String>,
     #[serde(default)]
     pub ca_bundle_env: Option<String>,
@@ -61,6 +63,10 @@ pub struct Adapter {
     pub membership_write_roles: BTreeSet<String>,
     #[serde(default)]
     pub default_write_scopes: BTreeSet<String>,
+    #[serde(default)]
+    pub clickhouse_write_tables: BTreeSet<String>,
+    #[serde(default)]
+    pub clickhouse_write_databases: BTreeSet<String>,
     #[serde(default)]
     pub probe_dsn_envs: std::collections::BTreeMap<String, String>,
     #[serde(default = "all_databases")]

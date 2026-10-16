@@ -65,8 +65,38 @@ pub fn apply(
         }
         return Ok(());
     }
+    if adapter.typ(system) == "clickhouse" {
+        if !live {
+            return Err(
+                "ClickHouse apply preview requires --live and explicit admin_url_env".into(),
+            );
+        }
+        let result = crate::clickhouse::writer::apply(path, system, write, expected)?;
+        if as_json {
+            return json(&result);
+        }
+        println!(
+            "ClickHouse {}: {}",
+            result.system,
+            if result.applied {
+                "single direct ACL change verified on this server"
+            } else {
+                "dry-run/no change; no statement sent"
+            }
+        );
+        if result.database_changes_include_future_tables {
+            println!(
+                "Scope: database ACLs cover every current and future table/relation in the named database, regardless of engine"
+            );
+        }
+        println!("Plan identifier: {}", result.plan_id);
+        for c in &result.changes {
+            println!("{}", c.cmd.as_deref().unwrap_or(""));
+        }
+        return Ok(());
+    }
     if live {
-        return Err("--live apply currently supports PostgreSQL only".into());
+        return Err("--live apply currently supports PostgreSQL and ClickHouse only".into());
     }
     #[cfg(unix)]
     {

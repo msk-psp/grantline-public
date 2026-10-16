@@ -74,7 +74,14 @@ outside the guarantee. Role-only plans additionally require a literal
 the whole cluster, use canonical options and an exact grantor. PostgreSQL
 schema-specific default table privileges additionally require literal
 `default_write_scopes`, the authenticated creator and a default-only change plan.
-Global/other-object defaults and ClickHouse/remote S3 writers remain pending.
+ClickHouse `apply --live` supports one direct SELECT/INSERT ACL change on a
+UUID-backed local Memory/MergeTree table, with `clickhouse_write_tables`, explicit
+`admin_url_env` and `--write --expect PLAN_ID`. It has no multi-statement rollback;
+dispatch or post-check failure requires inspection before retry. R3h2 adds exact
+DB scopes through independent `clickhouse_write_databases = ["db:demo"]`; these
+cover all current/future relation names and engines in the DB. Overlapping held/declared
+DB/table rights for the same subject and privilege are refused. Global/other-object
+PostgreSQL defaults, ClickHouse role writes and remote S3 writers remain pending.
 Run `python3 scripts/check_rust_clickhouse.py --docker` and
 `python3 scripts/check_rust_postgres.py --docker` plus
 `python3 scripts/check_rust_s3_network.py --docker` and
@@ -82,7 +89,9 @@ Run `python3 scripts/check_rust_clickhouse.py --docker` and
 `python3 scripts/check_rust_s3_writer.py --docker` and
 `python3 scripts/check_rust_postgres_writer.py --docker` and
 `python3 scripts/check_rust_postgres_membership.py --docker` and
-`python3 scripts/check_rust_postgres_defaults.py --docker` for isolated boundary and
+`python3 scripts/check_rust_postgres_defaults.py --docker` and
+`python3 scripts/check_rust_clickhouse_writer.py --docker` and
+`python3 scripts/check_rust_clickhouse_database.py --docker` for isolated boundary and
 real-server checks. Local S3 IAM files/trees support observation
 and grouped previews; directory-backed shared policies cannot be rewritten from
 a per-user change.
