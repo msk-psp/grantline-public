@@ -1,4 +1,5 @@
 //! S3 IAM interpretation and document previews. Remote reads require explicit opt-in.
+pub mod probe;
 mod remote;
 use crate::{
     Result,

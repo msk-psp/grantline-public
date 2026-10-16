@@ -40,6 +40,16 @@ pub struct Adapter {
     #[serde(default)]
     pub url_env: Option<String>,
     #[serde(default)]
+    pub endpoint_env: Option<String>,
+    #[serde(default)]
+    pub ca_bundle_env: Option<String>,
+    #[serde(default = "s3_region")]
+    pub probe_region: String,
+    #[serde(default)]
+    pub probe_credentials: std::collections::BTreeMap<String, crate::s3::probe::Credential>,
+    #[serde(default)]
+    pub probe_objects: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
     pub probe_url_env: Option<String>,
     #[serde(default)]
     pub probe_url_envs: std::collections::BTreeMap<String, String>,
@@ -53,6 +63,9 @@ pub struct Adapter {
     pub exclude_databases: Vec<String>,
     #[serde(default = "read_timeout")]
     pub read_timeout_seconds: u64,
+}
+fn s3_region() -> String {
+    "us-east-1".into()
 }
 fn all_databases() -> Vec<String> {
     vec!["*".into()]
