@@ -47,3 +47,5 @@ jobs:
         run: python3 scripts/check_rust_postgres_membership.py --docker
       - name: Verify creator-specific default table privileges, future objects and rollback
         run: python3 scripts/check_rust_postgres_defaults.py --docker
+      - name: Verify single-statement ClickHouse table writer and uncertain outcomes
+        run: python3 scripts/check_rust_clickhouse_writer.py --docker

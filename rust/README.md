@@ -1,6 +1,6 @@
 # Grantline — Rust + Leptos migration
 
-Experimental **R1 + R2 + R3a/R3b/R3c/R3d/R3e1/R3e2/R3e3/R3f/R3g1/R3g2/R3g3/R3g4 foundation**, alongside the supported Python console.
+Experimental **R1 + R2 + R3a/R3b/R3c/R3d/R3e1/R3e2/R3e3/R3f/R3g1/R3g2/R3g3/R3g4/R3h1 foundation**, alongside the supported Python console.
 This binary runs natively with no Python process. Commands are offline by default;
 native PostgreSQL/ClickHouse catalogs and remote S3 IAM require explicit `--live`
 and configured reader endpoints/credentials.
@@ -73,7 +73,7 @@ grant atoms do not model it. On older servers, `system.grants` can erase prefix
 wildcard information: bounded `SHOW GRANTS` batches check for it, and any prefix
 wildcard makes the instance unread. Global, DB, table and nested-role permissions
 remain distinct. Catalog reads across requests are not an atomic transaction;
-read-only probes below resolve ACLs separately; writers remain pending.
+read-only probes below resolve ACLs separately; R3h1 adds the narrow writer below.
 
 ### Read native PostgreSQL catalogs
 
@@ -251,7 +251,7 @@ Run `python3 scripts/check_rust_clickhouse.py --docker` for HTTP failure guards,
 identity/credential isolation, partial-result deadlines, real inherited/scoped
 ACLs, partial/column unknowns, password login, default-role distinctions and
 independent server-side write refusal. Positive TLS integration, custom CA,
-production/staging connections and writers remain unverified/pending.
+production/staging connections remain unverified; the narrow R3h1 writer is described below.
 
 ### Verify S3 List/Read samples (R3e3)
 
@@ -441,6 +441,71 @@ budget. Graph service patterns use `glob` syntax; invalid patterns are rejected.
 Normalized fixtures may add `"routes": [["demo-user", "group:demo", "member"]]` JSON
 metadata for structural policy hops. Existing snapshots contain no observer
 node-kind/policy-route metadata, and the output marks that limitation.
+
+### Apply one ClickHouse table ACL (R3h1)
+
+Opt in to one direct SELECT or INSERT grant/revoke on an existing UUID-backed
+Memory/MergeTree table in an Atomic database:
+
+```toml
+[adapters.ch]
+type = "clickhouse"
+admin_url_env = "GRANTLINE_CH_WRITER"
+clickhouse_write_tables = ["table:demo.events"]
+read_timeout_seconds = 30
+```
+
+The named HTTP(S) URL must include an explicit authenticated user. Credentials
+travel only in headers; redirects and environment proxies are disabled. Reader,
+probe and ambient credentials never supply the writer. Use a direct endpoint for
+one server, with no concurrent ACL/identity/table administration. Global visibility
+requires SHOW ACCESS/SHOW DATABASES plus the catalog reads for users, roles,
+role_grants, grants, databases and tables. The writer additionally needs a **direct
+exact-table GRANT OPTION** for the selected privilege; inherited/broader authority
+is deliberately insufficient. No user/role creation or role switching occurs.
+
+```sh
+rust/target/debug/grantline-rs -c /path/to/grantline.toml apply --system ch --live --json
+rust/target/debug/grantline-rs -c /path/to/grantline.toml apply --system ch --live --write --expect PLAN_ID_FROM_PREVIEW --json
+```
+
+Intent uses `table:demo.events` with exact SELECT or INSERT. A single invocation
+may change **at most one permission atom**; two privileges or a simultaneous grant
+and revoke need separate intent/preview reviews. Declare existing memberships and
+other direct ACLs you want to retain for managed subjects. Unchanged declared
+memberships remain read-only; any planned membership change is refused. Recipients
+must exist in local_directory, with unambiguous names/UUIDs, and cannot be the
+writer or a role in its ancestry. Broad/delegated/column/partial/parameterized or
+unsupported direct recipient ACLs refuse the plan. No global/DB/role writes, ALL,
+ON CLUSTER, REPLACE OPTION, views, Distributed/Replicated tables or replicated
+access storage. Legacy prefix wildcard grants can refuse the whole observation.
+
+Plan-ID binds input bytes, non-secret endpoint, authenticated user/server UUID,
+full principal IDs/storage and raw direct grants/role edges, database IDs and all
+allowlisted table UUIDs/engines/DDL. Allow at most 128 tables and 1000 intent grants. Catalog reads bracket the existing observer
+and must agree. All read queries retain row/byte/scan/time caps and readonly=2.
+The state and input files are refreshed immediately before a single bounded POST
+with readonly=0. The post-check requires exact expected raw ACLs, unchanged other
+bound metadata and convergence. No data query or session impersonation is issued
+by the writer. A successful receipt keeps `effective_access_verified=false` and
+confirms this observed server's direct ACL state only.
+
+**No multi-statement transaction or automatic rollback exists here.** Any dispatch
+error/timeout/HTTP exception or post-check failure reports **outcome unknown**;
+inspect direct ACLs before retrying or preparing an inverse. The writer never
+retries, follows a write redirect or sends compensating SQL. Even success is not
+a catalog compare-and-swap or a cross-node replication guarantee. Use controlled
+administration; external changes can occur between reads and the statement.
+Undo requires newly reviewed inverse intent. Data inserted while INSERT was
+active is not undone by revoking that permission.
+
+Run `python3 scripts/check_rust_clickhouse_writer.py --docker` for HTTP failure
+injection and official ClickHouse 26.6.2.160 grant/revoke/inverse and actual
+SELECT/INSERT/denial checks. Other versions, positive TLS/private CA, production,
+concurrent administration and crash/restart around dispatch are unverified.
+See [GRANT](https://clickhouse.com/docs/sql-reference/statements/grant),
+[REVOKE](https://clickhouse.com/docs/sql-reference/statements/revoke) and
+[system.grants](https://clickhouse.com/docs/operations/system-tables/grants).
 
 ### Apply PostgreSQL table, schema and database ACLs (R3g1/R3g2)
 
@@ -742,10 +807,11 @@ their own ports and are unaffected.
 - R3g2 extends that transaction to schema/database ACLs, with cooperative writer locking and full direct ACL postconditions.
 - R3g3 adds opt-in role-only membership transactions through postgres, with canonical options and an exact grantor.
 - R3g4 adds authenticated-creator, schema-specific default table privileges and future-object/rollback checks.
+- R3h1 applies one exact local ClickHouse SELECT/INSERT ACL with review and explicit uncertain outcomes.
 
 ## What remains
 
-Global and other-object PostgreSQL defaults, ClickHouse/remote S3
+Global and other-object PostgreSQL defaults, wider ClickHouse scopes, remote S3
 writers, production authentication,
 durable approvals, real Slack/GitHub writers, all existing console pages,
 WASM map interactions, four-language UI and release images are later stages.
@@ -774,6 +840,7 @@ python3 scripts/check_rust_s3_writer.py --docker
 python3 scripts/check_rust_postgres_writer.py --docker
 python3 scripts/check_rust_postgres_membership.py --docker
 python3 scripts/check_rust_postgres_defaults.py --docker
+python3 scripts/check_rust_clickhouse_writer.py --docker
 ```
 
 The checks cover canonical grants, coverage, convergence actions, diagnostic

@@ -33,7 +33,7 @@ State is disposable, private to the process and erased when it exits.
 | Stage | Implementation | Acceptance before promotion | Status |
 |---|---|---|---|
 | R2 | Typed config/intent, snapshots, findings, graph and offline plan CLI | Fixture decisions, diagnostics, PG/CH SQL previews, snapshot round trips and graph paths match Python; S3 commands/coalescing remain R3 | Merged in PR #16 |
-| R3 | PostgreSQL, ClickHouse and S3 native adapters, probes and writers | Existing regression cases ported; separately authorized live read/probe and reversible write validation per adapter | R3a–R3e3 merged; R3f merged; R3g1 merged; R3g2 merged; R3g3 membership writer merged in PR #28; R3g4 creator-specific default table writer implemented; other writers pending |
+| R3 | PostgreSQL, ClickHouse and S3 native adapters, probes and writers | Existing regression cases ported; separately authorized live read/probe and reversible write validation per adapter | R3a–R3e3 merged; R3f merged; R3g1 merged; R3g2 merged; R3g3 membership writer merged in PR #28; R3g4 creator-specific default table writer implemented; R3h1 single ClickHouse table ACL writer implemented; wider writers pending |
 | R4 | Production sessions/OIDC, durable approval store, Slack signatures/DMs, code writer and GitHub PRs | Requester binding, all approvers, callback replay, immutable plan and repo scope verified end to end; approval/PR/applied access reported separately | Pending |
 | R5 | All console pages, Leptos hydration and interactive permission map | Repeated hover highlight/dimming, matrix scrolling, accessible dark mode, logs and four locales verified in browser | Pending |
 | R6 | Release image, migration/rollback and operating guide | Reproducible native/WASM builds, upgrade of persisted state, image smoke tests and explicitly authorized rollout | Pending |
@@ -70,16 +70,16 @@ keep Python as a development-only oracle until all stages pass.
 
 ## Next action
 
-Review the R3g4 creator-bound default writer after merged R3g3 (PR #28), with
-its future-object, exact-catalog and rollback evidence. Next implement the
-ClickHouse writer as a separate review unit with explicit credentials, reviewed
-plans, supported-scope limits and reversible real-server tests. Remote S3 writers
-follow. Global and other-object PostgreSQL defaults remain unsupported. R3 remains
-incomplete; production/staging verification requires separate authorization.
+Review R3g4 (PR #29) and R3h1's single-statement ClickHouse table writer with
+its actual access, inverse and uncertain-outcome evidence. Next implement R3h2
+ClickHouse database-scope ACLs separately, keeping one-statement execution,
+explicit scope authorization and conservative partial-revoke guards. Role writes
+and remote S3 follow. Global/other-object PostgreSQL defaults remain unsupported.
+R3 remains incomplete; production/staging verification requires separate authorization.
 
 ## R3 — Native adapter migration {#R3}
 
-Status: R3a merged in PR #17; R3b merged in PR #18; R3c merged in PR #19; R3d merged in PR #20; R3e1 merged in PR #22; R3e2 merged in PR #23; R3e3 merged in PR #24; R3f merged in PR #25; R3g1 merged in PR #26; R3g2 merged in PR #27; R3g3 membership writer merged in PR #28; R3g4 creator-specific default table writer implemented.
+Status: R3a merged in PR #17; R3b merged in PR #18; R3c merged in PR #19; R3d merged in PR #20; R3e1 merged in PR #22; R3e2 merged in PR #23; R3e3 merged in PR #24; R3f merged in PR #25; R3g1 merged in PR #26; R3g2 merged in PR #27; R3g3 membership writer merged in PR #28; R3g4 creator-specific default table writer implemented; R3h1 single ClickHouse table ACL writer implemented.
 The first review unit implements S3 file/dir
 planes, effective policy observation, group/inline routes and identity-scoped
 document previews. Plan commands remain previews; R3f adds a separate explicit
@@ -584,3 +584,42 @@ pass. PR/CI evidence belongs in HANDOFF; no operational deployment is authorized
 
 References: PostgreSQL 17 [ALTER DEFAULT PRIVILEGES](https://www.postgresql.org/docs/17/sql-alterdefaultprivileges.html)
 and [pg_default_acl](https://www.postgresql.org/docs/17/catalog-pg-default-acl.html).
+
+### R3h1 — Single local ClickHouse table ACL writer
+
+Implement one direct SELECT or INSERT grant/revoke per invocation on an existing
+UUID-backed Memory/MergeTree table in an Atomic database. Require literal
+`clickhouse_write_tables = ["table:demo.events"]`, explicit `admin_url_env`,
+`--live`, and separately `--write --expect PLAN_ID`. The named HTTP(S) URL must
+include the authenticated user; do not fall back to readers/probes/ambient auth.
+Require a direct exact-table GRANT OPTION for the authenticated writer. Recipients
+must already exist in local_directory; refuse self/writer-role ancestors,
+colliding users/roles, column/partial/delegated/broad/parameterized recipient ACLs,
+wildcards, ALL, role/database/global changes and multiple planned changes.
+
+Reuse the bounded read-only catalog HTTP path. Read full principal IDs/storage,
+role memberships and raw direct grants, selected database/table UUIDs/DDL and
+server UUID/user/version. Bracket observer interpretation with equal catalog
+reads; bind these non-secret states, input bytes and fixed quoted SQL to plan-ID.
+Refresh and compare immediately before the only POST statement. Use no session,
+role switching, redirects, proxies, retry, ON CLUSTER or REPLACE OPTION.
+
+ClickHouse ACL writes have no multi-statement transaction here. After dispatch,
+transport/error/timeout or post-check failure must report outcome unknown and
+require inspection, never automatic retry or rollback. Compare the exact expected
+raw ACL rows, unchanged identities/table definitions/memberships and convergence.
+A successful result confirms only this server's direct catalog state, not effective
+access, cross-node replication or a concurrent-admin compare-and-swap. Require a
+controlled interval with no other ACL/identity/table administration. Undo needs
+newly reviewed inverse intent; no general restore or batching guarantee.
+
+Acceptance: isolated HTTP credential/scope/error/timeout/redirect/post-check
+boundaries and digest-pinned official ClickHouse grant/revoke/inverse on ordinary
+users and roles, actual SELECT/INSERT and denial, quoted identifiers, no-op,
+stale input/ACL/subject/table UUID/session refusal, unsupported broad/delegated/
+column/partial and multi-change refusal. Preserve reader/probe and other writer
+regressions. No production/staging access or rollout is authorized.
+
+References: ClickHouse [GRANT](https://clickhouse.com/docs/sql-reference/statements/grant),
+[REVOKE](https://clickhouse.com/docs/sql-reference/statements/revoke),
+[system.grants](https://clickhouse.com/docs/operations/system-tables/grants).
