@@ -33,7 +33,7 @@ State is disposable, private to the process and erased when it exits.
 | Stage | Implementation | Acceptance before promotion | Status |
 |---|---|---|---|
 | R2 | Typed config/intent, snapshots, findings, graph and offline plan CLI | Fixture decisions, diagnostics, PG/CH SQL previews, snapshot round trips and graph paths match Python; S3 commands/coalescing remain R3 | Merged in PR #16 |
-| R3 | PostgreSQL, ClickHouse and S3 native adapters, probes and writers | Existing regression cases ported; separately authorized live read/probe and reversible write validation per adapter | R3a–R3e3 merged; R3f merged; R3g1 merged; R3g2 merged; R3g3 PostgreSQL membership writer implemented; other writers pending |
+| R3 | PostgreSQL, ClickHouse and S3 native adapters, probes and writers | Existing regression cases ported; separately authorized live read/probe and reversible write validation per adapter | R3a–R3e3 merged; R3f merged; R3g1 merged; R3g2 merged; R3g3 membership writer merged in PR #28; R3g4 creator-specific default table writer implemented; other writers pending |
 | R4 | Production sessions/OIDC, durable approval store, Slack signatures/DMs, code writer and GitHub PRs | Requester binding, all approvers, callback replay, immutable plan and repo scope verified end to end; approval/PR/applied access reported separately | Pending |
 | R5 | All console pages, Leptos hydration and interactive permission map | Repeated hover highlight/dimming, matrix scrolling, accessible dark mode, logs and four locales verified in browser | Pending |
 | R6 | Release image, migration/rollback and operating guide | Reproducible native/WASM builds, upgrade of persisted state, image smoke tests and explicitly authorized rollout | Pending |
@@ -70,16 +70,16 @@ keep Python as a development-only oracle until all stages pass.
 
 ## Next action
 
-Review and merge R3g3's canonical, opt-in role membership writer and its
-cluster-scope/rollback evidence. Next implement R3g4 PostgreSQL default-privilege
-writes as a separate review unit, with creating-role/schema/database scope,
-explicit grantor/credentials and reversible tests. ClickHouse and remote S3
-writers follow. R3 remains incomplete; production/staging verification requires
-separate authorization.
+Review the R3g4 creator-bound default writer after merged R3g3 (PR #28), with
+its future-object, exact-catalog and rollback evidence. Next implement the
+ClickHouse writer as a separate review unit with explicit credentials, reviewed
+plans, supported-scope limits and reversible real-server tests. Remote S3 writers
+follow. Global and other-object PostgreSQL defaults remain unsupported. R3 remains
+incomplete; production/staging verification requires separate authorization.
 
 ## R3 — Native adapter migration {#R3}
 
-Status: R3a merged in PR #17; R3b merged in PR #18; R3c merged in PR #19; R3d merged in PR #20; R3e1 merged in PR #22; R3e2 merged in PR #23; R3e3 merged in PR #24; R3f merged in PR #25; R3g1 merged in PR #26; R3g2 merged in PR #27; R3g3 PostgreSQL membership writer implemented.
+Status: R3a merged in PR #17; R3b merged in PR #18; R3c merged in PR #19; R3d merged in PR #20; R3e1 merged in PR #22; R3e2 merged in PR #23; R3e3 merged in PR #24; R3f merged in PR #25; R3g1 merged in PR #26; R3g2 merged in PR #27; R3g3 membership writer merged in PR #28; R3g4 creator-specific default table writer implemented.
 The first review unit implements S3 file/dir
 planes, effective policy observation, group/inline routes and identity-scoped
 document previews. Plan commands remain previews; R3f adds a separate explicit
@@ -541,3 +541,46 @@ writer with direct ADMIN OPTION and no INHERIT/SET access to administered groups
 They verify actual cross-database SELECT, nested groups and SET ROLE for a
 NOINHERIT account, and roll back both a later cycle error and a later blocked
 membership insertion. Evidence and CI/PR results belong in the task handoff.
+
+### R3g4 — Creator-bound PostgreSQL default table privileges
+
+Implement schema-specific table defaults for the authenticated creating role only,
+behind a literal `default_write_scopes = ["default:demo.app@creator"]` allowlist.
+The selected DB, existing schema and creator must match exactly; never SET ROLE,
+borrow a grantor, create roles/schemas or edit global defaults. Require default-only
+change plans, exact supported table privileges and ordinary existing recipients;
+reject PUBLIC, predefined, privileged and creator/schema/database-owner targets,
+grant options or non-creator grantors. Validate allowlisted declared defaults even
+when the binary grant is already held. Unchanged defaults outside the write
+allowlist remain read-only; changes to other creators are refused. Use a separate
+scope/credential per creator. Global table defaults stay unread.
+
+Use the existing explicit admin credential, reviewed plan ID and database-local
+transaction advisory lock. Bind the complete pg_default_acl catalog including
+all object types, raw ACLs, row OIDs, creator/schema/role identities and session to
+a new plan format. Verify the exact expected default ACL atoms, unchanged unrelated
+default rows, object ACLs, roles/memberships/ownership and an empty remaining plan
+before COMMIT; errors/timeouts roll back all commands. Bind local default-row
+ownership through those rows separately from other shared ownership dependencies,
+so a creator without existing owned objects can add/remove its defaults without
+masking unrelated ownership changes. The membership guard still reconstructs the
+complete owner-role set. Default row removal and recreation are storage changes,
+not semantic inverse failures.
+
+Defaults affect future relations (including views/foreign tables), never existing
+objects. They belong to the role actually creating an object, not its members.
+Schema-specific defaults add to global defaults and cannot subtract global grants.
+Receipts must flag future-object scope without claiming effective access. Review
+inverse intent separately; inverse defaults do not remove ACLs on objects created
+while the default was active. No global/function/sequence/type/schema default writer.
+
+Acceptance: isolated official PostgreSQL with a non-superuser creator verifies
+exact grantor/options, quoted identifiers, actual future-object SELECT/INSERT and
+revoke/inverse behavior; existing objects and other schemas/creators/DBs unchanged;
+stale default row/creator/schema identities, flags, unrelated default types, grant
+options/global/default-off/mixed scope refusal, later SQL error and blocked later
+statement rollback. Existing object and role writers, readers and core suites must
+pass. PR/CI evidence belongs in HANDOFF; no operational deployment is authorized.
+
+References: PostgreSQL 17 [ALTER DEFAULT PRIVILEGES](https://www.postgresql.org/docs/17/sql-alterdefaultprivileges.html)
+and [pg_default_acl](https://www.postgresql.org/docs/17/catalog-pg-default-acl.html).
