@@ -1,6 +1,6 @@
 # Grantline — Rust + Leptos migration
 
-Experimental **R1 + R2 + R3a/R3b/R3c/R3d/R3e1/R3e2/R3e3/R3f foundation**, alongside the supported Python console.
+Experimental **R1 + R2 + R3a/R3b/R3c/R3d/R3e1/R3e2/R3e3/R3f/R3g1 foundation**, alongside the supported Python console.
 This binary runs natively with no Python process. Commands are offline by default;
 native PostgreSQL/ClickHouse catalogs and remote S3 IAM require explicit `--live`
 and configured reader endpoints/credentials.
@@ -26,7 +26,8 @@ counts. Without `--live`, no environment credentials are resolved or service con
 The bundled S3 file provider is now observed. Remote providers require `--live`.
 `plan --observed FILE.jsonl` imports a saved observation for any configured service; a service
 missing from its header remains unread. Unsupported command generation is
-reported per candidate. This CLI has no `apply` or `--write` command.
+reported per candidate. Explicit `apply` writes have separate boundaries below;
+`plan` never applies its previews.
 
 ### Read a native ClickHouse catalog
 
@@ -441,6 +442,65 @@ Normalized fixtures may add `"routes": [["demo-user", "group:demo", "member"]]` 
 metadata for structural policy hops. Existing snapshots contain no observer
 node-kind/policy-route metadata, and the output marks that limitation.
 
+### Apply PostgreSQL ordinary-table ACLs (R3g1)
+
+This first SQL writer supports **existing ordinary tables in one database**.
+It uses the existing native planner; a plan requiring role, schema, database or
+`ALTER DEFAULT PRIVILEGES` changes is refused in full. Declare any already-held
+non-table permissions you intend to retain for managed subjects. Only catalogs
+in the selected database (and shared role/database ACLs) are observed here;
+this is not a cluster-wide reconciliation or effective-access check.
+
+```toml
+[adapters.pg]
+type = "postgres"
+dsn_env = "GRANTLINE_PG_READER"          # existing plan/probe reader
+admin_dsn_env = "GRANTLINE_PG_WRITER"   # separate, explicitly named write credential
+databases = ["demo"]                   # one literal name; no exclusions/globs
+```
+
+Supply the write DSN via the named environment variable outside Git. It must
+name that exact database, a user and a single TCP host. The existing reader TLS
+rules apply: `sslmode=disable` is an explicit plaintext choice for a trusted local
+fixture; other modes require verified TLS without downgrade. Ambient `PG*`, probe
+mappings and `dsn_env` never supply writer credentials. The write role needs
+permission to lock affected tables and issue the owner-originated grants/revokes;
+logging in as the object owner works without requiring a superuser.
+
+```sh
+# Preview requires explicit network consent; runs a read-only transaction.
+rust/target/debug/grantline-rs -c /path/to/grantline.toml apply --system pg --live --json
+# Review the returned SQL and identifier, then apply exactly the current plan.
+rust/target/debug/grantline-rs -c /path/to/grantline.toml apply --system pg --live --write --expect PLAN_ID_FROM_PREVIEW --json
+```
+
+The identifier binds input bytes, non-secret endpoint, authenticated session,
+server start, database/table/role object identities, catalog ACL state and fixed
+quoted SQL. Passwords are not included in the identifier or receipt. A server
+restart, a changed object/ACL/role, another login or changed input requires a new
+preview. Dry-run and no-op calls create no files and commit no ACL changes.
+Only exact table privileges are accepted. ALL, PUBLIC/owner/privileged targets,
+column privileges, non-owner grantors, grant options, views, partitions and
+inheritance are unsupported. These conservative restrictions can refuse the
+whole plan even when only one candidate would be unsafe.
+
+Writing takes sorted `ACCESS EXCLUSIVE NOWAIT` locks on affected tables in one
+READ COMMITTED transaction, refreshes the reviewed state, then executes generated
+GRANT/REVOKE with RESTRICT. Direct ACLs and the remaining plan are checked before
+COMMIT. A pre-commit failure rolls everything back. **Locks briefly block table
+queries**, so use a controlled maintenance window. Relation locks do not freeze
+role, namespace or unrelated catalog administration; concurrent administrators
+are outside this unit's guarantee. See PostgreSQL's [LOCK documentation](https://www.postgresql.org/docs/17/sql-lock.html).
+
+A commit transport error is reported as **outcome unknown**: inspect the catalog
+before any retry. A successful receipt reports a committed direct ACL transaction
+and `effective_access_verified=false`. Test subject access separately with `probe`.
+To undo, edit intent, preview the inverse and review its new identifier. The S3
+`restore` command does not restore PostgreSQL; inverse intent does not restore
+ACL NULL/array storage representation, role state or database data. The official
+fixture tests full SQL-error rollback and a reviewed inverse; production writes,
+network loss during COMMIT and general disaster recovery are unverified.
+
 ### Apply or restore one local S3 IAM file (R3f)
 
 This Unix-only writer supports an existing monolithic `file` in the selected
@@ -556,10 +616,12 @@ their own ports and are unaffected.
 - R3e1/R3e2 probe PostgreSQL/ClickHouse ACLs, with optional explicit subject logins.
 - R3e3 signs scoped S3 List/HEAD samples with explicitly mapped subject keys.
 - R3f explicitly applies/restores one local S3 IAM file with stale-state guards and private backups.
+- R3g1 applies one PostgreSQL ordinary-table ACL plan transactionally with explicit credentials and review.
 
 ## What remains
 
-PostgreSQL/ClickHouse/remote S3 writers, production authentication,
+PostgreSQL schema/database/role/default-privilege writers, ClickHouse/remote S3
+writers, production authentication,
 durable approvals, real Slack/GitHub writers, all existing console pages,
 WASM map interactions, four-language UI and release images are later stages.
 Remote S3 document writes and other native writers remain in R3. Approval, a
@@ -584,6 +646,7 @@ python3 scripts/check_rust_postgres.py --docker
 python3 scripts/check_rust_s3_network.py --docker
 python3 scripts/check_rust_s3_probes.py --docker
 python3 scripts/check_rust_s3_writer.py --docker
+python3 scripts/check_rust_postgres_writer.py --docker
 ```
 
 The checks cover canonical grants, coverage, convergence actions, diagnostic
@@ -596,7 +659,7 @@ and unchanged source files. Rust additionally marks capabilities unknown when a
 policy is incomplete/missing, keeps empty attached policies authoritative and
 blocks previews that cannot exactly realize the requested grant set. Those safety
 boundaries intentionally exceed the Python oracle. Production/staging observation,
-actual writers, performance and production integration remain unverified. The ClickHouse
+production writers, performance and production integration remain unverified. The ClickHouse
 suite uses loopback HTTP failure scenarios and a disposable official 26.6.2.160
 server pinned by multi-platform image digest. It checks actual SQL, nested roles,
 unsupported scopes, stale grants, visibility and a server-refused POST write;

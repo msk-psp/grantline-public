@@ -29,8 +29,10 @@ enum Command {
         #[arg(long)]
         verbose: bool,
     },
-    /// Preview one local S3 IAM file; writing requires a reviewed plan identifier.
+    /// Preview local S3 IAM or (--live) PostgreSQL table ACLs; --write requires a reviewed plan.
     Apply {
+        #[arg(long)]
+        live: bool,
         #[arg(long)]
         system: String,
         #[arg(long)]
@@ -122,12 +124,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             verbose,
         } => cli::plan(&args.config, &source, json, verbose)?,
         Command::Apply {
+            live,
             system,
             write,
             expect,
             json,
         } => {
-            cli::apply(&args.config, &system, write, expect.as_deref(), json)?;
+            cli::apply(&args.config, &system, live, write, expect.as_deref(), json)?;
         }
         Command::Restore {
             system,

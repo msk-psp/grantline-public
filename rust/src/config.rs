@@ -56,6 +56,8 @@ pub struct Adapter {
     #[serde(default)]
     pub dsn_env: Option<String>,
     #[serde(default)]
+    pub admin_dsn_env: Option<String>,
+    #[serde(default)]
     pub probe_dsn_envs: std::collections::BTreeMap<String, String>,
     #[serde(default = "all_databases")]
     pub databases: Vec<String>,
@@ -235,4 +237,43 @@ pub fn load(path: &Path) -> Result<Loaded> {
             naming_synonyms: input.naming.synonyms,
         },
     })
+}
+
+// Writer dispatch must not open a FIFO before the selected adapter can validate it.
+pub(crate) fn writer_file(path: &Path) -> Result<Vec<u8>> {
+    use std::io::Read;
+    if !fs::metadata(path)
+        .map_err(|_| "Cannot inspect writer input")?
+        .is_file()
+    {
+        return Err("Writer input must be a regular file".into());
+    }
+    let mut bytes = Vec::new();
+    fs::File::open(path)
+        .map_err(|_| "Cannot open writer input")?
+        .take(4 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| "Cannot read writer input")?;
+    if bytes.len() > 4 * 1024 * 1024 {
+        return Err("Writer input exceeds 4 MiB".into());
+    }
+    Ok(bytes)
+}
+pub(crate) fn load_writer(path: &Path) -> Result<(Loaded, Vec<u8>, Vec<u8>)> {
+    let path = std::path::absolute(path).map_err(|_| "Cannot resolve writer config path")?;
+    let config_bytes = writer_file(&path)?;
+    let header: Config = toml::from_str(
+        std::str::from_utf8(&config_bytes).map_err(|_| "Writer config is not UTF-8")?,
+    )
+    .map_err(|_| "Invalid writer config TOML/schema")?;
+    let intent_path = relative(
+        path.parent().ok_or("Writer config has no parent")?,
+        &header.intent,
+    )?;
+    let intent_bytes = writer_file(&intent_path)?;
+    let loaded = load(&path)?;
+    if writer_file(&path)? != config_bytes || writer_file(&intent_path)? != intent_bytes {
+        return Err("Config/intent changed while loading writer inputs".into());
+    }
+    Ok((loaded, config_bytes, intent_bytes))
 }

@@ -65,12 +65,16 @@ permissions are the write credential for that file. Native PostgreSQL/ClickHouse
 `--live` and separately configured readers. PostgreSQL and ClickHouse `probe --live`
 support read-only ACL checks and optional mapped subject logins; see the Rust guide
 for the different guarantees of each adapter. S3 probes use explicit subject keys
-for scoped List/HEAD samples; PostgreSQL/ClickHouse/remote S3 writers remain pending.
+for scoped List/HEAD samples. PostgreSQL `apply --live` previews single-database
+ordinary-table ACL changes with explicit `admin_dsn_env`; writing additionally
+requires `--write --expect PLAN_ID`. Other PostgreSQL scopes and
+ClickHouse/remote S3 writers remain pending.
 Run `python3 scripts/check_rust_clickhouse.py --docker` and
 `python3 scripts/check_rust_postgres.py --docker` plus
 `python3 scripts/check_rust_s3_network.py --docker` and
 `python3 scripts/check_rust_s3_probes.py --docker` and
-`python3 scripts/check_rust_s3_writer.py --docker` for isolated boundary and
+`python3 scripts/check_rust_s3_writer.py --docker` and
+`python3 scripts/check_rust_postgres_writer.py --docker` for isolated boundary and
 real-server checks. Local S3 IAM files/trees support observation
 and grouped previews; directory-backed shared policies cannot be rewritten from
 a per-user change.
