@@ -66,8 +66,10 @@ permissions are the write credential for that file. Native PostgreSQL/ClickHouse
 support read-only ACL checks and optional mapped subject logins; see the Rust guide
 for the different guarantees of each adapter. S3 probes use explicit subject keys
 for scoped List/HEAD samples. PostgreSQL `apply --live` previews single-database
-ordinary-table ACL changes with explicit `admin_dsn_env`; writing additionally
-requires `--write --expect PLAN_ID`. Other PostgreSQL scopes and
+ordinary-table/schema/database ACL changes with explicit `admin_dsn_env`; writing additionally
+requires `--write --expect PLAN_ID`. Writers serialize through a database-local
+transaction advisory lock; concurrent external catalog administration remains
+outside the guarantee. PostgreSQL role/default-privilege scopes and
 ClickHouse/remote S3 writers remain pending.
 Run `python3 scripts/check_rust_clickhouse.py --docker` and
 `python3 scripts/check_rust_postgres.py --docker` plus

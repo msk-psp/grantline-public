@@ -29,7 +29,7 @@ enum Command {
         #[arg(long)]
         verbose: bool,
     },
-    /// Preview local S3 IAM or (--live) PostgreSQL table ACLs; --write requires a reviewed plan.
+    /// Preview local S3 IAM or (--live) PostgreSQL object ACLs; --write requires a reviewed plan.
     Apply {
         #[arg(long)]
         live: bool,

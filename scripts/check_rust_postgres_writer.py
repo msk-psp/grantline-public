@@ -135,6 +135,13 @@ def docker_test(binary, context):
         # Compare semantic ACLs, including grantor and delegation, rather than NULL vs materialized defaults.
         return sql("SELECT n.nspname,c.relname,a.grantee,a.grantor,a.privilege_type,a.is_grantable FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace CROSS JOIN LATERAL aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a WHERE n.nspname='public' AND c.relkind='r' ORDER BY 1,2,3,4,5,6")
 
+    def all_acl():
+        return sql("""SELECT * FROM (
+          SELECT 'table' k,n.nspname||'.'||c.relname object,a.grantee,a.grantor,a.privilege_type,a.is_grantable FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace CROSS JOIN LATERAL aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a WHERE n.nspname !~ '^pg_' AND n.nspname<>'information_schema' AND c.relkind='r'
+          UNION ALL SELECT 'schema',n.nspname,a.grantee,a.grantor,a.privilege_type,a.is_grantable FROM pg_namespace n CROSS JOIN LATERAL aclexplode(coalesce(n.nspacl,acldefault('n',n.nspowner))) a WHERE n.nspname !~ '^pg_' AND n.nspname<>'information_schema'
+          UNION ALL SELECT 'db',d.datname,a.grantee,a.grantor,a.privilege_type,a.is_grantable FROM pg_database d CROSS JOIN LATERAL aclexplode(coalesce(d.datacl,acldefault('d',d.datdba))) a WHERE NOT d.datistemplate
+        ) q ORDER BY 1,2,3,4,5,6""")
+
     def allowed(subject, table, privilege):
         return sql(f"SELECT has_table_privilege('{subject}','{table}','{privilege}')") == 't'
 
@@ -143,7 +150,7 @@ def docker_test(binary, context):
                         '--memory', '1g', '--cpus', '2', '-e', 'POSTGRES_HOST_AUTH_METHOD=trust', IMAGE,
                         '-c', 'log_statement=all'], check=True, stdout=subprocess.DEVNULL)
         for _ in range(150):
-            ready = subprocess.run([*docker, 'exec', name, 'pg_isready', '-U', 'postgres'], capture_output=True)
+            ready = subprocess.run([*docker, 'exec', name, 'pg_isready', '-h', '127.0.0.1', '-U', 'postgres'], capture_output=True)
             if ready.returncode == 0:
                 break
             time.sleep(0.2)
@@ -203,8 +210,8 @@ def docker_test(binary, context):
                     sql('ALTER ROLE gl_user LOGIN')
             # Unsupported inputs must not silently become executable SQL or partial plans.
             for subject, resource, privileges in [
-                    ('gl_user', 'role:gl_group', ['MEMBER']), ('gl_user', 'schema:gl_data.public', ['USAGE']),
-                    ('gl_user', 'db:gl_data', ['CREATE']), ('gl_user', 'default:gl_data.public@gl_owner', ['SELECT']),
+                    ('gl_user', 'role:gl_group', ['MEMBER']), ('gl_user', 'schema:other.public', ['USAGE']),
+                    ('gl_user', 'db:other', ['CREATE']), ('gl_user', 'default:gl_data.public@gl_owner', ['SELECT']),
                     ('gl_user', 'table:other.public.a_target', ['SELECT']), ('missing', 'table:gl_data.public.a_target', ['SELECT']),
                     ('PUBLIC', 'table:gl_data.public.a_target', ['SELECT']), ('gl_owner', 'table:gl_data.public.a_target', ['UPDATE']),
                     ('postgres', 'table:gl_data.public.a_target', ['SELECT']), ('gl_user', 'table:gl_data.public.a_target', ['ALL'])]:
@@ -282,6 +289,166 @@ def docker_test(binary, context):
                 assert 'lock affected table' in failure.stderr and acl() == snapshot
             finally:
                 holder.communicate('ROLLBACK;\n', timeout=10)
+            # R3g2: all three object kinds share one review and transaction.
+            sql('CREATE ROLE gl_scoped LOGIN; CREATE ROLE gl_scope_group; CREATE ROLE "gl"";scoped" LOGIN; CREATE SCHEMA app AUTHORIZATION gl_owner; CREATE SCHEMA old_scope AUTHORIZATION gl_owner; CREATE SCHEMA "odd"";schema" AUTHORIZATION gl_owner; GRANT USAGE ON SCHEMA old_scope TO gl_scoped; GRANT USAGE ON SCHEMA app TO gl_other')
+            scoped_subjects = ('gl_scoped', 'gl_scope_group', 'gl";scoped')
+            baseline = all_acl()
+            desired = [('gl_scoped', 'db:gl_data', ['CONNECT', 'CREATE', 'TEMPORARY']),
+                       ('gl_scoped', 'schema:gl_data.app', ['USAGE', 'CREATE']),
+                       ('gl_scoped', 'table:gl_data.public.a_target', ['SELECT']),
+                       ('gl_scope_group', 'schema:gl_data.app', ['USAGE']),
+                       ('gl_scope_group', 'schema:gl_data.public', ['USAGE']),
+                       ('gl";scoped', 'schema:gl_data.odd";schema', ['USAGE', 'CREATE'])]
+            intent(root, desired, managed=scoped_subjects)
+            p = run(binary, config, dsn)
+            assert all_acl() == baseline and len(p['changes']) == 11 and not p['applied']
+            assert any('ON DATABASE "gl_data"' in c['cmd'] for c in p['changes'])
+            assert any('ON SCHEMA "odd"";schema" TO "gl"";scoped"' in c['cmd'] for c in p['changes'])
+            assert run(binary, config, dsn, write=p['plan_id'])['applied']
+            assert sql("SELECT has_database_privilege('gl_scoped','gl_data','CREATE') AND has_schema_privilege('gl_scoped','app','USAGE') AND has_schema_privilege('gl_scoped','app','CREATE') AND has_table_privilege('gl_scoped','a_target','SELECT')") == 't'
+            assert sql("SELECT has_schema_privilege('gl_scoped','old_scope','USAGE')") == 'f'
+            assert sql("SELECT has_schema_privilege('gl_other','app','USAGE')") == 't'
+            assert not run(binary, config, dsn)['changed']
+            # Review revoking every newly assigned DB/schema/table privilege and restoring the old one.
+            intent(root, [('gl_scoped', 'schema:gl_data.old_scope', ['USAGE'])], managed=scoped_subjects)
+            inverse = run(binary, config, dsn)
+            assert run(binary, config, dsn, write=inverse['plan_id'])['applied'] and all_acl() == baseline
+            assert sql("SELECT has_database_privilege('gl_scoped','gl_data','CREATE')") == 'f'
+            # Direct CONNECT/TEMPORARY revocation does not remove PUBLIC's effective defaults.
+            assert sql("SELECT has_database_privilege('gl_scoped','gl_data','CONNECT') AND has_database_privilege('gl_scoped','gl_data','TEMPORARY')") == 't'
+
+            for kind in ['schema-oid', 'schema-name', 'schema-owner', 'schema-acl', 'database-owner', 'database-acl']:
+                intent(root, desired, managed=scoped_subjects)
+                p = run(binary, config, dsn)
+                if kind == 'schema-oid':
+                    sql('DROP SCHEMA "odd"";schema"; CREATE SCHEMA "odd"";schema" AUTHORIZATION gl_owner')
+                elif kind == 'schema-name':
+                    sql('ALTER SCHEMA app RENAME TO renamed_app')
+                elif kind == 'schema-owner':
+                    sql('ALTER SCHEMA app OWNER TO gl_other')
+                elif kind == 'schema-acl':
+                    sql('GRANT CREATE ON SCHEMA app TO gl_other')
+                elif kind == 'database-owner':
+                    sql('ALTER DATABASE gl_data OWNER TO gl_other')
+                else:
+                    sql('GRANT CREATE ON DATABASE gl_data TO gl_other')
+                snapshot = all_acl()
+                run(binary, config, dsn, write=p['plan_id'], ok=False)
+                assert all_acl() == snapshot, kind
+                if kind == 'schema-name':
+                    sql('ALTER SCHEMA renamed_app RENAME TO app')
+                elif kind == 'schema-owner':
+                    # OWNER TO merges ACL entries; restore this fixture's unrelated direct USAGE explicitly.
+                    sql('ALTER SCHEMA app OWNER TO gl_owner; GRANT USAGE ON SCHEMA app TO gl_other')
+                elif kind == 'schema-acl':
+                    sql('REVOKE CREATE ON SCHEMA app FROM gl_other')
+                elif kind == 'database-owner':
+                    sql('ALTER DATABASE gl_data OWNER TO gl_owner')
+                elif kind == 'database-acl':
+                    sql('REVOKE CREATE ON DATABASE gl_data FROM gl_other')
+            assert all_acl() == baseline
+            for subject, resource, privileges in [
+                    ('gl_scoped', 'schema:gl_data.missing', ['USAGE']),
+                    ('gl_scoped', 'schema:gl_data.app', ['ALL']),
+                    ('gl_scoped', 'schema:gl_data.app', ['CONNECT']),
+                    ('gl_scoped', 'db:gl_data', ['USAGE']), ('gl_scoped', 'db:gl_data', ['TEMP']),
+                    ('gl_scoped', 'db:gl_data', ['ALL']), ('gl_scoped', 'db:other', ['CREATE']),
+                    ('gl_scoped', 'schema:other.app', ['USAGE']),
+                    ('PUBLIC', 'db:gl_data', ['CREATE']), ('PUBLIC', 'schema:gl_data.app', ['CREATE']),
+                    ('postgres', 'schema:gl_data.app', ['CREATE']), ('postgres', 'db:gl_data', ['CREATE']),
+                    ('gl_owner', 'db:gl_data', ['CONNECT']), ('gl_owner', 'schema:gl_data.app', ['USAGE']),
+                    ('gl_owner', 'schema:gl_data.public', ['USAGE'])]:
+                intent(root, [(subject, resource, privileges)], managed=(subject,))
+                snapshot = all_acl()
+                run(binary, config, dsn, ok=False)
+                assert all_acl() == snapshot
+            for scope, privilege in [('SCHEMA app', 'CREATE'), ('DATABASE gl_data', 'CREATE')]:
+                sql(f'GRANT {privilege} ON {scope} TO gl_other WITH GRANT OPTION', user='gl_owner')
+                sql(f'SET ROLE gl_other; GRANT {privilege} ON {scope} TO gl_scoped')
+                intent(root, desired, managed=scoped_subjects)
+                snapshot = all_acl()
+                run(binary, config, dsn, ok=False)
+                assert all_acl() == snapshot
+                sql(f'REVOKE {privilege} ON {scope} FROM gl_other CASCADE', user='gl_owner')
+            # Missing grant options produce warnings after DB CREATE succeeded; verify full rollback.
+            sql('CREATE SCHEMA z_denied AUTHORIZATION gl_other; GRANT USAGE ON SCHEMA z_denied TO gl_owner')
+            mixed = [('gl_scoped', 'db:gl_data', ['CREATE']),
+                     ('gl_scoped', 'schema:gl_data.app', ['CREATE']),
+                     ('gl_scoped', 'schema:gl_data.z_denied', ['CREATE'])]
+            intent(root, mixed, managed=scoped_subjects)
+            p = run(binary, config, dsn)
+            snapshot = all_acl()
+            failure = run(binary, config, dsn, write=p['plan_id'], ok=False)
+            assert 'postcondition failed' in failure.stderr and all_acl() == snapshot
+            sql('DROP SCHEMA z_denied')
+            # Raise after earlier DB/schema grants, then delay the same last table GRANT.
+            sql('CREATE TABLE z_failure(a int)', user='gl_owner')
+            sql("CREATE FUNCTION gl_fail() RETURNS event_trigger LANGUAGE plpgsql AS $$ BEGIN IF current_query() LIKE '%z_failure%' THEN RAISE EXCEPTION '" + MARKER + "'; END IF; END $$; CREATE EVENT TRIGGER gl_failure ON ddl_command_start WHEN TAG IN ('GRANT') EXECUTE FUNCTION gl_fail()")
+            mixed[-1] = ('gl_scoped', 'table:gl_data.public.z_failure', ['SELECT'])
+            intent(root, mixed, managed=scoped_subjects)
+            p = run(binary, config, dsn)
+            snapshot = all_acl()
+            failure = run(binary, config, dsn, write=p['plan_id'], ok=False)
+            assert 'statement failed' in failure.stderr and all_acl() == snapshot
+            # Unexpected server-side ownership changes must also fail the postcondition.
+            sql("CREATE OR REPLACE FUNCTION gl_fail() RETURNS event_trigger LANGUAGE plpgsql SECURITY DEFINER AS $$ BEGIN IF current_query() LIKE '%z_failure%' THEN ALTER SCHEMA app OWNER TO gl_other; END IF; END $$")
+            p = run(binary, config, dsn)
+            failure = run(binary, config, dsn, write=p['plan_id'], ok=False)
+            assert 'postcondition failed' in failure.stderr and all_acl() == snapshot
+            assert sql("SELECT pg_get_userbyid(nspowner) FROM pg_namespace WHERE nspname='app'") == 'gl_owner'
+            sql("CREATE OR REPLACE FUNCTION gl_fail() RETURNS event_trigger LANGUAGE plpgsql SECURITY INVOKER AS $$ BEGIN IF current_query() LIKE '%z_failure%' THEN PERFORM pg_sleep(10); END IF; END $$")
+            p = run(binary, config, dsn)
+            start = time.monotonic()
+            run(binary, config, dsn, write=p['plan_id'], ok=False)
+            assert time.monotonic() - start < 8 and all_acl() == snapshot
+            sql('DROP EVENT TRIGGER gl_failure; DROP FUNCTION gl_fail(); DROP TABLE z_failure')
+
+            # This writer's advisory lock covers DB/schema-only plans as well as table plans.
+            holder = subprocess.Popen([*docker, 'exec', '-i', name, 'psql', '-X', '-At', '-U', 'postgres', '-d', 'gl_data'],
+                                      stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            try:
+                holder.stdin.write("BEGIN; SELECT pg_advisory_xact_lock(1196576334, 1); SELECT 'locked';\n")
+                holder.stdin.flush()
+                while holder.stdout.readline().strip() != 'locked':
+                    assert holder.poll() is None, 'advisory lock holder failed'
+                for rows in [desired, [('gl_scoped', 'db:gl_data', ['CREATE'])], [('gl_scoped', 'schema:gl_data.app', ['CREATE'])]]:
+                    intent(root, rows, managed=scoped_subjects)
+                    p = run(binary, config, dsn)  # Preview does not need the writer lock.
+                    snapshot = all_acl()
+                    failure = run(binary, config, dsn, write=p['plan_id'], ok=False)
+                    assert 'advisory lock' in failure.stderr and all_acl() == snapshot
+            finally:
+                holder.communicate('ROLLBACK;\n', timeout=10)
+            intent(root, desired, managed=scoped_subjects)
+            p = run(binary, config, dsn)
+            assert run(binary, config, dsn, write=p['plan_id'])['applied'], 'writer lock was not released'
+            intent(root, [('gl_scoped', 'schema:gl_data.old_scope', ['USAGE'])], managed=scoped_subjects)
+            p = run(binary, config, dsn)
+            run(binary, config, dsn, write=p['plan_id'])
+            assert all_acl() == baseline
+
+            # A quoted database name binds its actual OID, not just the configured spelling.
+            quoted_db = 'gl";database'
+            sql('CREATE DATABASE "gl"";database" OWNER gl_owner', db='postgres')
+            config.write_text(config.read_text().replace('databases=["gl_data"]', 'databases=[' + json.dumps(quoted_db) + ']'))
+            quoted_dsn = dsn.replace('dbname=gl_data', "dbname='" + quoted_db + "'")
+            intent(root, [('gl_scoped', 'db:' + quoted_db, ['CREATE'])], managed=scoped_subjects)
+            p = run(binary, config, quoted_dsn)
+            sql('DROP DATABASE "gl"";database"; CREATE DATABASE "gl"";database" OWNER gl_owner', db='postgres')
+            snapshot = all_acl()
+            run(binary, config, quoted_dsn, write=p['plan_id'], ok=False)
+            assert all_acl() == snapshot
+            p = run(binary, config, quoted_dsn)
+            assert 'DATABASE "gl"";database"' in p['changes'][0]['cmd']
+            assert run(binary, config, quoted_dsn, write=p['plan_id'])['applied']
+            intent(root, [], managed=scoped_subjects)
+            p = run(binary, config, quoted_dsn)
+            run(binary, config, quoted_dsn, write=p['plan_id'])
+            assert all_acl() == snapshot
+            sql('DROP DATABASE "gl"";database"', db='postgres')
+            config.write_bytes(original_config)
+            (root / 'intent.toml').write_bytes(original_intent)
+            print('PostgreSQL schema/database writer: mixed grants/revokes/inverse, all privileges/quoted identifiers, stale schema/database identity/owner/ACL, exact delegation refusal, warning/error/timeout rollback and cooperative lock passed')
             run(binary, config, dsn.replace('sslmode=disable', 'sslmode=prefer'), ok=False)
             assert sorted(p.name for p in root.iterdir()) == ['config.toml', 'intent.toml']
             print('PostgreSQL writer server version:', sql('SHOW server_version'))
