@@ -1,0 +1,41 @@
+# Copy outside this repository. All names are fictional; credentials are env refs.
+intent = "intent.toml"
+snapshots = "snapshots"
+audit_log = "audit.jsonl"
+
+[web]
+public_url = "https://access.example.com/"
+[web.auth]
+mode = "oidc"
+issuer = "https://identity.example.com/"
+client_id = "grantline-console"
+client_secret_env = "GRANTLINE_OIDC_SECRET"
+allowed_subjects = ["requester-sub", "operator-sub", "reviewer-sub"]
+
+[approvals]
+store = "approvals-native-v1"
+admin = ["U_OPERATOR"]
+[approvals.identities]
+requester-sub = "U_REQUESTER"
+operator-sub = "U_OPERATOR"
+reviewer-sub = "U_REVIEWER"
+[[approvals.rules]]
+match = ["s3:bucket:demo/*"]
+approvers = ["U_REVIEWER"]
+
+[approvals.slack]
+bot_token_env = "GRANTLINE_SLACK_BOT_TOKEN"
+signing_secret_env = "GRANTLINE_SLACK_SIGNING_SECRET"
+team_id = "T_EXAMPLE"
+
+[approvals.code_writer]
+repository = "example/access-policy"
+intent_path = "intent.toml"
+base_branch = "main"
+token_env = "GRANTLINE_GITHUB_TOKEN"
+expected_login = "operator"
+# Private policy repository required unless deliberately opted into publication.
+allow_public_repository = false
+
+# Add adapters using the existing per-system config documented in rust/README.md.
+# Keep reader, probe and writer credential environment references separate.

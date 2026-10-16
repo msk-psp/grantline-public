@@ -107,12 +107,53 @@ fn preference(headers: &HeaderMap, name: &str) -> Option<String> {
         .map(|(_, v)| v.into())
 }
 fn language(headers: &HeaderMap, q: &std::collections::BTreeMap<String, String>) -> String {
-    q.get("lang")
+    if let Some(lang) = q
+        .get("lang")
         .cloned()
-        .or_else(|| preference(headers, "grantline_lang"))
         .filter(|s| grantline_ui::i18n::LANGUAGES.contains(&s.as_str()))
-        .unwrap_or_else(|| "en".into())
+        .or_else(|| {
+            preference(headers, "grantline_lang")
+                .filter(|s| grantline_ui::i18n::LANGUAGES.contains(&s.as_str()))
+        })
+    {
+        return lang;
+    }
+    let mut choices: Vec<_> = headers
+        .get(header::ACCEPT_LANGUAGE)
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("")
+        .split(',')
+        .take(32)
+        .filter_map(|s| {
+            let mut parts = s.trim().split(';');
+            let tag = parts.next()?.trim().to_ascii_lowercase();
+            let weight = parts
+                .next()
+                .map(|p| {
+                    p.trim()
+                        .strip_prefix("q=")
+                        .and_then(|q| q.parse::<f32>().ok())
+                        .unwrap_or(0.0)
+                })
+                .unwrap_or(1.0);
+            let lang = match tag.split('-').next()? {
+                "ko" => "ko",
+                "ja" => "ja",
+                "zh" => "zh-CN",
+                "en" => "en",
+                _ => return None,
+            };
+            (weight.is_finite() && weight > 0.0 && weight <= 1.0).then_some((weight, lang))
+        })
+        .collect();
+    choices.sort_by(|a, b| b.0.total_cmp(&a.0));
+    choices
+        .first()
+        .map(|(_, lang)| *lang)
+        .unwrap_or("en")
+        .into()
 }
+
 fn html_document(
     lang: &str,
     theme: &str,
@@ -450,21 +491,38 @@ pub fn app(s: Shared) -> Router {
     let router = router.merge(workflow_routes());
     router.layer(middleware::from_fn(security)).with_state(s)
 }
-pub async fn serve(path: PathBuf, host: IpAddr, port: u16, live: bool) -> crate::Result<()> {
+pub async fn serve(
+    path: PathBuf,
+    host: IpAddr,
+    port: u16,
+    live: bool,
+    public_preview: bool,
+) -> crate::Result<()> {
     let config = config::load(&path)?;
+    if public_preview && (live || config.config.web.auth.mode != "local") {
+        return Err("Public preview requires local read-only mode without --live".into());
+    }
     let listener = tokio::net::TcpListener::bind(SocketAddr::new(host, port))
         .await
         .map_err(|_| "Cannot bind native console")?;
     let actual = listener
         .local_addr()
         .map_err(|_| "Cannot inspect listener")?;
-    let origin = config
-        .config
-        .web
-        .public_url
-        .clone()
-        .unwrap_or_else(|| format!("http://{actual}/"));
-    let auth = auth::Auth::new(config.config.web.auth.clone(), &origin, host.is_loopback())?;
+    let origin = config.config.web.public_url.clone().unwrap_or_else(|| {
+        format!(
+            "http://{}/",
+            if actual.ip().is_unspecified() {
+                SocketAddr::new("127.0.0.1".parse().unwrap(), actual.port())
+            } else {
+                actual
+            }
+        )
+    });
+    let auth = auth::Auth::new(
+        config.config.web.auth.clone(),
+        &origin,
+        host.is_loopback() || public_preview,
+    )?;
     #[cfg(unix)]
     let workflow = config
         .config
@@ -547,9 +605,9 @@ fn workflow_routes() -> Router<Shared> {
         match s.workflow.as_ref().ok_or_else(||"Approvals not configured".to_owned()).and_then(|w|w.get(&id,&actor.subject)){Ok(v)=>Json(v).into_response(),Err(_)=>(StatusCode::NOT_FOUND,"Request unavailable").into_response()}
     }))
     .route("/api/snapshots",post(|State(s):State<Shared>,headers:HeaderMap,Json(f):Json<PublishInput>|async move {
-        if let Err(e)=s.auth.write_actor(&headers,&f.csrf){return e.into_response()}
+        let actor=match s.auth.write_actor(&headers,&f.csrf){Ok(a)=>a,Err(e)=>return e.into_response()};
         let result=tokio::task::spawn_blocking(move||{
-            let l=config::load(&s.path)?;let o=engine::observe_with_live(&l,None,s.live)?;let dir=config::relative(&l.base,&l.config.snapshots)?;crate::workflow::private_dir(&dir)?;o.snapshot.write(&dir)?;
+            let l=config::load(&s.path)?;let mut o=engine::observe_with_live(&l,None,s.live)?;o.snapshot.user=actor.subject;let dir=config::relative(&l.base,&l.config.snapshots)?;crate::workflow::private_dir(&dir)?;o.snapshot.write(&dir)?;
             Ok(serde_json::json!({"recorded":true,"applied":false}))
         }).await;workflow_result(result)
     }))

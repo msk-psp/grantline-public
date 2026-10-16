@@ -36,7 +36,7 @@ State is disposable, private to the process and erased when it exits.
 | R3 | PostgreSQL, ClickHouse and S3 native adapters, probes and writers | Existing regression cases ported; separately authorized live read/probe and reversible write validation per adapter | R3a–R3e3 merged; R3f merged; R3g1 merged; R3g2 merged; R3g3 membership writer merged in PR #28; R3g4 merged in PR #29; R3h1/R3h2 merged in #31; R3h3 merged in #32; conditional remote JSON writer implemented; protocol-specific tree/IAM writes remain explicitly unsupported |
 | R4 | Production sessions/OIDC, durable approval store, Slack signatures/DMs, code writer and GitHub PRs | Requester binding, all approvers, callback replay, immutable plan and repo scope verified end to end; approval/PR/applied access reported separately | Implemented in this stack; isolated verification, operational promotion pending |
 | R5 | All console pages, Leptos hydration and interactive permission map | Repeated hover highlight/dimming, matrix scrolling, accessible dark mode, logs and four locales verified in browser | Implemented in this stack; isolated verification, operational promotion pending |
-| R6 | Release image, migration/rollback and operating guide | Reproducible native/WASM builds, upgrade of persisted state, image smoke tests and explicitly authorized rollout | Pending |
+| R6 | Release image, migration/rollback and operating guide | Reproducible native/WASM builds, upgrade of persisted state, image smoke tests and explicitly authorized rollout | Implemented in this stack; native image/state migration checked locally, operational promotion pending |
 
 ## R2 — Offline CLI and data contracts {#R2}
 
@@ -70,13 +70,14 @@ keep Python as a development-only oracle until all stages pass.
 
 ## Next action
 
-R3h1/R3h2 main integration merged in PR #31. Review and merge R3h3 canonical
-ClickHouse role memberships after CI, including direct ADMIN, exact UUID/options,
-raw-state inverse and future/dependant access evidence. Next address remote S3
-writers as a separate reviewed unit; establish endpoint conditional-write and
-recovery semantics before enabling mutations.
-Global/other-object PostgreSQL defaults remain unsupported. R3 is incomplete;
-production/staging verification requires separate authorization.
+Review and merge the stack from bottom to top: remote writer (#33), OIDC (#34),
+durable workflow (#35), Leptos console (#36), then native release/migration.
+R1–R6 software paths are implemented within their explicit adapter contracts.
+After stack CI and review, authorize a separate isolated operational pilot using
+real configured OIDC/Slack/GitHub identities and read-only service comparisons.
+A release publication and production/staging traffic switch require separate
+operator action. Unsupported protocol/object scopes remain refused, never
+silently simulated or treated as empty access.
 
 ## R3 — Native adapter migration {#R3}
 
@@ -768,3 +769,31 @@ OIDC and durable Slack/GitHub loopback tests, release WASM build, and Chrome
 checks for repeated hover, dimming, matrix scrolling, themes, official icons and
 four locale transitions. Real operational SSO, Slack, GitHub and IAM services
 were not contacted. R6 supplies distribution and migration instructions.
+
+## R6 — Native distribution and private upgrade
+
+`Dockerfile.rust` pins official Rust 1.99 and Debian base digests, builds locked
+native/WASM artifacts and runs UID 10001 without Python/Node. A separately
+explicit read-only public fixture preview permits container networking; it
+refuses live services or authenticated modes. Release publication depends on
+reference/privacy, native adapter/WASM/auth/workflow/migration tests and native
+image smoke tests. Existing Python Dockerfile remains an explicit rollback path.
+
+The copy-only `migrate` CLI defaults to dry-run. Write requires stopped source
+writers, `--write --offline`, bounded private inputs, a new destination and an
+atomic publication with a semantic-hash manifest. Legacy tokens/commands/code
+plans are discarded; scoped historical archives confer no approval authority.
+Pending/approved native records need a new review; crashed publication and
+notification dispatches become unknown and never automatically retry. Original
+source state is retained for rollback. Snapshot JSONL remains compatible.
+
+[Operating guide](../rust-operations.md) and fictional configuration cover OIDC,
+trusted proxy boundaries, independent Slack identities, exact GitHub account
+and repository scope, private volumes, migration, shadow comparison and rollback.
+The four READMEs now start from native console build and distinguish published
+images, merging, operational validation and actual IAM application.
+
+Isolated contract tests and official service/container checks establish software
+behavior, not a completed operational deployment. Real SSO/workspace/repository,
+service reload/effective access, published multiarchitecture release and traffic
+cutover remain separately authorized deployment acceptance checks.

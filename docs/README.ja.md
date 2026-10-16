@@ -14,19 +14,19 @@
 
 ## ローカルで試す
 
-Python 3.11 以降と [uv](https://docs.astral.sh/uv/) が必要です。
+Rust **1.99.0**が必要です。サーバーはRust、画面はLeptos SSR・WASMです。
 デモには別のサーバーや認証情報は不要です。
 
 ```bash
 git clone https://github.com/msk-psp/grantline-public.git
 cd grantline-public
-uv venv
-uv pip install -e .
-source .venv/bin/activate
-grantline -c examples/demo/grantline.toml serve
+rustup target add --toolchain 1.99.0 wasm32-unknown-unknown
+cargo +1.99.0 install --locked wasm-bindgen-cli --version 0.2.129
+RUSTUP_TOOLCHAIN=1.99.0 scripts/build_rust_ui.sh
+cargo +1.99.0 run --locked --manifest-path rust/Cargo.toml -- -c examples/demo/grantline.toml serve
 ```
 
-**http://127.0.0.1:8420/** を開いてください。最初の画面はアクセス経路マップです。
+**http://127.0.0.1:8424/** を開いてください。最初の画面はアクセス経路マップです。
 **サービス**はサービス別のリソース一覧、**権限表**は権限の比較、
 **変更**は権限付与・取り消しのプレビューを表示します。
 アカウントを選択すると、その権限とアクセス経路を確認できます。
@@ -38,6 +38,11 @@ grantline -c examples/demo/grantline.toml serve
 
 ## Dockerで実行する
 
+このバージョンのリリースワークフローはUID 10001で動作するnative Rust・WASM
+イメージをビルドします。Python・Nodeランタイムは含みません。既存タグは変わらず、
+マージだけでは新しいイメージを公開しません。ローカルビルドには
+`docker build -f Dockerfile.rust -t grantline-native:local .`を使ってください。
+
 GitHub Releaseの公開時に、GHCRへ`linux/amd64`・`linux/arm64`イメージを配布します。
 安定版は`latest`も更新します。プレリリースには個別のバージョンタグを使います。
 
@@ -48,36 +53,39 @@ docker run --rm -p 127.0.0.1:8420:8420 ghcr.io/msk-psp/grantline-public:latest
 **http://127.0.0.1:8420/** で、認証情報なしで内蔵デモを試せます。
 実際のシステムでは外部設定をマウントし、実行記録を永続化してください。
 [コンテナ設定](usage.md#containers)を参照し、デプロイにはリリースタグまたは
-digestを固定してください。PostgreSQLドライバーはイメージに含まれています。
+digestを固定してください。nativeイメージはPostgreSQLに直接対応します。
 
 ## よく使うコマンド
 
 ```bash
-grantline -c examples/demo/grantline.toml plan      # 権限の差分とネイティブコマンドを確認
-grantline -c examples/demo/grantline.toml apply     # ドライランのみ、変更なし
-grantline -c examples/demo/grantline.toml history  # 記録済みの観測結果を比較
+rust/target/debug/grantline-rs -c examples/demo/grantline.toml plan      # 権限の差分とネイティブコマンドを確認
+rust/target/debug/grantline-rs -c examples/demo/grantline.toml plan --json     # ドライランのみ、変更なし
+rust/target/debug/grantline-rs -c examples/demo/grantline.toml history  # 記録済みの観測結果を比較
 ```
 
-`apply --write` は設定されたシステムを変更し、デモのデータファイルも変更します。
-有効にする前にプレビューと管理範囲を確認してください。
+対応するnative writerはサービスごとのプレビューと明示的な`--write --expect HASH`が必要です。
+承認とPR作成だけではIAM権限を適用しません。
 
 ## システムを接続する
 
 実際の設定は `~/.config/grantline/prod.toml` など、リポジトリの外に保存してください。
 設定には認証情報を保持する環境変数の名前を指定します。
-観測用と書き込み用の認証情報は分離されています。PostgreSQL を使う場合は
-`uv pip install 'grantline[postgres]'` で追加の依存関係をインストールします。
+観測用と書き込み用の認証情報は分離されています。native PostgreSQLにはPythonドライバーが不要です。
 
 以下の詳細ドキュメントは英語です。
 
+- [Native運用・移行・復旧](rust-operations.md): OIDC、Slack・GitHub、非公開状態とロールバック。
 - [設定と運用](usage.md): アダプター、認証情報、ブリッジ、権限宣言、アクセス確認、観測記録、承認。
-- [セキュリティ](../SECURITY.md): コンソールの共有と書き込みの有効化。内蔵サーバーはユーザーを認証しないため、共有環境には認証プロキシが必要です。
+- [セキュリティ](../SECURITY.md): コンソールの共有と書き込みの有効化。native共有環境にはOIDCまたは信頼できる認証プロキシを設定してください。
 - [コントリビューション](../CONTRIBUTING.md): 開発環境とチェック。
 - [製品範囲](prd/003-scope.md): 要件と実装状況。
 
 読み取れない範囲は **不明**であり、「アクセス権限なし」とは扱いません。
 書き込みの前には必ずネイティブ操作をプレビューし、実行の試行と結果を監査記録に残します。
 宣言に基づく取り消しは、管理対象のアカウントと宣言が記述するシステムに限定されます。
+
+Python参照実装は`uv pip install -e .`と既存の`Dockerfile`で利用できます。
+Pythonとnativeのプロセスで同じ承認ストアを共有しないでください。
 
 ## ライセンス
 

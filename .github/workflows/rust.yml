@@ -1,10 +1,11 @@
 name: Rust native
 on:
+  workflow_call:
   push:
     branches: [main]
-    paths: ["rust/**", "grantline/**", "grantline.toml", "examples/**", "scripts/check_rust_*", "scripts/build_rust_ui.sh", ".github/workflows/rust.yml"]
+    paths: ["rust/**", "grantline/**", "grantline.toml", "examples/**", "scripts/check_rust_*", "scripts/build_rust_ui.sh", "Dockerfile.rust", ".dockerignore", ".github/workflows/release.yml", ".github/workflows/rust.yml"]
   pull_request:
-    paths: ["rust/**", "grantline/**", "grantline.toml", "examples/**", "scripts/check_rust_*", "scripts/build_rust_ui.sh", ".github/workflows/rust.yml"]
+    paths: ["rust/**", "grantline/**", "grantline.toml", "examples/**", "scripts/check_rust_*", "scripts/build_rust_ui.sh", "Dockerfile.rust", ".dockerignore", ".github/workflows/release.yml", ".github/workflows/rust.yml"]
 
 permissions:
   contents: read
@@ -67,3 +68,23 @@ jobs:
         run: node scripts/check_rust_oidc.mjs
       - name: Verify durable approvals and signed Slack to GitHub code publication
         run: node scripts/check_rust_workflow.mjs
+      - name: Verify offline state migration and interrupted publication recovery
+        run: node scripts/check_rust_migration.mjs
+
+  image:
+    needs: native
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Dockerfile.rust
+          load: true
+          push: false
+          tags: grantline-rust-ci:local
+          cache-from: type=gha,scope=native-image
+          cache-to: type=gha,mode=max,scope=native-image
+      - name: Smoke native image without Python or writable root
+        run: node scripts/check_rust_image.mjs

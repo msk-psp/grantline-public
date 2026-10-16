@@ -8,6 +8,8 @@ pub mod console;
 pub mod engine;
 pub mod graph;
 pub mod integrations;
+#[cfg(unix)]
+pub mod migration;
 pub mod model;
 pub mod planner;
 pub mod postgres;

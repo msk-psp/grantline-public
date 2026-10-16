@@ -122,6 +122,7 @@ fn status(lang: &str, value: &str) -> String {
     tr(
         lang,
         match value {
+            "legacy" => "Archived; request a new review",
             "pending" => "Pending",
             "approved" => "Approved",
             "denied" => "Denied",
@@ -262,7 +263,7 @@ pub fn Console(bootstrap: Bootstrap) -> impl IntoView {
     <a class="button secondary" href="">{tr(&b.lang,"Refresh")}</a>
     </div>{b.error.as_ref().map(|_|view!{<div role="alert" class="notice error">{tr(&b.lang,"Catalog unavailable; access is unknown.")}</div>})}{(!b.data.snapshot.unobserved.is_empty()).then(||view!{<div role="status" class="notice warning">
     <strong>{tr(&b.lang,"Access is unknown for unread services.")}</strong>{b.data.snapshot.unobserved.iter().map(|u|view!{<p>
-    <code class="entity">{u.system.clone()}</code>{u.note.clone()}</p>}).collect_view()}</div>})}{(!b.interactive).then(||view!{<div class="notice">{tr(&b.lang,"Interactive bundle unavailable; build the UI to enable interactions.")}</div>})}<form class="filters" method="get">
+    <code class="entity">{u.system.clone()}</code>{u.note.clone()}</p>}).collect_view()}</div>})}{(!b.interactive).then(||view!{<div class="notice">{tr(&b.lang,"Interactive bundle unavailable; build the UI to enable interactions.")}</div>})}{(!matches!(b.page.as_str(),"history"|"approvals"|"act")).then(||view!{<form class="filters" method="get">
     <label>
     <span class="sr-only">{tr(&b.lang,"Search")}</span>
     <input name="q" value=b.query.clone() placeholder=tr(&b.lang,"Search")/>
@@ -273,7 +274,7 @@ pub fn Console(bootstrap: Bootstrap) -> impl IntoView {
     <option value="">{tr(&b.lang,"All environments")}</option>{environments.into_iter().map(|e|view!{<option value=e.clone() selected=e==b.environment>{e.clone()}</option>}).collect_view()}</select>
     <input type="hidden" name="lang" value=b.lang.clone()/>
     <button>{tr(&b.lang,"Filter")}</button>
-    </form>{body}</main>
+    </form>})}{body}</main>
     <footer>"Grantline · "{tr(&b.lang,"Preview only; no permission has been applied.")}</footer>
     </div>}
 }
@@ -383,7 +384,7 @@ fn PermissionMap(
     </div>}
 }
 fn services(b: &Bootstrap) -> AnyView {
-    let cards=b.data.services.iter().map(|name|{let logs:Vec<_>=b.data.plan.findings.iter().filter(|f|f.system==*name).cloned().collect();let unknown=b.data.snapshot.unobserved.iter().any(|u|u.system==*name);let kind=b.data.service_kinds.get(name).map(String::as_str).unwrap_or("");let icon=match kind{"postgres"=>view!{<img class="service-icon" src="/static/postgresql.png" alt="PostgreSQL"/>}.into_any(),"s3"=>view!{<img class="service-icon" src="/static/seaweedfs.png" alt="SeaweedFS"/>}.into_any(),_=>view!{<span class="service-icon clickhouse" aria-hidden="true">"▥"</span>}.into_any()};view!{<section class="card">
+    let cards=b.data.services.iter().filter(|name|(b.service.is_empty()||b.service.as_str()==name.as_str())&&(b.environment.is_empty()||b.data.graph.envs.get(*name).is_some_and(|e|e.contains(&b.environment)))).map(|name|{let logs:Vec<_>=b.data.plan.findings.iter().filter(|f|f.system==*name).cloned().collect();let unknown=b.data.snapshot.unobserved.iter().any(|u|u.system==*name);let kind=b.data.service_kinds.get(name).map(String::as_str).unwrap_or("");let icon=match kind{"postgres"=>view!{<img class="service-icon" src="/static/postgresql.png" alt="PostgreSQL"/>}.into_any(),"s3"=>view!{<img class="service-icon" src="/static/seaweedfs.png" alt="SeaweedFS"/>}.into_any(),_=>view!{<span class="service-icon clickhouse" aria-hidden="true">"▥"</span>}.into_any()};view!{<section class="card">
 <div class="service-heading">{icon}<h2>{name.clone()}</h2>
 <span class="badge">{tr(&b.lang,if unknown{"Unknown"}else{"Observed"})}</span>
 </div>

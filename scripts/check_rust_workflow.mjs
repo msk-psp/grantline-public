@@ -48,6 +48,7 @@ try{
   await writeFile(join(root,'intent.toml'),'');await writeFile(join(root,'fixture.json'),'{"identities":[]}');
   await writeFile(join(root,'config.toml'),`intent="intent.toml"\n[adapters.s3]\ntype="s3"\n[adapters.s3.planes.static]\nfile="fixture.json"\n[web]\npublic_url="${origin}/"\n[web.auth]\nmode="proxy"\n[approvals]\nstore="state"\nadmin=["reviewer","owner"]\n[approvals.code_writer]\nrepository="fixture/repo"\nintent_path="intent.toml"\ntoken_env="GL_GH_FIXTURE"\nexpected_login="fixture-bot"\napi_url="${api}/github/"\n[approvals.slack]\nbot_token_env="GL_SLACK_FIXTURE"\nsigning_secret_env="GL_SIGN_FIXTURE"\nteam_id="fixture-team"\napi_url="${api}/slack/"\n`);
   await boot();let requester=await login('requester'),reviewer=await login('reviewer'),owner=await login('owner'),outsider=await login('outsider');
+  await post('/api/snapshots',requester);const snapshotNames=await readdir(join(root,'snapshots'));const header=JSON.parse((await readFile(join(root,'snapshots',snapshotNames[0]),'utf8')).split('\n')[0]);assert.equal(header.run.user,'requester');
   const input={system:'s3',subject:'demo',resource:'bucket:probe/team',privilege:'Read',action:'grant'};
   await post('/api/requests',reviewer,input,false);assert.equal(messages.length,0);
   for(const kind of ['identity','public']){fault=kind;await post('/api/requests',requester,input,false);}fault='';
