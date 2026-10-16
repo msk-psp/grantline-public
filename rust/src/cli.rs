@@ -46,7 +46,7 @@ pub fn apply(
             result.system,
             result.database,
             if result.applied {
-                "direct table ACL transaction committed"
+                "direct object ACL transaction committed"
             } else {
                 "dry-run/no change; nothing committed"
             }

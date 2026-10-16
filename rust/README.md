@@ -1,6 +1,6 @@
 # Grantline — Rust + Leptos migration
 
-Experimental **R1 + R2 + R3a/R3b/R3c/R3d/R3e1/R3e2/R3e3/R3f/R3g1 foundation**, alongside the supported Python console.
+Experimental **R1 + R2 + R3a/R3b/R3c/R3d/R3e1/R3e2/R3e3/R3f/R3g1/R3g2 foundation**, alongside the supported Python console.
 This binary runs natively with no Python process. Commands are offline by default;
 native PostgreSQL/ClickHouse catalogs and remote S3 IAM require explicit `--live`
 and configured reader endpoints/credentials.
@@ -442,13 +442,15 @@ Normalized fixtures may add `"routes": [["demo-user", "group:demo", "member"]]` 
 metadata for structural policy hops. Existing snapshots contain no observer
 node-kind/policy-route metadata, and the output marks that limitation.
 
-### Apply PostgreSQL ordinary-table ACLs (R3g1)
+### Apply PostgreSQL table, schema and database ACLs (R3g1/R3g2)
 
-This first SQL writer supports **existing ordinary tables in one database**.
-It uses the existing native planner; a plan requiring role, schema, database or
-`ALTER DEFAULT PRIVILEGES` changes is refused in full. Declare any already-held
-non-table permissions you intend to retain for managed subjects. Only catalogs
-in the selected database (and shared role/database ACLs) are observed here;
+The SQL writer supports **existing ordinary tables and schemas in one database,
+and ACLs on that same database**. Supported schema privileges are USAGE/CREATE;
+database privileges are CONNECT/CREATE/TEMPORARY. Use canonical `TEMPORARY` in
+intent; the `TEMP` alias is refused to avoid a nonconvergent plan.
+It uses the existing native planner; role and `ALTER DEFAULT PRIVILEGES` changes
+remain refused in full. Declare any already-held permissions you intend to retain
+for managed subjects. Only catalogs in the selected database (and shared role/database ACLs) are observed here;
 this is not a cluster-wide reconciliation or effective-access check.
 
 ```toml
@@ -475,22 +477,30 @@ rust/target/debug/grantline-rs -c /path/to/grantline.toml apply --system pg --li
 ```
 
 The identifier binds input bytes, non-secret endpoint, authenticated session,
-server start, database/table/role object identities, catalog ACL state and fixed
+server start, database/schema/table/role object identities, catalog ACL state and fixed
 quoted SQL. Passwords are not included in the identifier or receipt. A server
 restart, a changed object/ACL/role, another login or changed input requires a new
-preview. Dry-run and no-op calls create no files and commit no ACL changes.
-Only exact table privileges are accepted. ALL, PUBLIC/owner/privileged targets,
+preview. The R3g2 plan-ID format is v2; older R3g1 IDs need a fresh preview
+after upgrading. Dry-run and no-op calls create no files and commit no ACL changes.
+Only exact supported object privileges are accepted. ALL, PUBLIC/owner/privileged targets,
 column privileges, non-owner grantors, grant options, views, partitions and
 inheritance are unsupported. These conservative restrictions can refuse the
 whole plan even when only one candidate would be unsafe.
 
-Writing takes sorted `ACCESS EXCLUSIVE NOWAIT` locks on affected tables in one
-READ COMMITTED transaction, refreshes the reviewed state, then executes generated
-GRANT/REVOKE with RESTRICT. Direct ACLs and the remaining plan are checked before
-COMMIT. A pre-commit failure rolls everything back. **Locks briefly block table
-queries**, so use a controlled maintenance window. Relation locks do not freeze
-role, namespace or unrelated catalog administration; concurrent administrators
-are outside this unit's guarantee. See PostgreSQL's [LOCK documentation](https://www.postgresql.org/docs/17/sql-lock.html).
+Writing first takes a nonblocking transaction advisory lock with reserved keys
+`(1196576334, 1)` in the connected database. This serializes all plans from this
+writer version, including schema/DB-only plans. It then takes sorted
+`ACCESS EXCLUSIVE NOWAIT` locks on affected tables in the same READ COMMITTED
+transaction, refreshes the reviewed state and executes generated GRANT/REVOKE
+with RESTRICT. Exact table/schema/database ACLs, including grantor/grant option,
+object identities/ownership and the remaining plan are checked before COMMIT.
+A pre-commit failure rolls everything back. **Table locks briefly block table
+queries**, so use a controlled maintenance window. Advisory locks are cooperative:
+raw SQL, older writers and other catalog administrators do not participate.
+Neither this advisory lock nor relation locks freeze role/namespace/database
+administration. Concurrent administrators are outside this unit's guarantee.
+See PostgreSQL's [advisory locking](https://www.postgresql.org/docs/17/explicit-locking.html#ADVISORY-LOCKS)
+and [LOCK documentation](https://www.postgresql.org/docs/17/sql-lock.html).
 
 A commit transport error is reported as **outcome unknown**: inspect the catalog
 before any retry. A successful receipt reports a committed direct ACL transaction
@@ -498,7 +508,11 @@ and `effective_access_verified=false`. Test subject access separately with `prob
 To undo, edit intent, preview the inverse and review its new identifier. The S3
 `restore` command does not restore PostgreSQL; inverse intent does not restore
 ACL NULL/array storage representation, role state or database data. The official
-fixture tests full SQL-error rollback and a reviewed inverse; production writes,
+fixture tests full mixed-scope rollback on SQL errors, timeouts and ineffective
+warning-only grants, stale schema/database identity/ownership/ACL refusal,
+cooperative lock contention/release, and a reviewed inverse. Direct ACL revocation
+does not remove privileges inherited from PUBLIC or roles and does not terminate
+existing sessions. This receipt still does not prove effective access. Production writes,
 network loss during COMMIT and general disaster recovery are unverified.
 
 ### Apply or restore one local S3 IAM file (R3f)
@@ -617,10 +631,11 @@ their own ports and are unaffected.
 - R3e3 signs scoped S3 List/HEAD samples with explicitly mapped subject keys.
 - R3f explicitly applies/restores one local S3 IAM file with stale-state guards and private backups.
 - R3g1 applies one PostgreSQL ordinary-table ACL plan transactionally with explicit credentials and review.
+- R3g2 extends that transaction to schema/database ACLs, with cooperative writer locking and full direct ACL postconditions.
 
 ## What remains
 
-PostgreSQL schema/database/role/default-privilege writers, ClickHouse/remote S3
+PostgreSQL role/default-privilege writers, ClickHouse/remote S3
 writers, production authentication,
 durable approvals, real Slack/GitHub writers, all existing console pages,
 WASM map interactions, four-language UI and release images are later stages.

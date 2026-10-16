@@ -33,7 +33,7 @@ State is disposable, private to the process and erased when it exits.
 | Stage | Implementation | Acceptance before promotion | Status |
 |---|---|---|---|
 | R2 | Typed config/intent, snapshots, findings, graph and offline plan CLI | Fixture decisions, diagnostics, PG/CH SQL previews, snapshot round trips and graph paths match Python; S3 commands/coalescing remain R3 | Merged in PR #16 |
-| R3 | PostgreSQL, ClickHouse and S3 native adapters, probes and writers | Existing regression cases ported; separately authorized live read/probe and reversible write validation per adapter | R3a–R3e3 merged; R3f merged; R3g1 PostgreSQL ordinary-table writer implemented; other writers pending |
+| R3 | PostgreSQL, ClickHouse and S3 native adapters, probes and writers | Existing regression cases ported; separately authorized live read/probe and reversible write validation per adapter | R3a–R3e3 merged; R3f merged; R3g1 merged; R3g2 PostgreSQL schema/database writer implemented; other writers pending |
 | R4 | Production sessions/OIDC, durable approval store, Slack signatures/DMs, code writer and GitHub PRs | Requester binding, all approvers, callback replay, immutable plan and repo scope verified end to end; approval/PR/applied access reported separately | Pending |
 | R5 | All console pages, Leptos hydration and interactive permission map | Repeated hover highlight/dimming, matrix scrolling, accessible dark mode, logs and four locales verified in browser | Pending |
 | R6 | Release image, migration/rollback and operating guide | Reproducible native/WASM builds, upgrade of persisted state, image smoke tests and explicitly authorized rollout | Pending |
@@ -70,16 +70,16 @@ keep Python as a development-only oracle until all stages pass.
 
 ## Next action
 
-Review and merge R3g1's PostgreSQL single-database ordinary-table ACL writer.
-Next implement R3g2 schema/database ACL writes with explicit credentials, reviewed
-state binding and isolated transactional rollback checks; keep role/default-privilege
-writes as subsequent review units, followed by ClickHouse and remote S3 writers. Each unit needs
-acceptance evidence; R3 remains incomplete. Production/staging verification
+Review and merge R3g2's schema/database ACL extension and its mixed-scope
+transaction tests. Next implement R3g3 PostgreSQL role membership writes as a
+separate unit with explicit membership option/grantor modelling and privilege
+boundary/rollback tests. Default-privilege writes follow, then ClickHouse and
+remote S3 writers. R3 remains incomplete. Production/staging verification
 requires separate authorization.
 
 ## R3 — Native adapter migration {#R3}
 
-Status: R3a merged in PR #17; R3b merged in PR #18; R3c merged in PR #19; R3d merged in PR #20; R3e1 merged in PR #22; R3e2 merged in PR #23; R3e3 merged in PR #24; R3f merged in PR #25; R3g1 PostgreSQL ordinary-table writer implemented.
+Status: R3a merged in PR #17; R3b merged in PR #18; R3c merged in PR #19; R3d merged in PR #20; R3e1 merged in PR #22; R3e2 merged in PR #23; R3e3 merged in PR #24; R3f merged in PR #25; R3g1 merged in PR #26; R3g2 PostgreSQL schema/database writer implemented.
 The first review unit implements S3 file/dir
 planes, effective policy observation, group/inline routes and identity-scoped
 document previews. Plan commands remain previews; R3f adds a separate explicit
@@ -410,6 +410,8 @@ or unverified. PostgreSQL/ClickHouse/remote S3 writers remain subsequent units.
 
 ### R3g1 — Transactional PostgreSQL ordinary-table ACL writer
 
+Merged in PR #26. This unit's table-only boundary is extended by R3g2 below.
+
 Scope: one explicitly selected PostgreSQL 16+ database and existing ordinary tables.
 `apply --system NAME --live` reads only the named `admin_dsn_env` and previews a
 fresh native plan. It never falls back to reader, probe or ambient PG credentials.
@@ -445,3 +447,46 @@ SQL error and a delayed statement after an earlier successful GRANT: all leave
 original direct ACLs intact. Execution logs and PR/CI state live in the task
 handoff, not in this specification. Production, COMMIT network-loss ambiguity and
 concurrent role/namespace administrators remain unverified.
+
+### R3g2 — Single-database schema and database ACL writes
+
+Extend the same reviewed writer to existing `schema:DB.NAME` USAGE/CREATE and
+`db:DB` CONNECT/CREATE/TEMPORARY atoms, alongside ordinary-table ACLs in the same
+transaction. TEMP aliases, ALL/wildcards, PUBLIC/owner/privileged targets,
+non-owner grantors/delegation and cross-database changes remain refused. Role and
+default-privilege writes remain later units. No object creation, data SQL or role
+switching is executed. Explicit admin credentials, `--live`, `--write --expect`,
+TLS rules, bounded inputs and unknown-scope refusal remain unchanged.
+
+Bind schema/database object OIDs, ownership and raw ACL state to a versioned
+plan ID. All writes acquire a nonblocking transaction advisory lock with reserved
+keys `(1196576334, 1)` in the connected database before observation; this
+serializes this writer version's table/schema/DB plans. Existing affected-table
+NOWAIT ACCESS EXCLUSIVE locks remain. There is no SQL LOCK SCHEMA/DATABASE
+substitute here: advisory locking does not exclude raw SQL or older writers.
+Use a controlled maintenance window without external role/namespace/database
+administration; this unit must not claim cluster-wide serialization or CAS.
+
+Apply fixed quoted GRANT/REVOKE RESTRICT, verify exact direct ACL atoms across
+all three object kinds including grantor/grant option, unchanged object
+identities/ownership/non-ACL catalog state and an empty remaining plan, then
+COMMIT once. PUBLIC defaults and unrelated grants stay intact. A warning-only
+ineffective grant, SQL error or timeout must roll back all mixed-scope changes.
+COMMIT connection-loss outcomes remain unknown and require inspection before retry.
+
+Acceptance: official disposable PostgreSQL verifies all supported privileges,
+quoted schema/subject identifiers, DB/schema/table mixed plans and reviewed
+inverse restoring semantic ACLs. Reject stale schema OID/name/owner/ACL and DB
+owner/ACL, other-DB grants, delegation, privileged/owner/PUBLIC targets and
+unsupported scope/privilege. Verify mixed-scope SQL-error, timeout and warning
+rollback plus advisory lock contention/release, existing table locks, credential
+redaction and reader/S3 regressions. No operational writes are authorized.
+
+R3g2 implementation retains the existing read/plan/core semantics and write
+credential boundaries. The reviewed-ID format advances to v2: IDs from the
+ordinary-table-only writer must be previewed again. The fixture uses official
+PostgreSQL 17.11, covers PUBLIC's preserved effective defaults, the special
+`pg_database_owner` owner of the public schema, and quoted schema/subject/database
+names. Exact run results and PR/CI evidence are recorded in the task handoff.
+The initial Docker readiness check now verifies TCP, avoiding the image's
+temporary initialization server that accepts only local socket connections.
