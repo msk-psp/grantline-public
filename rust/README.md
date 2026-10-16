@@ -994,3 +994,36 @@ only after review. Restore refuses changed applied bytes and uses current ETag.
 412 means revision conflict. Other dispatch/post-check failures require inspection;
 there is no automatic retry/compensation or service reload. Shared IAM trees and
 IAM Query remain read-only. Run `python3 scripts/check_rust_remote_writer.py`.
+
+## Native production authentication
+
+`grantline-rs -c CONFIG serve --port 8424` starts the native console. Without auth
+configuration it is a loopback-only, read-only local preview. Demo identities
+are never accepted on production routes. `--live` explicitly enables configured
+service reads; it does not enable permission application.
+
+```toml
+[web]
+public_url = "https://grantline.example.com/"
+[web.auth]
+mode = "oidc"
+issuer = "https://identity.example.com"
+client_id = "grantline"
+client_secret_env = "GRANTLINE_OIDC_CLIENT_SECRET"
+allowed_subjects = ["provider-subject-id"]
+```
+
+Register the exact `PUBLIC_URL/auth/callback` URI. OIDC uses code flow, PKCE,
+browser-bound one-use state and nonce, and issuer/audience/signature/expiry
+verification. Subjects, not unverified email aliases, identify users. Sessions
+expire after an hour and are invalidated by restart. Cookies are HttpOnly,
+SameSite=Lax and Secure for HTTPS. Mutation endpoints require exact Origin plus
+session CSRF. `POST /auth/logout` revokes the session.
+
+For an existing OIDC proxy, set `mode = "proxy"` and optionally
+`identity_header = "X-Forwarded-Email"`. Bind the process to loopback and make
+the proxy strip/replace this header and restrict access. Each authenticated
+request must retain the same proxy identity as its private session. A header
+from an untrusted direct client is not authentication; do not expose the
+loopback upstream. Duplicate identities and off-origin/invalid CSRF are rejected.
+Run `node scripts/check_rust_oidc.mjs` for an isolated RSA-signed provider test.
