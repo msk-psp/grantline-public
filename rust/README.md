@@ -1,6 +1,6 @@
 # Grantline — Rust + Leptos migration
 
-Experimental **R1 + R2 + R3a/R3b/R3c/R3d/R3e1/R3e2/R3e3 foundation**, alongside the supported Python console.
+Experimental **R1 + R2 + R3a/R3b/R3c/R3d/R3e1/R3e2/R3e3/R3f foundation**, alongside the supported Python console.
 This binary runs natively with no Python process. Commands are offline by default;
 native PostgreSQL/ClickHouse catalogs and remote S3 IAM require explicit `--live`
 and configured reader endpoints/credentials.
@@ -441,6 +441,76 @@ Normalized fixtures may add `"routes": [["demo-user", "group:demo", "member"]]` 
 metadata for structural policy hops. Existing snapshots contain no observer
 node-kind/policy-route metadata, and the output marks that limitation.
 
+### Apply or restore one local S3 IAM file (R3f)
+
+This Unix-only writer supports an existing monolithic `file` in the selected
+adapter's enforced plane. It reads only that source; other services/planes,
+remote readers, environment credentials and imported snapshots are not used.
+Remote IAM and directory/group policy trees remain unsupported for writes.
+The filesystem's write permission is the credential, as in the Python file
+adapter; no network/admin credential is inferred from read access.
+
+```sh
+rust/target/debug/grantline-rs -c /path/to/grantline.toml apply --system object-store --json
+# Review the permission-only previews, then copy the returned plan_id:
+rust/target/debug/grantline-rs -c /path/to/grantline.toml apply --system object-store --write --expect PLAN_ID_FROM_DRY_RUN --json
+# Inspect rollback before explicitly restoring the returned private backup:
+rust/target/debug/grantline-rs -c /path/to/grantline.toml restore --system object-store --backup /absolute/path/to/private-backup --json
+rust/target/debug/grantline-rs -c /path/to/grantline.toml restore --system object-store --backup /absolute/path/to/private-backup --write --json
+```
+
+Dry-run creates no files. Application requires an exact match for the reviewed
+config/intent bytes, selected path, source bytes/metadata and grouped previews.
+Re-read immediately before replacement; an edited source, rotated key, changed
+intent/config, replaced inode or changed mode invalidates the plan. Up to 1,000
+changes are coalesced into one complete file replacement. Existing credentials,
+account metadata and unrelated identities/fields remain intact; new identities
+have no credentials. New native prefix actions use `Verb:bucket/prefix/*`, since
+bare prefix paths do not authorize descendants on SeaweedFS. Existing untouched
+actions are preserved; this is not a repair of historic normalization assumptions.
+Re-evaluate the full resulting file against intent before writing. A candidate
+plan that drops a covering grant without retaining the intended narrower access
+is refused rather than temporarily removing that access; inspect `plan` and
+resolve the declaration/source with its owner before retrying.
+
+Use regular, singly linked files on a trusted local POSIX filesystem. Empty or
+traversal segments in changed resource scopes are unsupported. Symlinks,
+FIFOs, unsafe writable parents/ancestors, special/group/world-write source bits,
+duplicate JSON keys, floats/out-of-range integers, unrecognized IAM fields and
+incomplete policies are refused. Root fields are `identities`/`accounts`; identity
+fields are `name`, `actions`, `policy`, `credentials`, `account`, `disabled` and
+`status`. Unknown policy-binding formats require an owning IAM client. Source,
+config and intent are each limited to 4 MiB; backup envelopes to 32 MiB.
+
+Writers coordinate with a persistent, private `.FILENAME.grantline.lock` sidecar
+and a nonblocking OS lock. Do not remove it while a writer may run. Staging uses
+a private file in the same directory, preserves POSIX mode/owner/group, syncs
+contents and backup, then atomically replaces the source and syncs its directory.
+Readers see a complete old or new document. Owner/group changes are refused.
+The lock coordinates cooperating Grantline writers; it is not a filesystem CAS
+against unrelated editors. ACLs, extended attributes, SELinux labels, network
+filesystems and power-loss/fault-injection guarantees are not supported/verified;
+use this writer only for ordinary POSIX-mode-managed files.
+
+The returned hidden backup contains **the exact original bytes, including keys**,
+plus target/digest/mode metadata. It is mode 0600, not encrypted or a signed
+approval artifact; keep it private and outside public version control. Retention
+and deletion are separate operator actions. Rollback requires the same selected
+system/path/owner/mode and exact applied-file digest. If another edit occurred,
+restore refuses to overwrite it. A restore also backs up the current version,
+so redo has the same conditional boundary. No-op writes create no backup.
+An interrupted pre-replacement operation may leave a private backup; errors
+after replacement explicitly require inspection before retrying.
+
+`applied`/`restored` mean **local file replacement only**. No service reload,
+IAM API call, Slack/GitHub action or deployment occurs. JSON explicitly reports
+`service_reload_verified: false`. Effective service access requires separate
+reload/readback/probe evidence. Run `cargo test --manifest-path rust/Cargo.toml`
+for stale-state, permission, symlink/hardlink, duplicate/unknown JSON, lock,
+credential preservation, atomic-reader and exact-restore guards;
+`python3 scripts/check_rust_s3_writer.py --docker` verifies actual scoped access
+before application, after application and after restoration on isolated SeaweedFS.
+
 ## Run the native approval playground
 
 From the repository root:
@@ -485,15 +555,17 @@ their own ports and are unaffected.
 - R3d reads remote S3 JSON/Filer/IAM sources with bounded collections and no write preview.
 - R3e1/R3e2 probe PostgreSQL/ClickHouse ACLs, with optional explicit subject logins.
 - R3e3 signs scoped S3 List/HEAD samples with explicitly mapped subject keys.
+- R3f explicitly applies/restores one local S3 IAM file with stale-state guards and private backups.
 
 ## What remains
 
-Native writes, production authentication,
+PostgreSQL/ClickHouse/remote S3 writers, production authentication,
 durable approvals, real Slack/GitHub writers, all existing console pages,
 WASM map interactions, four-language UI and release images are later stages.
-Live S3 document writes and other native writers remain in R3. Approval, a
+Remote S3 document writes and other native writers remain in R3. Approval, a
 simulated PR and effective IAM access are separate states. This experimental app
-never changes live access and is not ready to replace a production deployment.
+is not ready to replace a production deployment. The playground stays fictional;
+CLI file application, service reload and effective access are separate states.
 
 ## Check the boundary
 
@@ -511,6 +583,7 @@ python3 scripts/check_rust_clickhouse.py --docker
 python3 scripts/check_rust_postgres.py --docker
 python3 scripts/check_rust_s3_network.py --docker
 python3 scripts/check_rust_s3_probes.py --docker
+python3 scripts/check_rust_s3_writer.py --docker
 ```
 
 The checks cover canonical grants, coverage, convergence actions, diagnostic

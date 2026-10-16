@@ -11,7 +11,7 @@ use std::{
 };
 
 #[derive(Parser)]
-#[command(about = "Grantline native Rust migration — experimental, read-only planning")]
+#[command(about = "Grantline native Rust migration — experimental, dry-run by default")]
 struct Cli {
     #[arg(short = 'c', long, global = true, default_value = "grantline.toml")]
     config: PathBuf,
@@ -28,6 +28,28 @@ enum Command {
         json: bool,
         #[arg(long)]
         verbose: bool,
+    },
+    /// Preview one local S3 IAM file; writing requires a reviewed plan identifier.
+    Apply {
+        #[arg(long)]
+        system: String,
+        #[arg(long)]
+        write: bool,
+        #[arg(long, requires = "write")]
+        expect: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Restore a private original-byte backup only if the target still matches its applied state.
+    Restore {
+        #[arg(long)]
+        system: String,
+        #[arg(long)]
+        backup: PathBuf,
+        #[arg(long)]
+        write: bool,
+        #[arg(long)]
+        json: bool,
     },
     /// Read-only native ACL checks. Network activity requires --live; no writes or data reads.
     Probe {
@@ -99,6 +121,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             json,
             verbose,
         } => cli::plan(&args.config, &source, json, verbose)?,
+        Command::Apply {
+            system,
+            write,
+            expect,
+            json,
+        } => {
+            cli::apply(&args.config, &system, write, expect.as_deref(), json)?;
+        }
+        Command::Restore {
+            system,
+            backup,
+            write,
+            json,
+        } => {
+            cli::restore(&args.config, &system, &backup, write, json)?;
+        }
         Command::Probe {
             live,
             observed,

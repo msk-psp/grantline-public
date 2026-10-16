@@ -33,7 +33,7 @@ State is disposable, private to the process and erased when it exits.
 | Stage | Implementation | Acceptance before promotion | Status |
 |---|---|---|---|
 | R2 | Typed config/intent, snapshots, findings, graph and offline plan CLI | Fixture decisions, diagnostics, PG/CH SQL previews, snapshot round trips and graph paths match Python; S3 commands/coalescing remain R3 | Merged in PR #16 |
-| R3 | PostgreSQL, ClickHouse and S3 native adapters, probes and writers | Existing regression cases ported; separately authorized live read/probe and reversible write validation per adapter | R3a–R3e2 merged; R3e3 S3 List/HEAD probes implemented; writers pending |
+| R3 | PostgreSQL, ClickHouse and S3 native adapters, probes and writers | Existing regression cases ported; separately authorized live read/probe and reversible write validation per adapter | R3a–R3e3 merged; R3f local S3 file writer implemented; other writers pending |
 | R4 | Production sessions/OIDC, durable approval store, Slack signatures/DMs, code writer and GitHub PRs | Requester binding, all approvers, callback replay, immutable plan and repo scope verified end to end; approval/PR/applied access reported separately | Pending |
 | R5 | All console pages, Leptos hydration and interactive permission map | Repeated hover highlight/dimming, matrix scrolling, accessible dark mode, logs and four locales verified in browser | Pending |
 | R6 | Release image, migration/rollback and operating guide | Reproducible native/WASM builds, upgrade of persisted state, image smoke tests and explicitly authorized rollout | Pending |
@@ -70,20 +70,21 @@ keep Python as a development-only oracle until all stages pass.
 
 ## Next action
 
-Review R3e3's S3 read-only subject-signed List/HEAD probes and isolated server
-evidence. The next review unit is a native writer for local S3 IAM documents,
-using existing grouped previews, explicit opt-in, stale-source guards and
-reversible fixture validation. Other writers and separately authorized
-production/staging verification follow. Each
+Review R3f's local S3 IAM file writer, conditional restore and isolated SeaweedFS
+before/after/restore evidence. The next review unit is a PostgreSQL writer with
+explicit admin credentials, reviewed plan binding, transactional fixed GRANT/REVOKE
+and isolated reversible verification. ClickHouse/remote S3 writers and separately
+authorized production/staging verification follow. Each
 review unit needs acceptance evidence before advancing; R3 is not yet complete.
 
 ## R3 — Native adapter migration {#R3}
 
-Status: R3a merged in PR #17; R3b merged in PR #18; R3c merged in PR #19; R3d merged in PR #20; R3e1 merged in PR #22; R3e2 merged in PR #23; R3e3 S3 List/HEAD probes implemented.
+Status: R3a merged in PR #17; R3b merged in PR #18; R3c merged in PR #19; R3d merged in PR #20; R3e1 merged in PR #22; R3e2 merged in PR #23; R3e3 merged in PR #24; R3f local S3 file writer implemented.
 The first review unit implements S3 file/dir
 planes, effective policy observation, group/inline routes and identity-scoped
-document previews. Plan commands remain previews; no IAM file, shared managed
-policy or live service is changed. Existing Python regressions are the oracle.
+document previews. Plan commands remain previews; R3f adds a separate explicit
+local-file application path. Shared managed policies and live services are not
+written by this unit. Existing Python regressions are the oracle.
 
 Acceptance: preserve policy-over-native precedence, exact Deny subtraction,
 literal prefix-listing capabilities, conservative unread scopes, cross-plane
@@ -365,3 +366,44 @@ List, empty/ambiguous/auth failures and independent server-side write refusal.
 Existing S3 readers and PostgreSQL/ClickHouse server regressions remain green.
 Positive TLS/private CA, AWS integration, writes and production/staging access
 remain unverified or pending. No deployment is part of this unit.
+
+### R3f — Local S3 IAM file application and conditional restore
+
+Status: implemented for one explicitly selected local monolithic file on Unix.
+`apply` defaults to a file-free dry-run; `--write --expect PLAN_ID` must match
+config/intent bytes, selected path, source bytes/metadata and grouped previews.
+Read no other service/plane, network or imported snapshot. Filesystem write
+permission is the local credential. Remote IAM and shared group trees are refused.
+
+Reuse exact normalized-grant preview validation and require full final-intent
+convergence, refusing a covering-grant removal that would lose intended narrower
+access. Preserve credentials, account
+metadata and unrelated identities. New identities have no keys. Emit recursive
+native prefix actions with `/*`; bare prefix actions do not authorize descendants
+on SeaweedFS. This is a correction to new preview output, not a reinterpretation
+or automatic repair of untouched source actions. Unknown source fields/bindings,
+incomplete policies, duplicate JSON keys, non-integral/out-of-range numbers,
+unsafe permissions/parents, symlinks/hardlinks/FIFOs and oversize inputs are refused.
+
+Use a private persistent sidecar OS lock for cooperating writers. Stage in the
+same directory, retain POSIX mode/owner/group, sync a 0600 backup of exact original
+bytes, recheck source/inputs, atomically replace and sync directory. Conditional
+restore requires the exact applied digest/target/owner/mode and itself saves a
+private backup. Readers see complete old/new documents. Backup contains keys;
+never print its contents or commit it. Explicit JSON service_reload_verified=false
+separates file replacement from service application. No reload or network write.
+
+Acceptance: Rust36 tests, format/Clippy/build; stale source/config/intent/mode/inode
+and foreign-plan refusals, credential/account/unmanaged preservation, policy JSON
+and new-identity file changes, duplicate/unknown schemas, permissions, path/link
+and lock guards, in-operation mutation refusal, concurrent readers and exact
+conditional rollback/redo. Existing differential suites and Python36 tests pass.
+check_rust_s3_writer.py bounds FIFO rejection and verifies before/apply/restore
+on official isolated SeaweedFS4.48: actual native-action prefix access/revocation,
+sibling denial, unchanged keys and no accidental List/PUT/DELETE authorization.
+Policy JSON transformation is model-tested; its service loading is unverified.
+
+Limits: 4MiB source/config/intent, 32MiB backup, 1,000 changes. This is not a CAS
+against unrelated editors. ACL/xattr/SELinux, network filesystems, power-loss/fault
+injection, Windows, operational reload and production/staging writes are unsupported
+or unverified. PostgreSQL/ClickHouse/remote S3 writers remain subsequent units.

@@ -1,4 +1,4 @@
-//! Offline commands. Reads never resolve credentials or invoke live adapters.
+//! Native read-only commands and explicitly selected local IAM application.
 use crate::{
     Result, config, engine,
     graph::Paths,
@@ -15,6 +15,72 @@ fn json(value: &impl Serialize) -> Result<()> {
         "{}",
         serde_json::to_string_pretty(value).map_err(|_| "Cannot encode output")?
     );
+    Ok(())
+}
+pub fn apply(
+    path: &Path,
+    system: &str,
+    write: bool,
+    expected: Option<&str>,
+    as_json: bool,
+) -> Result<()> {
+    #[cfg(unix)]
+    {
+        let result = crate::s3::writer::apply(path, system, write, expected)?;
+        writer_output(&result, as_json)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (path, system, write, expected, as_json);
+        Err("Local IAM writer currently supports Unix filesystems only".into())
+    }
+}
+pub fn restore(path: &Path, system: &str, backup: &Path, write: bool, as_json: bool) -> Result<()> {
+    #[cfg(unix)]
+    {
+        let result = crate::s3::writer::restore(path, system, backup, write)?;
+        writer_output(&result, as_json)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (path, system, backup, write, as_json);
+        Err("Local IAM writer currently supports Unix filesystems only".into())
+    }
+}
+#[cfg(unix)]
+fn writer_output(result: &crate::s3::writer::Receipt, as_json: bool) -> Result<()> {
+    if as_json {
+        return json(result);
+    }
+    println!(
+        "Local S3 IAM {}: {} — {}",
+        result.system,
+        result.path.display(),
+        if result.applied {
+            "file replaced; service reload/application not verified"
+        } else if result.restored {
+            "original bytes restored; service reload not verified"
+        } else {
+            "dry-run/no change; IAM file not written"
+        }
+    );
+    println!("Plan identifier: {}", result.plan_id);
+    for p in &result.previews {
+        println!(
+            "{} {}: {} grouped change(s)\nBefore: {}\nAfter: {}",
+            p.subject,
+            p.kind,
+            p.changes.len(),
+            p.before.as_ref().unwrap_or(&serde_json::Value::Null),
+            p.after.as_ref().unwrap_or(&serde_json::Value::Null)
+        );
+    }
+    if let Some(backup) = &result.backup {
+        println!(
+            "Private original-byte backup: {} (contains credentials; keep private)",
+            backup.display()
+        );
+    }
     Ok(())
 }
 #[derive(clap::Args, Default)]
