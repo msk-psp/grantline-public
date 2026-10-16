@@ -130,6 +130,8 @@ mod tests {
         };
         Catalog {
             observed: Observed::default(),
+            default_acls: BTreeSet::new(),
+            default_state: vec![],
             tables: vec![],
             schemas: vec![],
             databases: vec![],

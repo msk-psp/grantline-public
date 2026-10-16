@@ -54,6 +54,11 @@ pub fn apply(
         if result.membership_changes_cluster_wide {
             println!("Scope: role memberships affect the entire PostgreSQL cluster");
         }
+        if result.default_changes_future_objects_only {
+            println!(
+                "Scope: defaults affect future relations created by the named role; existing objects are unchanged"
+            );
+        }
         println!("Plan identifier: {}", result.plan_id);
         for change in &result.changes {
             println!("{}", change.cmd.as_deref().unwrap_or(""));

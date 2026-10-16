@@ -1,6 +1,6 @@
 # Grantline — Rust + Leptos migration
 
-Experimental **R1 + R2 + R3a/R3b/R3c/R3d/R3e1/R3e2/R3e3/R3f/R3g1/R3g2/R3g3 foundation**, alongside the supported Python console.
+Experimental **R1 + R2 + R3a/R3b/R3c/R3d/R3e1/R3e2/R3e3/R3f/R3g1/R3g2/R3g3/R3g4 foundation**, alongside the supported Python console.
 This binary runs natively with no Python process. Commands are offline by default;
 native PostgreSQL/ClickHouse catalogs and remote S3 IAM require explicit `--live`
 and configured reader endpoints/credentials.
@@ -449,8 +449,8 @@ and ACLs on that same database**. Supported schema privileges are USAGE/CREATE;
 database privileges are CONNECT/CREATE/TEMPORARY. Use canonical `TEMPORARY` in
 intent; the `TEMP` alias is refused to avoid a nonconvergent plan.
 It uses the existing native planner. Role changes require the separate R3g3
-opt-in described below and cannot mix with object changes; `ALTER DEFAULT
-PRIVILEGES` changes remain refused in full. Declare any already-held permissions you intend to retain
+opt-in described below and cannot mix with object changes. Default privileges
+require the separate R3g4 allowlist and a default-only change plan. Declare any already-held permissions you intend to retain
 for managed subjects. Only catalogs in the selected database (and shared role/database ACLs) are observed here;
 this is not a cluster-wide reconciliation or effective-access check.
 
@@ -481,7 +481,7 @@ The identifier binds input bytes, non-secret endpoint, authenticated session,
 server start, database/schema/table/role object identities, catalog ACL state and fixed
 quoted SQL. Passwords are not included in the identifier or receipt. A server
 restart, a changed object/ACL/role, another login or changed input requires a new
-preview. The R3g3 plan-ID format is v3; older IDs need a fresh preview after upgrading. Dry-run and no-op calls create no files and commit no ACL changes.
+preview. The R3g4 plan-ID format is v4; older IDs need a fresh preview after upgrading. Dry-run and no-op calls create no files and commit no ACL changes.
 Only exact supported object privileges are accepted. ALL, PUBLIC/owner/privileged targets,
 column privileges, non-owner grantors, grant options, views, partitions and
 inheritance are unsupported. These conservative restrictions can refuse the
@@ -514,6 +514,59 @@ cooperative lock contention/release, and a reviewed inverse. Direct ACL revocati
 does not remove privileges inherited from PUBLIC or roles and does not terminate
 existing sessions. This receipt still does not prove effective access. Production writes,
 network loss during COMMIT and general disaster recovery are unverified.
+
+### Apply creator-specific default table privileges (R3g4)
+
+Default off. Authorize exact existing `default:database.schema@creator` resources:
+
+```toml
+[adapters.pg-defaults]
+type = "postgres"
+admin_dsn_env = "GRANTLINE_PG_CREATOR"
+databases = ["demo"]
+default_write_scopes = ["default:demo.app@app_creator"]
+```
+
+The named DSN must authenticate as **app_creator** in **demo**. The creator may
+hold CREATE on the schema without owning it, and must be an ordinary role; no SET ROLE, borrowed identity or superuser fallback occurs.
+Intent uses `resource = "default:demo.app@app_creator"` and exact table privileges
+such as `privs = ["SELECT", "INSERT"]`. Run `apply --system pg-defaults --live
+--json` for a read-only preview, then separately add `--write --expect PLAN_ID`.
+Plans may change defaults only; preserve existing managed object ACLs in intent.
+Unchanged defaults outside the write allowlist remain read-only. Use a separate
+scope/credential per creator. No role/schema creation,
+PUBLIC/predefined/privileged/creator/schema-owner/database-owner recipients, ALL,
+grant options or non-creator grantors are supported. Existing allowlisted declared
+defaults are validated even if their binary grant is already present.
+
+The SQL always names FOR ROLE and IN SCHEMA, uses quoted identifiers, and revokes
+with RESTRICT. Global table defaults remain unread and refuse the whole writer;
+sequence/function/type/schema defaults are read and bound but never changed.
+Plan ID v4 binds **all raw pg_default_acl rows**, including other object types,
+row OIDs, creator/schema IDs, grantors/options, inputs and authenticated session.
+The same database-local advisory lock serializes participating writers. Before
+COMMIT, verify exact expected table-default ACL atoms, identical unrelated raw
+default rows, untouched object ACLs/memberships/roles/ownership and convergence.
+Errors, unexpected side effects and timeouts before COMMIT roll everything back.
+External concurrent administration remains outside this cooperative guarantee.
+
+These defaults apply to **future relations**, including views and foreign tables,
+created by the named role. Existing objects do not change. Membership in the
+creator does not transfer its defaults to member-owned objects; a different
+creating role needs its own intent and credential. Per-schema defaults add to
+global defaults and cannot revoke a global grant. A successful receipt flags
+`default_changes_future_objects_only=true` and keeps `effective_access_verified=false`;
+CONNECT/schema USAGE, RLS and other access prerequisites need separate validation.
+
+Undo with newly reviewed inverse intent. Objects created while a default was
+active retain their assigned ACLs after the default is revoked. Inverse defaults
+restore neither those object ACLs nor data or raw default-row OIDs. Official
+PostgreSQL 17.11 tests verify actual future SELECT/INSERT, other creator/schema/DB
+isolation, quoted SQL, inverse semantics, stale catalog/identity refusal and full
+later-error/timeout/unexpected-side-effect rollback. Production, PostgreSQL 16,
+positive TLS and COMMIT network loss remain unverified. See PostgreSQL's
+[ALTER DEFAULT PRIVILEGES](https://www.postgresql.org/docs/17/sql-alterdefaultprivileges.html)
+and [pg_default_acl](https://www.postgresql.org/docs/17/catalog-pg-default-acl.html).
 
 ### Apply canonical role memberships (R3g3)
 
@@ -558,7 +611,7 @@ schemas. The writer's INHERIT/SET ancestry cannot be changed. These guards do no
 prove the complete effective authority of an allowlisted role: review its ACLs,
 RLS and application privileges before authorizing it.
 
-Plan ID v3 binds role OIDs, flags, complete membership options/grantors and owner
+Plan ID v4 binds role OIDs, flags, complete membership options/grantors and owner
 role IDs. Exact expected memberships, untouched direct object ACLs and other
 catalog state are verified before one COMMIT. JSON receipts flag
 `membership_changes_cluster_wide=true` for role change plans and keep
@@ -688,10 +741,11 @@ their own ports and are unaffected.
 - R3g1 applies one PostgreSQL ordinary-table ACL plan transactionally with explicit credentials and review.
 - R3g2 extends that transaction to schema/database ACLs, with cooperative writer locking and full direct ACL postconditions.
 - R3g3 adds opt-in role-only membership transactions through postgres, with canonical options and an exact grantor.
+- R3g4 adds authenticated-creator, schema-specific default table privileges and future-object/rollback checks.
 
 ## What remains
 
-PostgreSQL default-privilege writers, ClickHouse/remote S3
+Global and other-object PostgreSQL defaults, ClickHouse/remote S3
 writers, production authentication,
 durable approvals, real Slack/GitHub writers, all existing console pages,
 WASM map interactions, four-language UI and release images are later stages.
@@ -719,6 +773,7 @@ python3 scripts/check_rust_s3_probes.py --docker
 python3 scripts/check_rust_s3_writer.py --docker
 python3 scripts/check_rust_postgres_writer.py --docker
 python3 scripts/check_rust_postgres_membership.py --docker
+python3 scripts/check_rust_postgres_defaults.py --docker
 ```
 
 The checks cover canonical grants, coverage, convergence actions, diagnostic

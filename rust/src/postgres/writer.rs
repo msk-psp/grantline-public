@@ -1,4 +1,5 @@
-//! Explicit object ACL writes and opted-in cluster-wide role memberships. No role switching.
+//! Explicit object ACLs, creator defaults and opted-in role memberships. No role switching.
+mod defaults;
 mod membership;
 use super::*;
 use crate::{config as input, planner};
@@ -13,7 +14,8 @@ const SCHEMA_STATE: &str = "SELECT n.oid::bigint AS oid, n.nspname AS name, n.ns
 // Advisory keys are database-local and coordinate this writer version only.
 const WRITER_LOCK: &str = "SELECT pg_try_advisory_xact_lock(1196576334, 1) AS present";
 const ROLES: &str = "SELECT oid::bigint AS oid, rolname AS name, rolcanlogin AS login, rolsuper OR rolcreaterole OR rolcreatedb OR rolreplication OR rolbypassrls AS privileged, rolinherit AS inherit, json_build_array(rolsuper,rolcreaterole,rolcreatedb,rolreplication,rolbypassrls) AS privilege_flags FROM pg_roles";
-const OWNER_ROLES: &str = "SELECT DISTINCT refobjid::bigint AS oid FROM pg_shdepend WHERE refclassid='pg_authid'::regclass AND deptype='o'";
+// Local default rows are bound separately: adding/removing one legitimately changes its ownership dependency.
+const OTHER_OWNER_ROLES: &str = "SELECT DISTINCT refobjid::bigint AS oid FROM pg_shdepend WHERE refclassid='pg_authid'::regclass AND deptype='o' AND NOT(classid='pg_default_acl'::regclass AND dbid=(SELECT oid FROM pg_database WHERE datname=current_database()))";
 const SESSION: &str = "SELECT current_database() AS database, (SELECT oid::bigint FROM pg_database WHERE datname=current_database()) AS database_oid, session_user::text AS login, current_user::text AS active, inet_server_addr()::text AS address, inet_server_port() AS port, pg_postmaster_start_time()::text AS started, current_setting('server_version_num')::int AS version, current_setting('transaction_read_only')::bool AS readonly";
 
 #[derive(Deserialize, Serialize, PartialEq)]
@@ -56,6 +58,8 @@ struct Catalog {
     other: Value,
     members: BTreeSet<Membership>,
     owner_role_oids: BTreeSet<i64>,
+    default_acls: BTreeSet<AclAtom>,
+    default_state: Vec<Value>,
 }
 async fn rows(client: &Client, sql: &str) -> Result<Vec<Value>> {
     let mut rows: Vec<Value> = query(client, sql).await?;
@@ -134,7 +138,7 @@ async fn catalog(client: &Client, system: &str, db: &str) -> Result<Catalog> {
     let mut databases: Vec<Object> = query(client, DATABASE_STATE).await?;
     schemas.sort_by_key(|s| s.oid);
     databases.sort_by_key(|d| d.oid);
-    let owner_role_oids: BTreeSet<_> = rows(client, OWNER_ROLES)
+    let other_owner_role_oids: BTreeSet<_> = rows(client, OTHER_OWNER_ROLES)
         .await?
         .iter()
         .map(|v| {
@@ -143,8 +147,26 @@ async fn catalog(client: &Client, system: &str, db: &str) -> Result<Catalog> {
                 .ok_or_else(|| "Invalid owner role catalog".to_owned())
         })
         .collect::<Result<_>>()?;
-    let other = json!({"roles": roles, "owner_role_oids": owner_role_oids,
-        "defaults": rows(client, DEFAULT_SQL).await?});
+    let mut default_acls = BTreeSet::new();
+    for row in query::<DefaultAcl>(client, DEFAULT_SQL).await? {
+        default_acls.insert((
+            format!("default:{db}.{}@{}", row.schema, row.creator),
+            row.acl.subject,
+            row.acl.privilege,
+            row.acl.grantor,
+            row.acl.is_grantable,
+        ));
+    }
+    let default_state = rows(client, defaults::STATE).await?;
+    let mut owner_role_oids = other_owner_role_oids.clone();
+    for row in &default_state {
+        owner_role_oids.insert(
+            row["creator_oid"]
+                .as_i64()
+                .ok_or("Invalid default creator identity")?,
+        );
+    }
+    let other = json!({"roles": roles, "other_owner_role_oids": other_owner_role_oids});
     Ok(Catalog {
         observed,
         tables,
@@ -155,11 +177,14 @@ async fn catalog(client: &Client, system: &str, db: &str) -> Result<Catalog> {
         owner_role_oids,
         schemas,
         databases,
+        default_acls,
+        default_state,
     })
 }
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
 enum Target {
     Role(String),
+    Default(String, String),
     Database(String),
     Schema(String),
     Table(String, String),
@@ -168,6 +193,11 @@ impl Target {
     fn sql(&self) -> String {
         match self {
             Self::Role(role) => identifier(role),
+            Self::Default(schema, creator) => format!(
+                "FOR ROLE {} IN SCHEMA {}",
+                identifier(creator),
+                identifier(schema)
+            ),
             Self::Database(db) => format!("DATABASE {}", identifier(db)),
             Self::Schema(schema) => format!("SCHEMA {}", identifier(schema)),
             Self::Table(schema, table) => {
@@ -177,7 +207,7 @@ impl Target {
     }
     fn owner<'a>(&self, cat: &'a Catalog) -> Result<&'a str> {
         match self {
-            Self::Role(_) => None,
+            Self::Role(_) | Self::Default(_, _) => None,
             Self::Database(db) => cat
                 .databases
                 .iter()
@@ -198,6 +228,9 @@ impl Target {
     }
 }
 fn target(g: &Grant, db: &str) -> Result<Target> {
+    if g.resource.starts_with("default:") {
+        return defaults::target(g, db);
+    }
     if let Some(role) = g.resource.strip_prefix("role:") {
         name(role)?;
         if g.privilege != "MEMBER" {
@@ -305,6 +338,14 @@ fn report(
                 .into(),
         );
     }
+    let default_changes = plan
+        .changes
+        .iter()
+        .filter(|c| c.grant.resource.starts_with("default:"))
+        .count();
+    if default_changes > 0 && default_changes != plan.changes.len() {
+        return Err("Default privileges require a default-only change plan".into());
+    }
     for g in &intent.grants {
         if g.resource
             .strip_prefix("role:")
@@ -312,10 +353,25 @@ fn report(
         {
             membership::command(g, cat, &adapter.membership_write_roles, issuer, None)?;
         }
+        if g.resource.starts_with("default:") && adapter.default_write_scopes.contains(&g.resource)
+        {
+            defaults::command(g, db, cat, &adapter.default_write_scopes, issuer, None)?;
+        }
     }
     for change in &mut plan.changes {
         let g = &change.grant;
         let target = target(g, db)?;
+        if let Target::Default(_, _) = target {
+            change.cmd = defaults::command(
+                g,
+                db,
+                cat,
+                &adapter.default_write_scopes,
+                issuer,
+                Some(&change.action),
+            )?;
+            continue;
+        }
         if let Target::Role(_) = target {
             change.cmd = membership::command(
                 g,
@@ -383,6 +439,7 @@ pub struct Receipt {
     pub changed: bool,
     pub effective_access_verified: bool,
     pub membership_changes_cluster_wide: bool,
+    pub default_changes_future_objects_only: bool,
     pub changes: Vec<planner::Change>,
 }
 struct Inputs<'a> {
@@ -414,8 +471,8 @@ fn binding(
         .ok_or("Invalid session binding")?
         .remove("readonly");
     let state = serde_json::to_vec(
-        &json!({"format": "postgres-membership-writer-v3", "path": path, "system": system,
-        "endpoint": endpoint, "session": session, "tables": cat.tables, "schemas": cat.schemas, "databases": cat.databases, "catalog": cat.other, "members": cat.members, "changes": plan.changes}),
+        &json!({"format": "postgres-default-writer-v4", "path": path, "system": system,
+        "endpoint": endpoint, "session": session, "tables": cat.tables, "schemas": cat.schemas, "databases": cat.databases, "catalog": cat.other, "members": cat.members, "defaults": cat.default_state, "changes": plan.changes}),
     )
     .map_err(|_| "Cannot bind PostgreSQL write plan")?;
     let mut hash = Sha256::new();
@@ -518,6 +575,7 @@ async fn transaction(
     if write && !plan.changes.is_empty() {
         let mut wanted = cat.acls.clone();
         let mut wanted_members = cat.members.clone();
+        let mut wanted_defaults = cat.default_acls.clone();
         for change in &plan.changes {
             if let Target::Role(role) = target(&change.grant, db)? {
                 if change.action == "grant" {
@@ -532,6 +590,22 @@ async fn transaction(
                 } else {
                     wanted_members.retain(|m| {
                         !(m.member == change.grant.subject && m.role == role && m.grantor == issuer)
+                    });
+                }
+            } else if let Target::Default(_, _) = target(&change.grant, db)? {
+                if change.action == "grant" {
+                    wanted_defaults.insert((
+                        change.grant.resource.clone(),
+                        change.grant.subject.clone(),
+                        change.grant.privilege.clone(),
+                        issuer.into(),
+                        false,
+                    ));
+                } else {
+                    wanted_defaults.retain(|(resource, subject, privilege, _, _)| {
+                        !(resource == &change.grant.resource
+                            && subject == &change.grant.subject
+                            && privilege == &change.grant.privilege)
                     });
                 }
             } else {
@@ -560,6 +634,8 @@ async fn transaction(
         let after = catalog(client, system, db).await?;
         if wanted != after.acls
             || wanted_members != after.members
+            || wanted_defaults != after.default_acls
+            || defaults::untouched(&cat, &plan, db)? != defaults::untouched(&after, &plan, db)?
             || cat.other != after.other
             || metadata(&cat)? != metadata(&after)?
             || !report(loaded, system, db, &after, issuer)?
@@ -590,6 +666,10 @@ async fn transaction(
             .changes
             .iter()
             .any(|c| c.grant.resource.starts_with("role:")),
+        default_changes_future_objects_only: plan
+            .changes
+            .iter()
+            .any(|c| c.grant.resource.starts_with("default:")),
         changes: plan.changes,
     })
 }
@@ -701,7 +781,6 @@ mod tests {
             ("schema:demo.app", "CONNECT"),
             ("schema:demo.*", "USAGE"),
             ("schema:demo.app.extra", "USAGE"),
-            ("default:demo.app@owner", "SELECT"),
         ] {
             assert!(target(&Grant::new("pg", "demo-user", resource, privilege), "demo").is_err());
         }
