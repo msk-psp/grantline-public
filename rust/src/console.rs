@@ -633,7 +633,7 @@ fn workflow_routes() -> Router<Shared> {
         let actor=match s.auth.write_actor(&headers,&f.csrf){Ok(a)=>a,Err(e)=>return e.into_response()};
         let result=tokio::task::spawn_blocking(move||s.workflow.as_ref().ok_or("Approvals not configured")?.publish(&id,&actor)).await;workflow_result(result)
     })).route("/api/slack/actions",post(|State(s):State<Shared>,headers:HeaderMap,body:axum::body::Bytes|async move{
-        let result=tokio::task::spawn_blocking(move||s.workflow.as_ref().ok_or("Slack approvals not configured")?.slack(&headers,&body)).await;workflow_result(result)
+        let result=tokio::task::spawn_blocking(move||s.workflow.as_ref().ok_or("Slack approvals not configured")?.slack(&headers,&body)).await;match result {Ok(Ok(_))=>StatusCode::OK.into_response(),other=>workflow_result(other)}
     })).layer(axum::extract::DefaultBodyLimit::max(65536)).layer(middleware::from_fn(security))
 }
 #[cfg(unix)]

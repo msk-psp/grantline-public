@@ -7,7 +7,7 @@ import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {spawn} from 'node:child_process';
 const sha=c=>c.repeat(40),base=sha('a'),tree=sha('b'),blob=sha('c'),commit=sha('f');
-const source='managed_subjects = ["demo"]\n';let messages=[],writes=[],fault='',currentBase=base;
+const source='managed_subjects = ["demo"]\n';let messages=[],writes=[],fault='',currentBase=base,slowNotify=false,slowPublish=false,notifyReady,publishReady;
 const external=createServer(async(req,res)=>{
   let text='';for await(const b of req)text+=b;const input=text?JSON.parse(text):{};
   const json=v=>{res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(v));};
@@ -19,8 +19,9 @@ const external=createServer(async(req,res)=>{
   if(req.url==='/github/repos/fixture/repo/git/trees/'+tree)return json({tree:[{path:'intent.toml',mode:'100644',type:'blob',sha:blob}]});
   if(req.url==='/github/repos/fixture/repo/git/blobs/'+blob)return json({encoding:'base64',content:Buffer.from(source).toString('base64')});
   if(req.url==='/slack/conversations.open')return json({ok:true,channel:{id:'dm-'+input.users}});
-  if(req.url==='/slack/chat.postMessage'){messages.push(input);return json({ok:true,ts:'1.0'});}
+  if(req.url==='/slack/chat.postMessage'){messages.push(input);if(slowNotify){slowNotify=false;notifyReady();await new Promise(r=>setTimeout(r,4000));}return json({ok:true,ts:'1.0'});}
   writes.push({method:req.method,path:req.url,body:input});
+  if(slowPublish&&req.url.endsWith('/git/refs')){slowPublish=false;publishReady();await new Promise(r=>setTimeout(r,4000));}
   if(fault==='publication'){res.writeHead(500);return res.end('synthetic-private-error');}
   if(req.url.endsWith('/git/refs')){assert.equal(input.sha,base);assert.match(input.ref,/^refs\/heads\/grantline\/[0-9a-f]{32}$/);return json({object:{sha:base}});}
   if(req.url.endsWith('/git/blobs')){const after=Buffer.from(input.content,'base64').toString();assert.match(after,/managed_subjects/);assert.match(after,/bucket:probe\/team/);return json({sha:sha('d')});}
@@ -67,7 +68,15 @@ try{
   const record=join(root,'state',request.id+'.json');assert.equal((await stat(record)).mode&0o777,0o600);assert.equal((await stat(join(root,'state'))).mode&0o777,0o700);
   await stop();await boot();requester=await login('requester');reviewer=await login('reviewer');owner=await login('owner');
   const persisted=await(await fetch(origin+'/api/requests',{headers:reviewer.headers})).json();assert.equal(persisted[0].status,'approved');
-  const published=await post('/api/requests/'+request.id+'/publish',requester);assert.equal(published.status,'proposed');assert.equal(published.pr_url,'https://github.com/fixture/repo/pull/1');assert.equal(published.applied,false);assert.equal(writes.length,6);
+  const notificationStarted=new Promise(r=>notifyReady=r);slowNotify=true;
+  const otherPromise=post('/api/requests',requester,{...input,resource:'bucket:probe/concurrent'});await notificationStarted;
+  const actionDuringNotify=JSON.parse(messages.at(-1).blocks[1].elements.find(e=>e.action_id==='approve').value);
+  let started=Date.now();const ack=await signCallback(actionDuringNotify,'owner');assert.equal(ack.status,200);assert.equal(await ack.text(),'');const ackMs=Date.now()-started;assert(ackMs<2500,'Slack ack blocked by an outbound DM');
+  const other=await otherPromise;assert(other.approved.includes('owner'),'DM completion overwrote a callback approval');
+  const publicationStarted=new Promise(r=>publishReady=r);slowPublish=true;
+  const publication=post('/api/requests/'+request.id+'/publish',requester);await publicationStarted;
+  started=Date.now();await post('/api/requests/'+other.id+'/decide',reviewer,{plan_hash:other.plan_hash,decision:'approve'});const decisionMs=Date.now()-started;assert(decisionMs<2500,'Independent decision blocked by GitHub publication');console.log(`PASS: 4s external delays; Slack ack ${ackMs}ms, independent decision ${decisionMs}ms, concurrent approval preserved`);
+  const published=await publication;assert.equal(published.status,'proposed');assert.equal(published.pr_url,'https://github.com/fixture/repo/pull/1');assert.equal(published.applied,false);assert.equal(writes.length,6);
   await post('/api/requests/'+request.id+'/publish',requester,{},false);assert.equal(writes.length,6,'publication retried');
   // Stale source and uncertain external failures stay durable and cannot auto-retry.
   const configText=await readFile(join(root,'config.toml'),'utf8');
@@ -79,6 +88,6 @@ try{
   currentBase=sha('8');const policy=await post('/api/requests',requester,input);await stop();await writeFile(join(root,'config.toml'),configText.replace('admin=["reviewer","owner"]','admin=["reviewer","owner","new-owner"]'));await boot();reviewer=await login('reviewer');
   await post('/api/requests/'+policy.id+'/decide',reviewer,{plan_hash:policy.plan_hash,decision:'approve'},false);
   assert.ok(!output.includes('synthetic-github')&&!output.includes('synthetic-slack'));
-  assert.equal((await readdir(join(root,'state'))).filter(n=>n.endsWith('.json')).length,4);assert.ok(configText.includes('fixture/repo'));
+  assert.equal((await readdir(join(root,'state'))).filter(n=>n.endsWith('.json')).length,5);assert.ok(configText.includes('fixture/repo'));
   console.log('PASS: authenticated requester, all independent approvals, duplicate-submit/replay/CSRF guards, signed workspace-bound Slack DMs/callback, restart persistence, exact Git scope/patch/base and single PR, stale-source refusal and no IAM application');
 }finally{if(child?.exitCode===null)await stop();await new Promise(r=>external.close(r));await rm(root,{recursive:true,force:true});}

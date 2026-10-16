@@ -431,13 +431,14 @@ impl Workflow {
         if let Some(slack) = &self.config.slack {
             r.notifications = "sending".into();
             self.save(&r)?;
-            r.notifications = if self.notify(slack, &r).is_ok() {
-                "sent"
-            } else {
-                "unknown"
-            }
-            .into();
-            self.save(&r)?;
+            drop(_guard);
+            let sent = self.notify(slack, &r).is_ok();
+            let _guard = self.mutex.lock().map_err(|_| "Approval lock unavailable")?;
+            // A callback may have approved the request while a DM was in flight.
+            let mut current = self.load(&r.id)?;
+            current.notifications = if sent { "sent" } else { "unknown" }.into();
+            self.save(&current)?;
+            return Ok(current.view());
         }
         Ok(r.view())
     }
@@ -590,13 +591,20 @@ impl Workflow {
         r.status = "publishing".into();
         event(&mut r, &actor.subject, "publishing");
         self.save(&r)?;
-        match self
+        drop(_guard);
+        let result = self
             .config
             .code_writer
             .as_ref()
             .ok_or("Code writer unavailable")?
-            .publish(&r.code, &r.id, &r.grant, &r.action)
-        {
+            .publish(&r.code, &r.id, &r.grant, &r.action);
+        let _guard = self.mutex.lock().map_err(|_| "Approval lock unavailable")?;
+        let current = self.load(&r.id)?;
+        if current.status != "publishing" || current.plan_hash != r.plan_hash {
+            return Err("Publication state changed; inspect the external outcome".into());
+        }
+        r = current;
+        match result {
             Ok(url) => {
                 r.status = "proposed".into();
                 r.pr_url = Some(url);

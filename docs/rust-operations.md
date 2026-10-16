@@ -81,7 +81,10 @@ intended workspace and set interactivity to `<public_url>/api/slack/actions`.
 Inject its bot token and signing secret by the configured environment names;
 `team_id` pins the workspace. The server signs/verifies the raw request body
 with Slack v0 HMAC, enforces timestamp tolerance and checks the acting user,
-plan hash and single-use decision. Link verification is not a substitute for
+plan hash and single-use decision. Valid interactions receive an empty HTTP 200
+acknowledgement. External DM/PR calls release the state mutex, so they cannot
+hold up an independent decision; completion reloads the durable record to
+preserve concurrent approvals. This follows [Slack's acknowledgement contract](https://docs.slack.dev/interactivity/handling-user-interaction/#acknowledgment-response). Link verification is not a substitute for
 console authentication. A Slack DM exposes request details to its named
 approver; keep approval scope limited. Integration errors withhold response
 bodies and never automatically resend uncertain notifications.
