@@ -57,3 +57,5 @@ jobs:
         run: python3 scripts/check_rust_remote_writer.py
       - name: Verify native OIDC signatures, PKCE, session and callback security
         run: node scripts/check_rust_oidc.mjs
+      - name: Verify durable approvals and signed Slack to GitHub code publication
+        run: node scripts/check_rust_workflow.mjs

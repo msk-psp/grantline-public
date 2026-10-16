@@ -26,6 +26,8 @@ pub struct App {
     pub auth: auth::Auth,
     pub path: PathBuf,
     pub live: bool,
+    #[cfg(unix)]
+    pub workflow: Option<Arc<crate::workflow::Workflow>>,
 }
 pub type Shared = Arc<App>;
 #[derive(Deserialize, Default)]
@@ -122,7 +124,7 @@ async fn security(request: Request, next: Next) -> Response {
     r
 }
 pub fn app(s: Shared) -> Router {
-    Router::new()
+    let router = Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/", get(home))
         .route("/login", get(sign_in))
@@ -133,7 +135,10 @@ pub fn app(s: Shared) -> Router {
         .route("/api/catalog", get(catalog))
         .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024))
         .layer(middleware::from_fn(security))
-        .with_state(s)
+        .with_state(s.clone());
+    #[cfg(unix)]
+    let router = router.merge(workflow_routes().with_state(s));
+    router
 }
 pub async fn serve(path: PathBuf, host: IpAddr, port: u16, live: bool) -> crate::Result<()> {
     let config = config::load(&path)?;
@@ -150,11 +155,105 @@ pub async fn serve(path: PathBuf, host: IpAddr, port: u16, live: bool) -> crate:
         .clone()
         .unwrap_or_else(|| format!("http://{actual}/"));
     let auth = auth::Auth::new(config.config.web.auth.clone(), &origin, host.is_loopback())?;
-    println!("Grantline native console: {origin}");
-    axum::serve(listener, app(Arc::new(App { auth, path, live })))
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
+    #[cfg(unix)]
+    let workflow = config
+        .config
+        .approvals
+        .clone()
+        .filter(|_| config.config.web.auth.mode != "local")
+        .map(|cfg| {
+            crate::workflow::Workflow::open(
+                cfg,
+                &config.base,
+                &origin,
+                &serde_json::to_string(&config.config.web.auth)
+                    .map_err(|_| "Cannot bind auth policy")?,
+            )
+            .map(Arc::new)
         })
-        .await
-        .map_err(|_| "Native console stopped with an error".into())
+        .transpose()?;
+    println!("Grantline native console: {origin}");
+    axum::serve(
+        listener,
+        app(Arc::new(App {
+            auth,
+            path,
+            live,
+            #[cfg(unix)]
+            workflow,
+        })),
+    )
+    .with_graceful_shutdown(async {
+        let _ = tokio::signal::ctrl_c().await;
+    })
+    .await
+    .map_err(|_| "Native console stopped with an error".into())
+}
+
+#[cfg(unix)]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RequestInput {
+    csrf: String,
+    system: String,
+    subject: String,
+    resource: String,
+    privilege: String,
+    action: String,
+}
+#[cfg(unix)]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DecisionInput {
+    csrf: String,
+    plan_hash: String,
+    decision: String,
+}
+#[cfg(unix)]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PublishInput {
+    csrf: String,
+}
+#[cfg(unix)]
+fn workflow_routes() -> Router<Shared> {
+    use axum::extract::Path;
+    Router::new().route("/api/requests",get(|State(s):State<Shared>,headers:HeaderMap|async move{
+        let Some(actor)=s.auth.current(&headers).filter(|a|a.authenticated)else{return(StatusCode::UNAUTHORIZED,"Authentication required").into_response()};
+        let Some(store)=&s.workflow else{return Json(serde_json::json!([])).into_response()};
+        match store.list(&actor.subject){Ok(v)=>Json(v).into_response(),Err(_)=>(StatusCode::SERVICE_UNAVAILABLE,"Approval store unavailable").into_response()}
+    }).post(|State(s):State<Shared>,headers:HeaderMap,Json(f):Json<RequestInput>|async move{
+        let actor=match s.auth.write_actor(&headers,&f.csrf){Ok(a)=>a,Err(e)=>return e.into_response()};
+        let result=tokio::task::spawn_blocking(move||{
+            let loaded=config::load(&s.path)?;let adapter=loaded.config.adapters.get(&f.system).ok_or("Unknown request system")?;
+            if [&f.system,&f.subject,&f.resource,&f.privilege].iter().any(|s|s.is_empty()||s.len()>1024||s.chars().any(char::is_control)){return Err("Invalid request fields".into())}
+            let grant=crate::model::Grant::new(&f.system,&f.subject,&f.resource,&f.privilege).normalized(&loaded.kinds);
+            if adapter.kind(&f.system)=="s3"{if !grant.resource.starts_with("bucket:")||!matches!(grant.privilege.as_str(),"Read"|"Write"|"List"){return Err("Unsupported S3 request".into())}}else{crate::commands::preview(&grant,&f.action,adapter.kind(&f.system))?;}
+            s.workflow.as_ref().ok_or("Approval code writer is not configured")?.create(&actor,grant,f.action)
+        }).await;
+        workflow_result(result)
+    })).route("/api/requests/{id}/decide",post(|State(s):State<Shared>,headers:HeaderMap,Path(id):Path<String>,Json(f):Json<DecisionInput>|async move{
+        let actor=match s.auth.write_actor(&headers,&f.csrf){Ok(a)=>a,Err(e)=>return e.into_response()};
+        if !matches!(f.decision.as_str(),"approve"|"deny"){return(StatusCode::BAD_REQUEST,"Invalid decision").into_response()}
+        let result=tokio::task::spawn_blocking(move||s.workflow.as_ref().ok_or("Approvals not configured")?.decide_actor(&id,&actor,&f.plan_hash,f.decision=="approve")).await;workflow_result(result)
+    })).route("/api/requests/{id}/publish",post(|State(s):State<Shared>,headers:HeaderMap,Path(id):Path<String>,Json(f):Json<PublishInput>|async move{
+        let actor=match s.auth.write_actor(&headers,&f.csrf){Ok(a)=>a,Err(e)=>return e.into_response()};
+        let result=tokio::task::spawn_blocking(move||s.workflow.as_ref().ok_or("Approvals not configured")?.publish(&id,&actor)).await;workflow_result(result)
+    })).route("/api/slack/actions",post(|State(s):State<Shared>,headers:HeaderMap,body:axum::body::Bytes|async move{
+        let result=tokio::task::spawn_blocking(move||s.workflow.as_ref().ok_or("Slack approvals not configured")?.slack(&headers,&body)).await;workflow_result(result)
+    })).layer(axum::extract::DefaultBodyLimit::max(65536)).layer(middleware::from_fn(security))
+}
+#[cfg(unix)]
+fn workflow_result(
+    result: Result<crate::Result<serde_json::Value>, tokio::task::JoinError>,
+) -> Response {
+    match result {
+        Ok(Ok(v)) => Json(v).into_response(),
+        Ok(Err(e)) => (StatusCode::CONFLICT, e).into_response(),
+        Err(_) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Approval operation unavailable",
+        )
+            .into_response(),
+    }
 }
