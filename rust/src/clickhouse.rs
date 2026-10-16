@@ -1,5 +1,6 @@
-//! Explicit read-only catalog observation and probes. No arbitrary SQL or writes.
+//! Bounded read-only catalogs/probes and a separately opted-in fixed ACL writer.
 pub mod probe;
+pub mod writer;
 use crate::{
     Result,
     config::Adapter,
@@ -301,6 +302,9 @@ fn check_show_scope(line: &str) -> Result<()> {
 }
 fn observe_inner(adapter: &Adapter, system: &str) -> Result<Observation> {
     let http = Http::from_config(adapter)?;
+    observe_http(&http, system)
+}
+fn observe_http(http: &Http, system: &str) -> Result<Observation> {
     if !matches!(
         http.query::<Visibility>(VISIBILITY_SQL)?.as_slice(),
         [Visibility { result: 1 }]
