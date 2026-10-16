@@ -384,13 +384,32 @@ fn PermissionMap(
     </div>}
 }
 fn services(b: &Bootstrap) -> AnyView {
-    let cards=b.data.services.iter().filter(|name|(b.service.is_empty()||b.service.as_str()==name.as_str())&&(b.environment.is_empty()||b.data.graph.envs.get(*name).is_some_and(|e|e.contains(&b.environment)))).map(|name|{let logs:Vec<_>=b.data.plan.findings.iter().filter(|f|f.system==*name).cloned().collect();let unknown=b.data.snapshot.unobserved.iter().any(|u|u.system==*name);let kind=b.data.service_kinds.get(name).map(String::as_str).unwrap_or("");let icon=match kind{"postgres"=>view!{<img class="service-icon" src="/static/postgresql.png" alt="PostgreSQL"/>}.into_any(),"s3"=>view!{<img class="service-icon" src="/static/seaweedfs.png" alt="SeaweedFS"/>}.into_any(),_=>view!{<span class="service-icon clickhouse" aria-hidden="true">"▥"</span>}.into_any()};view!{<section class="card">
-<div class="service-heading">{icon}<h2>{name.clone()}</h2>
-<span class="badge">{tr(&b.lang,if unknown{"Unknown"}else{"Observed"})}</span>
-</div>
-<p class="muted">{b.data.snapshot.ts.clone()}</p>{findings(&b.lang,&logs)}</section>}}).collect_view();
-    view! {<div class="cards">{cards}</div>}.into_any()
+    let query = b.query.to_lowercase();
+    let matches = |f: &Finding| {
+        format!("{} {} {}", f.title, f.detail, f.entities.join(" "))
+            .to_lowercase()
+            .contains(&query)
+    };
+    let cards=b.data.services.iter().filter(|name| {
+        (b.service.is_empty() || b.service.as_str()==name.as_str())
+        && (b.environment.is_empty() || b.data.graph.envs.get(*name).is_some_and(|e|e.contains(&b.environment)))
+        && (query.is_empty() || name.to_lowercase().contains(&query) || b.data.plan.findings.iter().any(|f|f.system.as_str()==name.as_str()&&matches(f)))
+    }).map(|name| {
+        let logs:Vec<_>=b.data.plan.findings.iter().filter(|f|f.system==*name&&(query.is_empty()||name.to_lowercase().contains(&query)||matches(f))).cloned().collect();
+        let unknown=b.data.snapshot.unobserved.iter().any(|u|u.system==*name);
+        let kind=b.data.service_kinds.get(name).map(String::as_str).unwrap_or("");
+        let icon=match kind {
+            "postgres"=>view!{<img class="service-icon" src="/static/postgresql.png" alt="PostgreSQL"/>}.into_any(),
+            "s3"=>view!{<img class="service-icon" src="/static/seaweedfs.png" alt="SeaweedFS"/>}.into_any(),
+            _=>view!{<span class="service-icon clickhouse" aria-hidden="true">"▥"</span>}.into_any()
+        };
+        view!{<section class="card"><div class="service-heading">{icon}<h2>{name.clone()}</h2>
+        <span class=if unknown{"badge warning"}else{"badge"}>{tr(&b.lang,if unknown{"Unknown"}else{"Observed"})}</span></div>
+        <p class="muted">{b.data.snapshot.ts.clone()}</p>{findings(&b.lang,&logs)}</section>}
+    }).collect_view();
+    view!{{cards.is_empty().then(||view!{<p class="empty">{tr(&b.lang,"No results")}</p>})}<div class="cards">{cards}</div>}.into_any()
 }
+
 fn matrix_table(lang: &str, rows: &[Grant]) -> AnyView {
     let subjects: BTreeSet<_> = rows.iter().map(|g| g.subject.clone()).collect();
     let columns: BTreeSet<_> = rows
