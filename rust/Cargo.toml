@@ -31,6 +31,7 @@ tokio-postgres-rustls = { version = "0.14", features = ["ring", "webpki-roots"] 
 hmac = "0.12"
 roxmltree = "0.21"
 openidconnect = { version = "4.0.1", default-features = false, features = ["reqwest", "rustls-tls"] }
+base64 = "0.22"
 
 [dev-dependencies]
 http-body-util = "0.1"

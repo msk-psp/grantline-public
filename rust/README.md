@@ -1027,3 +1027,54 @@ request must retain the same proxy identity as its private session. A header
 from an untrusted direct client is not authentication; do not expose the
 loopback upstream. Duplicate identities and off-origin/invalid CSRF are rejected.
 Run `node scripts/check_rust_oidc.mjs` for an isolated RSA-signed provider test.
+
+## Durable approvals, Slack and code PRs
+
+Use authenticated proxy/OIDC identities and configure this native path explicitly:
+
+```toml
+[approvals]
+store = "/var/lib/grantline/approvals"
+admin = ["reviewer", "owner"]
+[approvals.identities]
+"oidc-subject" = "reviewer"
+[approvals.code_writer]
+repository = "example/iam-config"
+intent_path = "intent.toml"
+base_branch = "main"
+token_env = "GRANTLINE_GITHUB_TOKEN"
+expected_login = "example-bot"
+[approvals.slack]
+bot_token_env = "SLACK_BOT_TOKEN"
+signing_secret_env = "SLACK_SIGNING_SECRET"
+team_id = "workspace-id-from-slack"
+```
+
+The process creates a private 0700 store with 0600 atomic records and a lifetime
+OS lock; run one instance per store. Local preview never opens this store. All
+admins and matching rule approvers must approve, and requesters cannot approve
+their own requests. Explicit identity mappings are unique. Policy/auth changes
+invalidate older requests; restart after config changes. Requests expire in
+seven days, repeated decisions/publication are refused, and duplicate submissions
+reuse the existing immutable plan rather than sending duplicate DMs.
+
+Native GitHub publication uses the configured account, repository, base and exact
+regular intent blob. It rechecks the approved base/blob/patch, creates only one
+request branch and code PR, uses verified-account noreply commit metadata, and
+never merges or applies IAM. Repositories must be private unless explicitly
+configured with `allow_public_repository = true`. Intent TOML is normalized in
+the patch; reviewers should inspect the complete diff, including formatting.
+After any uncertain publication, status stays `publish_unknown`; inspect the
+request branch/PR before manual recovery. No automatic re-publication occurs.
+
+Slack uses per-approver DMs with the exact action, privilege and review link.
+Interactive buttons POST to `PUBLIC_URL/api/slack/actions`; raw-body HMAC-SHA256,
+five-minute timestamp, configured workspace, approver and immutable plan are
+verified. Browser review also works without Slack. Set no Slack block to disable
+notifications. Missing/failed notifications are recorded, not reported as delivered.
+Neither a Slack approval nor a PR means applied service access.
+
+`node scripts/check_rust_workflow.mjs` runs the full flow against disposable local
+Slack/GitHub endpoints, including process restart, stale source, policy changes,
+unknown outcomes and account/repository scope guards. Production credentials and
+real workspace delivery require separately authorized validation.
