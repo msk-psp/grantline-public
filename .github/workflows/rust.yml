@@ -49,3 +49,5 @@ jobs:
         run: python3 scripts/check_rust_postgres_defaults.py --docker
       - name: Verify single-statement ClickHouse table writer and uncertain outcomes
         run: python3 scripts/check_rust_clickhouse_writer.py --docker
+      - name: Verify single-statement ClickHouse database writer and future table scope
+        run: python3 scripts/check_rust_clickhouse_database.py --docker

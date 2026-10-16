@@ -26,13 +26,14 @@ def intent(root, rows, managed=('gl_user',)):
     (root / 'intent.toml').write_text(text)
 
 
-def config_at(root, resources=('table:analytics.events',)):
+def config_at(root, resources=('table:analytics.events',), *, databases=()):
     p = root / 'config.toml'
     p.write_text('intent="intent.toml"\n[adapters.ch-test]\ntype="clickhouse"\n'
                  'url_env="GL_CH_UNUSED_READER"\nadmin_url_env="GL_CH_WRITER"\n'
                  'probe_url_envs={gl_user="GL_CH_UNUSED_PROBE"}\nread_timeout_seconds=3\n'
-                 'clickhouse_write_tables=' + json.dumps(resources) + '\n')
-    intent(root, [('gl_user', resources[0], ['SELECT'])])
+                 'clickhouse_write_tables=' + json.dumps(resources) + '\n'
+                 'clickhouse_write_databases=' + json.dumps(databases) + '\n')
+    intent(root, [('gl_user', (*resources, *databases)[0], ['SELECT'])])
     return p
 
 
@@ -55,8 +56,10 @@ def run(binary, config, endpoint, *, write=None, live=True, ok=True):
     return json.loads(r.stdout) if ok else r
 
 
-def protocol(binary):
-    base = [grant(subject='writer', database='analytics', table='events', grant_option=1)]
+def protocol(binary, *, database_scope=False):
+    target = None if database_scope else 'events'
+    target_sql = '`analytics`.*' if database_scope else '`analytics`.`events`'
+    base = [grant(subject='writer', database='analytics', table=target, grant_option=1)]
     s = dict(mode='normal', grants=copy.deepcopy(base), posts=[], gets=[])
     principals = [dict(name=n, id=str(uuid.uuid4()), storage='local_directory', kind='account') for n in ['writer', 'gl_user']]
     table = dict(database='analytics', name='events', id=str(uuid.uuid4()), engine='Memory', create_table_query='CREATE TABLE analytics.events(a UInt8) ENGINE=Memory')
@@ -97,9 +100,9 @@ def protocol(binary):
             elif 'FROM system.databases' in q:
                 rows = [database]
             elif q.startswith('SHOW GRANTS'):
-                rows = [dict(statement='GRANT SELECT ON analytics.events TO writer WITH GRANT OPTION')]
+                rows = [dict(statement=f'GRANT SELECT ON {target_sql} TO writer WITH GRANT OPTION')]
                 if len(s['grants']) > 1:
-                    rows.append(dict(statement='GRANT SELECT ON analytics.events TO gl_user'))
+                    rows.append(dict(statement=f'GRANT SELECT ON {target_sql} TO gl_user'))
             else:
                 raise AssertionError(q)
             body = encoded(rows)
@@ -116,14 +119,14 @@ def protocol(binary):
             assert path.path == '/catalog/' and 'query' not in params and MARKER not in self.path
             assert self.headers.get('X-ClickHouse-User') == 'writer' and self.headers.get('X-ClickHouse-Key') == MARKER
             assert params['readonly'] == ['0'] and params['wait_end_of_query'] == ['1']
-            assert q == 'GRANT SELECT ON `analytics`.`events` TO `gl_user`;'
+            assert q == f'GRANT SELECT ON {target_sql} TO `gl_user`;'
             if s['mode'] == 'timeout':
                 time.sleep(4)
                 return
             if s['mode'] in ['normal', 'post-failure', 'post-extra']:
-                s['grants'].append(grant(subject='gl_user', database='analytics', table='events'))
+                s['grants'].append(grant(subject='gl_user', database='analytics', table=target))
             if s['mode'] == 'post-extra':
-                s['grants'].append(grant(subject='writer', database='analytics', table='events', access_type='INSERT'))
+                s['grants'].append(grant(subject='writer', database='analytics', table=target, access_type='INSERT'))
             self.send_response(500 if s['mode'] == 'error' else 302 if s['mode'] == 'redirect' else 200)
             if s['mode'] == 'redirect':
                 self.send_header('Location', '/leak')
@@ -140,7 +143,7 @@ def protocol(binary):
     try:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            config = config_at(root)
+            config = config_at(root, (), databases=('db:analytics',)) if database_scope else config_at(root)
             for url in [None, 'invalid-' + MARKER, endpoint + '?bad=1', endpoint + '#bad', endpoint.replace('writer:', ':')]:
                 run(binary, config, url, ok=False)
             run(binary, config, endpoint, live=False, ok=False)
@@ -150,6 +153,7 @@ def protocol(binary):
                 s.update(mode=mode, grants=copy.deepcopy(base), posts=[], gets=[])
                 p = run(binary, config, endpoint)
                 assert p['changed'] and not p['applied'] and not p['effective_access_verified'] and p['single_statement_only']
+                assert p['database_changes_include_future_tables'] == database_scope
                 assert not s['posts']
                 if mode == 'normal':
                     assert run(binary, config, endpoint, write=p['plan_id'])['applied']
@@ -172,7 +176,7 @@ def protocol(binary):
         server.shutdown()
         server.server_close()
         worker.join(timeout=5)
-    print('ClickHouse writer HTTP: explicit credentials/live/expect, preview/one POST, row/byte/time bounds, stale IDs, errors/timeout/redirect/ineffective/post-check uncertainty, no retry/compensation and redaction passed')
+    print(('ClickHouse DB' if database_scope else 'ClickHouse table') + ' writer HTTP: explicit credentials/live/expect, preview/one POST, row/byte/time bounds, stale IDs, errors/timeout/redirect/ineffective/post-check uncertainty, no retry/compensation and redaction passed')
 
 
 def docker_test(binary, context):

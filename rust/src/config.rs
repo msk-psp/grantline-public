@@ -66,6 +66,8 @@ pub struct Adapter {
     #[serde(default)]
     pub clickhouse_write_tables: BTreeSet<String>,
     #[serde(default)]
+    pub clickhouse_write_databases: BTreeSet<String>,
+    #[serde(default)]
     pub probe_dsn_envs: std::collections::BTreeMap<String, String>,
     #[serde(default = "all_databases")]
     pub databases: Vec<String>,

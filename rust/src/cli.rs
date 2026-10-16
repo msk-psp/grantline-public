@@ -84,6 +84,11 @@ pub fn apply(
                 "dry-run/no change; no statement sent"
             }
         );
+        if result.database_changes_include_future_tables {
+            println!(
+                "Scope: database ACLs cover every current and future table/relation in the named database, regardless of engine"
+            );
+        }
         println!("Plan identifier: {}", result.plan_id);
         for c in &result.changes {
             println!("{}", c.cmd.as_deref().unwrap_or(""));

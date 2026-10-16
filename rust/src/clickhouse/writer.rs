@@ -48,18 +48,41 @@ fn table(resource: &str) -> Result<(&str, &str)> {
 fn string(s: &str) -> String {
     format!("'{}'", s.replace('\\', "\\\\").replace('\'', "\\'"))
 }
+fn scope(resource: &str) -> Result<(&str, Option<&str>)> {
+    if let Some(db) = resource.strip_prefix("db:") {
+        literal(db)?;
+        if matches!(db, "system" | "information_schema" | "INFORMATION_SCHEMA") {
+            return Err("System databases cannot be write targets".into());
+        }
+        return Ok((db, None));
+    }
+    let (db, t) = table(resource)?;
+    Ok((db, Some(t)))
+}
+fn allowed(adapter: &Adapter, resource: &str) -> bool {
+    if resource.starts_with("db:") {
+        adapter.clickhouse_write_databases.contains(resource)
+    } else {
+        adapter.clickhouse_write_tables.contains(resource)
+    }
+}
 fn target_sql(g: &Grant) -> Result<String> {
-    let (db, t) = table(&g.resource)?;
+    let (db, t) = scope(&g.resource)?;
     if !matches!(g.privilege.as_str(), "SELECT" | "INSERT") {
         return Err("ClickHouse writer supports exact SELECT or INSERT only".into());
     }
-    Ok(format!("{}.{}", quoted(db), quoted(t)))
+    Ok(format!(
+        "{}.{}",
+        quoted(db),
+        t.map(quoted).unwrap_or_else(|| "*".into())
+    ))
 }
 fn identity(s: &Value) -> bool {
     s.as_str()
         .is_some_and(|s| !s.is_empty() && s != "00000000-0000-0000-0000-000000000000")
 }
-fn state(http: &Http, tables: &BTreeSet<String>) -> Result<State> {
+fn state(http: &Http, adapter: &Adapter) -> Result<State> {
+    let tables = &adapter.clickhouse_write_tables;
     if !matches!(
         http.query::<Visibility>(VISIBILITY_SQL)?.as_slice(),
         [Visibility { result: 1 }]
@@ -86,28 +109,41 @@ fn state(http: &Http, tables: &BTreeSet<String>) -> Result<State> {
         }
         register(name, kind, &mut kinds)?;
     }
-    let filters = tables
+    let mut filters = tables
         .iter()
         .map(|r| {
             let (db, t) = table(r)?;
             Ok(format!("(database={} AND name={})", string(db), string(t)))
         })
         .collect::<Result<Vec<_>>>()?;
+    for resource in &adapter.clickhouse_write_databases {
+        let (db, t) = scope(resource)?;
+        if t.is_some() {
+            return Err("clickhouse_write_databases requires exact db:name entries".into());
+        }
+        filters.push(format!("database={}", string(db)));
+    }
     let selected = sorted(http.query::<Value>(&format!("SELECT database,name,toString(uuid) AS id,engine,create_table_query FROM system.tables WHERE {} LIMIT 10001", if filters.is_empty() { "0".into() } else { filters.join(" OR ") }))?);
-    if selected.len() != tables.len()
-        || selected.iter().any(|t| {
-            !identity(&t["id"]) || !matches!(t["engine"].as_str(), Some("Memory" | "MergeTree"))
-        })
-    {
-        return Err(
-            "Every allowed table must exist with a UUID and Memory/MergeTree engine".into(),
-        );
+    if selected.iter().any(|t| !identity(&t["id"])) {
+        return Err("Selected ClickHouse objects require nonzero UUIDs".into());
+    }
+    for resource in tables {
+        let (db, name) = table(resource)?;
+        if !selected.iter().any(|t| {
+            t["database"] == db
+                && t["name"] == name
+                && matches!(t["engine"].as_str(), Some("Memory" | "MergeTree"))
+        }) {
+            return Err(
+                "Every allowed table must exist with a UUID and Memory/MergeTree engine".into(),
+            );
+        }
     }
     let databases = sorted(http.query::<Value>(
         "SELECT name,toString(uuid) AS id,engine FROM system.databases LIMIT 10001",
     )?);
-    for r in tables {
-        let (db, _) = table(r)?;
+    for r in tables.iter().chain(&adapter.clickhouse_write_databases) {
+        let (db, _) = scope(r)?;
         if !databases
             .iter()
             .any(|d| d["name"] == db && d["engine"] == "Atomic" && identity(&d["id"]))
@@ -149,7 +185,12 @@ fn ancestors(s: &State, user: &str) -> BTreeSet<String> {
     }
     seen
 }
-fn recipient<'a>(s: &'a State, subject: &str, protected: &BTreeSet<String>) -> Result<&'a Value> {
+fn recipient<'a>(
+    s: &'a State,
+    subject: &str,
+    protected: &BTreeSet<String>,
+    adapter: &Adapter,
+) -> Result<&'a Value> {
     let p = s
         .principals
         .iter()
@@ -172,7 +213,17 @@ fn recipient<'a>(s: &'a State, subject: &str, protected: &BTreeSet<String>) -> R
             || r["access_object"] != ""
             || !matches!(r["access_type"].as_str(), Some("SELECT" | "INSERT"))
             || r["database"].as_str().is_none_or(|s| literal(s).is_err())
-            || r["table"].as_str().is_none_or(|s| literal(s).is_err())
+            || match r["table"].as_str() {
+                Some(t) => literal(t).is_err(),
+                None => {
+                    !r["table"].is_null()
+                        || !r["database"].as_str().is_some_and(|db| {
+                            adapter
+                                .clickhouse_write_databases
+                                .contains(&format!("db:{db}"))
+                        })
+                }
+            }
         {
             return Err(
                 "Recipient has broad, delegated, column, partial or unsupported direct ACLs".into(),
@@ -182,7 +233,7 @@ fn recipient<'a>(s: &'a State, subject: &str, protected: &BTreeSet<String>) -> R
     Ok(p)
 }
 fn atom(g: &Grant, p: &Value, grant_option: u8) -> Result<Value> {
-    let (db, t) = table(&g.resource)?;
+    let (db, t) = scope(&g.resource)?;
     Ok(
         json!({"user_name": if p["kind"] == "account" { json!(g.subject) } else { Value::Null }, "role_name": if p["kind"] == "role" { json!(g.subject) } else { Value::Null }, "access_type":g.privilege,"access_object":"","database":db,"table":t,"column":Value::Null,"is_partial_revoke":0,"grant_option":grant_option}),
     )
@@ -217,16 +268,31 @@ fn report(
         return Err("ClickHouse writer intent exceeds 1000 grants".into());
     }
     let protected = ancestors(s, issuer);
+    // Changing between DB and table grants can silently coalesce/erase explicit ACLs.
+    let mut levels: BTreeMap<(&str, &str, &str), BTreeSet<bool>> = BTreeMap::new();
+    for g in intent.grants.iter().chain(&observed.grants).filter(|g| {
+        intent.managed.contains(&g.subject) || intent.grants.iter().any(|i| i.subject == g.subject)
+    }) {
+        if let Ok((db, t)) = scope(&g.resource) {
+            levels
+                .entry((&g.subject, &g.privilege, db))
+                .or_default()
+                .insert(t.is_none());
+        }
+    }
+    if levels.values().any(|v| v.len() > 1) {
+        return Err("Overlapping held/declared DB and table privileges require separate manual reconciliation".into());
+    }
     for g in &intent.grants {
         // Retain declared memberships read-only; any planned membership change is refused below.
         if g.resource.starts_with("role:") && g.privilege == "MEMBER" {
             continue;
         }
         target_sql(g)?;
-        if !adapter.clickhouse_write_tables.contains(&g.resource) {
-            return Err("ClickHouse writes require literal clickhouse_write_tables".into());
+        if !allowed(adapter, &g.resource) {
+            return Err("ClickHouse writes require a literal table or database allowlist for the exact scope".into());
         }
-        recipient(s, &g.subject, &protected)?;
+        recipient(s, &g.subject, &protected, adapter)?;
     }
     if observed.unknown.iter().any(|u| {
         u.subjects.is_empty()
@@ -251,10 +317,10 @@ fn report(
     }
     for c in &mut plan.changes {
         let target = target_sql(&c.grant)?;
-        if !adapter.clickhouse_write_tables.contains(&c.grant.resource) {
-            return Err("ClickHouse writes require literal clickhouse_write_tables".into());
+        if !allowed(adapter, &c.grant.resource) {
+            return Err("ClickHouse writes require a literal table or database allowlist for the exact scope".into());
         }
-        recipient(s, &c.grant.subject, &protected)?;
+        recipient(s, &c.grant.subject, &protected, adapter)?;
         let actor = s
             .principals
             .iter()
@@ -264,7 +330,7 @@ fn report(
         authority.subject = issuer.into();
         if !s.grants.contains(&atom(&authority, actor, 1)?) {
             return Err(
-                "Writer must directly hold exact-table GRANT OPTION for the changed privilege"
+                "Writer must directly hold exact-scope GRANT OPTION for the changed privilege"
                     .into(),
             );
         }
@@ -282,13 +348,13 @@ fn report(
     Ok(plan)
 }
 fn checked(http: &Http, loaded: &input::Loaded, system: &str) -> Result<(State, planner::Report)> {
-    let tables = &loaded.config.adapters[system].clickhouse_write_tables;
-    if tables.len() > 128 {
-        return Err("ClickHouse table allowlist exceeds 128 entries".into());
+    let adapter = &loaded.config.adapters[system];
+    if adapter.clickhouse_write_tables.len() + adapter.clickhouse_write_databases.len() > 128 {
+        return Err("ClickHouse write allowlists exceed 128 entries".into());
     }
-    let before = state(http, tables)?;
+    let before = state(http, adapter)?;
     let observed = observe_http(http, system)?;
-    let after = state(http, tables)?;
+    let after = state(http, adapter)?;
     if before != after {
         return Err("ClickHouse catalog changed during observation; preview again".into());
     }
@@ -351,6 +417,7 @@ pub struct Receipt {
     pub changed: bool,
     pub effective_access_verified: bool,
     pub single_statement_only: bool,
+    pub database_changes_include_future_tables: bool,
     pub changes: Vec<planner::Change>,
 }
 pub fn apply(path: &Path, system: &str, write: bool, expected: Option<&str>) -> Result<Receipt> {
@@ -377,7 +444,7 @@ pub fn apply(path: &Path, system: &str, write: bool, expected: Option<&str>) -> 
     }
     let http = Http::from_env(key, adapter.read_timeout_seconds, Instant::now())?;
     let (state, plan) = checked(&http, &loaded, system)?;
-    let value = serde_json::to_vec(&json!({"format":"clickhouse-single-table-v1","path":path,"system":system,"endpoint":http.url.as_str(),"state":state,"changes":plan.changes})).map_err(|_| "Cannot bind ClickHouse plan")?;
+    let value = serde_json::to_vec(&json!({"format":"clickhouse-single-acl-v2","path":path,"system":system,"endpoint":http.url.as_str(),"state":state,"changes":plan.changes})).map_err(|_| "Cannot bind ClickHouse plan")?;
     let mut hash = Sha256::new();
     for part in [&config_bytes, &intent_bytes, &value] {
         hash.update((part.len() as u64).to_be_bytes());
@@ -391,7 +458,7 @@ pub fn apply(path: &Path, system: &str, write: bool, expected: Option<&str>) -> 
         );
     }
     if write && !plan.changes.is_empty() {
-        let now = self::state(&http, &adapter.clickhouse_write_tables)?;
+        let now = self::state(&http, adapter)?;
         let intent_path = input::relative(&loaded.base, &loaded.config.intent)?;
         if state != now
             || input::writer_file(&path).ok().as_deref() != Some(&config_bytes)
@@ -402,7 +469,12 @@ pub fn apply(path: &Path, system: &str, write: bool, expected: Option<&str>) -> 
             );
         }
         let c = &plan.changes[0];
-        let p = recipient(&state, &c.grant.subject, &ancestors(&state, &http.user))?;
+        let p = recipient(
+            &state,
+            &c.grant.subject,
+            &ancestors(&state, &http.user),
+            adapter,
+        )?;
         let row = atom(&c.grant, p, 0)?;
         let mut wanted = state;
         if c.action == "grant" {
@@ -425,6 +497,10 @@ pub fn apply(path: &Path, system: &str, write: bool, expected: Option<&str>) -> 
         changed: !plan.changes.is_empty(),
         effective_access_verified: false,
         single_statement_only: true,
+        database_changes_include_future_tables: plan
+            .changes
+            .iter()
+            .any(|c| c.grant.resource.starts_with("db:")),
         changes: plan.changes,
     })
 }
@@ -448,5 +524,12 @@ mod tests {
             assert!(table(r).is_err(), "{r}");
         }
         assert!(target_sql(&Grant::new("ch", "user", "table:demo.t", "ALL")).is_err());
+        assert_eq!(
+            target_sql(&Grant::new("ch", "user", "db:odd`db", "SELECT")).unwrap(),
+            "`odd\\`db`.*"
+        );
+        for r in ["db:system", "db:*", "db:demo.*", "global:*", "db:demo?"] {
+            assert!(scope(r).is_err(), "{r}");
+        }
     }
 }

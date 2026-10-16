@@ -1,6 +1,6 @@
 # Grantline — Rust + Leptos migration
 
-Experimental **R1 + R2 + R3a/R3b/R3c/R3d/R3e1/R3e2/R3e3/R3f/R3g1/R3g2/R3g3/R3g4/R3h1 foundation**, alongside the supported Python console.
+Experimental **R1 + R2 + R3a/R3b/R3c/R3d/R3e1/R3e2/R3e3/R3f/R3g1/R3g2/R3g3/R3g4/R3h1/R3h2 foundation**, alongside the supported Python console.
 This binary runs natively with no Python process. Commands are offline by default;
 native PostgreSQL/ClickHouse catalogs and remote S3 IAM require explicit `--live`
 and configured reader endpoints/credentials.
@@ -476,13 +476,15 @@ other direct ACLs you want to retain for managed subjects. Unchanged declared
 memberships remain read-only; any planned membership change is refused. Recipients
 must exist in local_directory, with unambiguous names/UUIDs, and cannot be the
 writer or a role in its ancestry. Broad/delegated/column/partial/parameterized or
-unsupported direct recipient ACLs refuse the plan. No global/DB/role writes, ALL,
+unsupported direct recipient ACLs refuse the plan, except exact opt-in DB scopes
+described below. Table-only config does not authorize DB scopes; R3h2 below adds an independent
+DB opt-in. No global/role writes, ALL,
 ON CLUSTER, REPLACE OPTION, views, Distributed/Replicated tables or replicated
 access storage. Legacy prefix wildcard grants can refuse the whole observation.
 
-Plan-ID binds input bytes, non-secret endpoint, authenticated user/server UUID,
+Plan-ID v2 (fresh preview required for older IDs) binds input bytes, non-secret endpoint, authenticated user/server UUID,
 full principal IDs/storage and raw direct grants/role edges, database IDs and all
-allowlisted table UUIDs/engines/DDL. Allow at most 128 tables and 1000 intent grants. Catalog reads bracket the existing observer
+allowlisted table UUIDs/engines/DDL. Allow at most 128 combined table/DB scope entries and 1000 intent grants. Catalog reads bracket the existing observer
 and must agree. All read queries retain row/byte/scan/time caps and readonly=2.
 The state and input files are refreshed immediately before a single bounded POST
 with readonly=0. The post-check requires exact expected raw ACLs, unchanged other
@@ -506,6 +508,56 @@ concurrent administration and crash/restart around dispatch are unverified.
 See [GRANT](https://clickhouse.com/docs/sql-reference/statements/grant),
 [REVOKE](https://clickhouse.com/docs/sql-reference/statements/revoke) and
 [system.grants](https://clickhouse.com/docs/operations/system-tables/grants).
+
+### Apply one ClickHouse database ACL (R3h2)
+
+DB scopes use a separate, default-empty allowlist. A table entry never grants
+permission to rewrite its parent database scope, or vice versa:
+
+```toml
+[adapters.ch]
+type = "clickhouse"
+admin_url_env = "GRANTLINE_CH_WRITER"
+clickhouse_write_databases = ["db:demo"]
+```
+
+Intent uses `resource = "db:demo"` and exact SELECT or INSERT. This generates
+a quoted `GRANT SELECT ON demo.* TO ...` or a newly reviewed REVOKE, still
+**one atom per invocation** with `--live --write --expect PLAN_ID`. The authenticated writer
+must directly hold the same DB-scope privilege WITH GRANT OPTION. A table grant,
+other DB, inherited role or global authority is not substituted for that row.
+Unchanged managed memberships and unrelated direct ACLs must stay in intent.
+
+**A DB allowlist authorizes all existing and future table/relation names and
+engines in that DB**, including views and tables created after the write. It is
+not a frozen list of today's Memory/MergeTree tables. Use an existing UUID-backed
+Atomic database; an empty database is valid. Global/system/dropped/prefix DB
+scopes, role membership changes, grant options and partial revokes stay refused.
+Table-specific opt-ins retain R3h1's engine restrictions.
+
+Before planning, bind the DB UUID and every current contained table UUID/engine/
+DDL. New/dropped/recreated tables, views, schema changes or same-name DB recreation
+after preview require a new plan. The CLI and JSON receipt flag
+`database_changes_include_future_tables=true` for DB change plans. The row/scan/
+byte/time caps, full raw ACL postconditions and outcome-unknown behavior are shared
+with R3h1. There is no multi-statement rollback, automatic retry or concurrent-admin
+compare-and-swap; use a direct server endpoint and controlled administration.
+
+The union of held and declared direct DB/table grants for the same subject, DB
+and SELECT/INSERT privilege must not overlap. Broadening can coalesce narrower
+rows, and narrowing/revoking can erase intended rights or create partial revokes;
+such transitions require separate manual reconciliation. A different privilege or
+a different DB can be retained. After DB revoke, inherited role paths can still
+allow access and inserted data remains. The receipt does not claim effective
+access or data restoration. Review an inverse separately.
+
+`python3 scripts/check_rust_clickhouse_database.py --docker` verifies actual
+current/view/future/empty-DB SELECT/INSERT, other-DB denial, role propagation and
+residual access, quoted DBs, exact inverse/data preservation, stale DB/table/DDL/
+ACL/source/session and unsafe scope refusal on official ClickHouse 26.6.2.160.
+It reuses the full HTTP failure/timeout/redirect/postcondition injection suite
+for DB statements. See [GRANT scope](https://clickhouse.com/docs/sql-reference/statements/grant#wildcard-grants)
+and [partial REVOKE](https://clickhouse.com/docs/sql-reference/statements/revoke#partial-revokes).
 
 ### Apply PostgreSQL table, schema and database ACLs (R3g1/R3g2)
 
@@ -808,10 +860,11 @@ their own ports and are unaffected.
 - R3g3 adds opt-in role-only membership transactions through postgres, with canonical options and an exact grantor.
 - R3g4 adds authenticated-creator, schema-specific default table privileges and future-object/rollback checks.
 - R3h1 applies one exact local ClickHouse SELECT/INSERT ACL with review and explicit uncertain outcomes.
+- R3h2 adds explicitly authorized DB scopes, future-relation scope disclosure and overlap/partial-revoke guards.
 
 ## What remains
 
-Global and other-object PostgreSQL defaults, wider ClickHouse scopes, remote S3
+Global and other-object PostgreSQL defaults, ClickHouse role writes, remote S3
 writers, production authentication,
 durable approvals, real Slack/GitHub writers, all existing console pages,
 WASM map interactions, four-language UI and release images are later stages.
@@ -841,6 +894,7 @@ python3 scripts/check_rust_postgres_writer.py --docker
 python3 scripts/check_rust_postgres_membership.py --docker
 python3 scripts/check_rust_postgres_defaults.py --docker
 python3 scripts/check_rust_clickhouse_writer.py --docker
+python3 scripts/check_rust_clickhouse_database.py --docker
 ```
 
 The checks cover canonical grants, coverage, convergence actions, diagnostic
