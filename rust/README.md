@@ -1,6 +1,6 @@
 # Grantline — Rust + Leptos migration
 
-Experimental **R1 + R2 + R3a/R3b/R3c/R3d/R3e1/R3e2 foundation**, alongside the supported Python console.
+Experimental **R1 + R2 + R3a/R3b/R3c/R3d/R3e1/R3e2/R3e3 foundation**, alongside the supported Python console.
 This binary runs natively with no Python process. Commands are offline by default;
 native PostgreSQL/ClickHouse catalogs and remote S3 IAM require explicit `--live`
 and configured reader endpoints/credentials.
@@ -183,7 +183,7 @@ The findings compare definite outcomes with the exact saved/observed grant
 atoms, as in Python. ACL checks do not establish schema traversal, RLS outcomes,
 row availability, owner DDL powers, SET ROLE behavior or end-to-end data access.
 Subject login is subject to the server's authentication configuration (the
-isolated integration server uses trust authentication). S3 probes, writes and
+isolated integration server uses trust authentication). Native writes and
 production/staging validation remain pending.
 
 ### Verify ClickHouse ACLs (R3e2)
@@ -251,6 +251,73 @@ identity/credential isolation, partial-result deadlines, real inherited/scoped
 ACLs, partial/column unknowns, password login, default-role distinctions and
 independent server-side write refusal. Positive TLS integration, custom CA,
 production/staging connections and writers remain unverified/pending.
+
+### Verify S3 List/Read samples (R3e3)
+
+Use `probe --live --system object-store --subject demo-user --json`, optionally
+with `--observed /path/to/baseline.jsonl`. Service/subject selection, informational
+exit status and saved-baseline findings follow the probe contract above. Only
+observed atoms are checked. Offline mode performs no network activity.
+
+S3 uses the data endpoint, separately from the IAM/Filer observer. Explicitly map
+each subject's access key and secret through named environment variables:
+
+```toml
+[adapters.object-store]
+type = "s3"
+enforced = "dynamic"
+endpoint_env = "GRANTLINE_S3_DATA_ENDPOINT"
+probe_region = "us-east-1"
+read_timeout_seconds = 30
+
+[adapters.object-store.probe_credentials."demo-user"]
+key_env = "GRANTLINE_DEMO_USER_KEY"
+secret_env = "GRANTLINE_DEMO_USER_SECRET"
+# session_token_env = "GRANTLINE_DEMO_USER_TOKEN" # optional temporary credential
+
+# Optional full bucket-relative key, useful when the subject cannot List.
+[adapters.object-store.probe_objects]
+"bucket:example/team" = "team/sample.txt"
+```
+
+Keep the existing `planes` configuration for observation. IAM document secrets,
+reader/admin credentials and ambient AWS credentials are never used for probes.
+The operator must bind each key to the correct subject; no STS identity lookup
+verifies that mapping. Config stores variable names, not secret values.
+
+`List` issues SigV4 ListObjectsV2 with `max-keys=1`, `encoding-type=url` and an
+exact directory prefix. `Read` HEADs the configured sample, or one listed key;
+it never downloads an object body. List and Read share the sampled listing for
+the same subject/scope. An empty listing can allow List but leaves Read unknown.
+One readable object does not establish access to every object in the prefix.
+Explicit samples must remain inside the requested prefix; sampled names never
+appear in output. Use normalized resource names in `probe_objects`.
+
+Only concrete `bucket:name[/prefix]` List/Read atoms are supported. Write, Admin,
+capabilities, roles and unresolved wildcard scopes remain unknown; no write
+verb is sent. Existing grant normalization removes trailing `*` and `/` before
+selection. Listings accept percent encoding and SeaweedFS form-style `+` spaces
+(literal plus is `%2B`). Paths preserve spaces, `+`, `%` and Unicode, while traversal
+segments are rejected. Path-style DNS buckets only: access points, virtual-host
+routing, S3 Express and version-specific probes are not implemented.
+
+Allow requires a valid scoped XML listing or a successful HEAD with object
+metadata. Deny requires HTTP 403 with explicit S3 `AccessDenied`; invalid keys,
+signatures/tokens/regions, generic HEAD 403/404, malformed/partial XML, redirects
+and transport/service failures remain unknown. A HEAD 403 alone cannot distinguish
+an unreadable object from a nonexistent object when List is unavailable.
+
+Each adapter has one `read_timeout_seconds` deadline (1–120 seconds), at most
+1,000 atoms, 128 subjects, 512 requests, 1 MiB per response and 16 MiB total.
+Deadline/aggregate/request exhaustion discards earlier partial results. HTTPS
+uses verified bundled roots; redirects and environment proxies are disabled.
+Custom `ca_bundle_env` is explicitly unsupported. Errors do not expose raw
+responses, credentials or sample keys. Positive TLS/private CA and AWS deployment
+integration remain unverified; the actual server test uses isolated SeaweedFS.
+
+Run `python3 scripts/check_rust_s3_probes.py --docker` for independent SigV4
+HTTP checks, error/scope/budget guards, credential isolation and official
+SeaweedFS List/HEAD, explicit samples and independent write refusal.
 
 ### Read remote S3 IAM sources
 
@@ -416,13 +483,15 @@ their own ports and are unaffected.
 - R3b reads native ClickHouse catalogs through an explicit reader with `--live`.
 - R3c reads PostgreSQL 16+ catalogs with per-DB unread scopes and read-only transactions.
 - R3d reads remote S3 JSON/Filer/IAM sources with bounded collections and no write preview.
+- R3e1/R3e2 probe PostgreSQL/ClickHouse ACLs, with optional explicit subject logins.
+- R3e3 signs scoped S3 List/HEAD samples with explicitly mapped subject keys.
 
 ## What remains
 
-Probes and native writes, production authentication,
+Native writes, production authentication,
 durable approvals, real Slack/GitHub writers, all existing console pages,
 WASM map interactions, four-language UI and release images are later stages.
-Live S3 document writes and all probe paths remain in R3. Approval, a
+Live S3 document writes and other native writers remain in R3. Approval, a
 simulated PR and effective IAM access are separate states. This experimental app
 never changes live access and is not ready to replace a production deployment.
 
@@ -441,6 +510,7 @@ python3 scripts/check_rust_s3.py
 python3 scripts/check_rust_clickhouse.py --docker
 python3 scripts/check_rust_postgres.py --docker
 python3 scripts/check_rust_s3_network.py --docker
+python3 scripts/check_rust_s3_probes.py --docker
 ```
 
 The checks cover canonical grants, coverage, convergence actions, diagnostic

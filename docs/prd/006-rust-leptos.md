@@ -33,7 +33,7 @@ State is disposable, private to the process and erased when it exits.
 | Stage | Implementation | Acceptance before promotion | Status |
 |---|---|---|---|
 | R2 | Typed config/intent, snapshots, findings, graph and offline plan CLI | Fixture decisions, diagnostics, PG/CH SQL previews, snapshot round trips and graph paths match Python; S3 commands/coalescing remain R3 | Merged in PR #16 |
-| R3 | PostgreSQL, ClickHouse and S3 native adapters, probes and writers | Existing regression cases ported; separately authorized live read/probe and reversible write validation per adapter | R3a–R3e1 merged; R3e2 ClickHouse probes implemented; S3 probes/writers pending |
+| R3 | PostgreSQL, ClickHouse and S3 native adapters, probes and writers | Existing regression cases ported; separately authorized live read/probe and reversible write validation per adapter | R3a–R3e2 merged; R3e3 S3 List/HEAD probes implemented; writers pending |
 | R4 | Production sessions/OIDC, durable approval store, Slack signatures/DMs, code writer and GitHub PRs | Requester binding, all approvers, callback replay, immutable plan and repo scope verified end to end; approval/PR/applied access reported separately | Pending |
 | R5 | All console pages, Leptos hydration and interactive permission map | Repeated hover highlight/dimming, matrix scrolling, accessible dark mode, logs and four locales verified in browser | Pending |
 | R6 | Release image, migration/rollback and operating guide | Reproducible native/WASM builds, upgrade of persisted state, image smoke tests and explicitly authorized rollout | Pending |
@@ -70,14 +70,16 @@ keep Python as a development-only oracle until all stages pass.
 
 ## Next action
 
-Review R3e2's ClickHouse read-only ACL probes and isolated server evidence;
-S3 probes are the next review unit. Writers and
-separately authorized production/staging verification follow. Each
+Review R3e3's S3 read-only subject-signed List/HEAD probes and isolated server
+evidence. The next review unit is a native writer for local S3 IAM documents,
+using existing grouped previews, explicit opt-in, stale-source guards and
+reversible fixture validation. Other writers and separately authorized
+production/staging verification follow. Each
 review unit needs acceptance evidence before advancing; R3 is not yet complete.
 
 ## R3 — Native adapter migration {#R3}
 
-Status: R3a merged in PR #17; R3b merged in PR #18; R3c merged in PR #19; R3d merged in PR #20; R3e1 merged in PR #22; R3e2 ClickHouse probes implemented.
+Status: R3a merged in PR #17; R3b merged in PR #18; R3c merged in PR #19; R3d merged in PR #20; R3e1 merged in PR #22; R3e2 merged in PR #23; R3e3 S3 List/HEAD probes implemented.
 The first review unit implements S3 file/dir
 planes, effective policy observation, group/inline routes and identity-scoped
 document previews. Plan commands remain previews; no IAM file, shared managed
@@ -322,5 +324,44 @@ an earlier success, subject cap and redaction; isolated official ClickHouse
 26.6.2.160 for inherited/global/table ACLs, direct membership, partial/column
 unknowns, quoted identifiers, restricted/missing subjects, actual SHA256 password
 login, wrong credentials/identity, non-default roles and readonly INSERT semantics.
-No production/staging access or deployment. S3 probes and writers remain next;
+No production/staging access or deployment. Writers remain next;
 positive TLS/private CA, live row-policy/session behavior remain unverified.
+
+### R3e3 — S3 read-only data-plane samples
+
+Scope: existing tri-state probe CLI, explicitly mapped subject SigV4 credentials,
+ListObjectsV2 with max-keys=1 and HEAD metadata of one in-scope object. The data
+endpoint and credentials are independent of IAM/Filer observation. No secrets
+are extracted from IAM documents; no reader/admin/AWS environment fallback.
+The operator binds keys to subjects; no STS identity check is claimed.
+
+An optional normalized-resource-to-object map permits HEAD without List access.
+Reject out-of-prefix samples and traversal before network activity. Preserve
+encoded Unicode, spaces, plus and percent characters, including SeaweedFS
+form-encoded listing spaces (`+` versus literal `%2B`). A successful sample is
+not a prefix-wide effective-access proof. Empty scopes and inability to select
+an object leave Read unknown. Only concrete bucket/prefix List/Read atoms have
+an evaluator; Write/Admin/capabilities/roles/unresolved wildcards remain unknown.
+No object-body GET or write verb is issued by native probes.
+
+Allow requires a validated scoped listing or HEAD metadata. Deny requires an
+explicit S3 AccessDenied error with HTTP403. Invalid credentials/signatures,
+token/region errors, generic HEAD403/404, malformed XML, service/transport errors
+and redirects remain unknown. No response body, sample key or credential enters
+diagnostics. HTTPS uses verified roots; proxies/redirects are disabled; custom
+CA bundles are explicitly unsupported.
+
+Bounds: <=1,000 atoms/128 subjects, 512 requests, 1MiB per response, 16MiB total
+and one 1–120-second adapter deadline independent of observation. Request/total
+byte/deadline exhaustion discards earlier partial results. Reuse a listing only
+within the same subject/resource. Offline probes never resolve credentials.
+
+Acceptance: native fmt/clippy/tests/build and all three differential suites;
+check_rust_s3_probes.py independent HTTP signature/session-token/encoding oracle,
+scope/cache isolation, explicit samples, auth/denial/error distinctions,
+deadline/request/byte limits, no credential fallback and redaction; disposable
+official SeaweedFS 4.48 for actual SigV4 List/HEAD, read-only subjects without
+List, empty/ambiguous/auth failures and independent server-side write refusal.
+Existing S3 readers and PostgreSQL/ClickHouse server regressions remain green.
+Positive TLS/private CA, AWS integration, writes and production/staging access
+remain unverified or pending. No deployment is part of this unit.

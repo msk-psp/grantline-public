@@ -62,9 +62,11 @@ For Rust changes run the native checks and all three differential suites in the
 explicit `snapshot` command records state. Native PostgreSQL/ClickHouse/S3 reads require
 `--live` and separately configured readers. PostgreSQL and ClickHouse `probe --live`
 support read-only ACL checks and optional mapped subject logins; see the Rust guide
-for the different guarantees of each adapter. S3 probes and all writers remain pending. Run `python3 scripts/check_rust_clickhouse.py --docker` and
+for the different guarantees of each adapter. S3 probes use explicit subject keys
+for scoped List/HEAD samples; all writers remain pending. Run `python3 scripts/check_rust_clickhouse.py --docker` and
 `python3 scripts/check_rust_postgres.py --docker` plus
-`python3 scripts/check_rust_s3_network.py --docker` for isolated boundary and
+`python3 scripts/check_rust_s3_network.py --docker` and
+`python3 scripts/check_rust_s3_probes.py --docker` for isolated boundary and
 real-server checks. Local S3 IAM files/trees support observation
 and grouped previews; directory-backed shared policies cannot be rewritten from
 a per-user change.

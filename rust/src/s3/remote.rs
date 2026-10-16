@@ -258,6 +258,90 @@ fn hmac(key: &[u8], data: &str) -> Vec<u8> {
     mac.update(data.as_bytes());
     mac.finalize().into_bytes().to_vec()
 }
+pub(super) fn uri_encode(value: &str, keep_slash: bool) -> String {
+    let mut out = String::new();
+    for b in value.bytes() {
+        if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) || keep_slash && b == b'/' {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+pub(super) struct Signer<'a> {
+    pub key: &'a str,
+    pub secret: &'a str,
+    pub token: Option<&'a str>,
+    pub region: &'a str,
+    pub service: &'a str,
+}
+impl Signer<'_> {
+    pub fn sign(
+        &self,
+        method: &str,
+        url: &Url,
+        body: &[u8],
+        timestamp: &str,
+        mut headers: BTreeMap<String, String>,
+    ) -> BTreeMap<String, String> {
+        let mut host = url
+            .host_str()
+            .unwrap_or("")
+            .trim_matches(['[', ']'])
+            .to_owned();
+        if host.contains(':') {
+            host = format!("[{host}]");
+        }
+        if let Some(port) = url.port() {
+            host += &format!(":{port}");
+        }
+        headers.insert("host".into(), host);
+        headers.insert("x-amz-content-sha256".into(), sha(body));
+        headers.insert("x-amz-date".into(), timestamp.into());
+        if let Some(token) = self.token {
+            headers.insert("x-amz-security-token".into(), token.into());
+        }
+        let names = headers.keys().cloned().collect::<Vec<_>>().join(";");
+        let canonical_headers = headers
+            .iter()
+            .map(|(k, v)| format!("{k}:{}\n", v.trim()))
+            .collect::<String>();
+        let mut pairs = url
+            .query_pairs()
+            .map(|(k, v)| (uri_encode(&k, false), uri_encode(&v, false)))
+            .collect::<Vec<_>>();
+        pairs.sort();
+        let query = pairs
+            .into_iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect::<Vec<_>>()
+            .join("&");
+        // URL paths are already encoded; S3 signs them without double encoding.
+        let canonical = format!(
+            "{method}\n{}\n{query}\n{canonical_headers}\n{names}\n{}",
+            url.path(),
+            sha(body)
+        );
+        let date = &timestamp[..8];
+        let scope = format!("{date}/{}/{}/aws4_request", self.region, self.service);
+        let to_sign = format!(
+            "AWS4-HMAC-SHA256\n{timestamp}\n{scope}\n{}",
+            sha(canonical.as_bytes())
+        );
+        let mut signing = ("AWS4".to_owned() + self.secret).into_bytes();
+        for part in [date, self.region, self.service, "aws4_request"] {
+            signing = hmac(&signing, part);
+        }
+        let signature = hmac(&signing, &to_sign)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
+        headers.insert("authorization".into(),format!("AWS4-HMAC-SHA256 Credential={}/{scope}, SignedHeaders={names}, Signature={signature}",self.key));
+        headers.remove("host");
+        headers
+    }
+}
 fn signed(
     url: &Url,
     body: &str,
@@ -266,54 +350,22 @@ fn signed(
     token: Option<&str>,
     timestamp: &str,
 ) -> BTreeMap<String, String> {
-    let mut host = url
-        .host_str()
-        .unwrap_or("")
-        .trim_matches(['[', ']'])
-        .to_owned();
-    if host.contains(':') {
-        host = format!("[{host}]");
+    Signer {
+        key,
+        secret,
+        token,
+        region: "us-east-1",
+        service: "iam",
     }
-    if let Some(port) = url.port() {
-        host += &format!(":{port}");
-    }
-    let mut headers = BTreeMap::from([
-        ("host".into(), host),
-        ("content-type".into(), CONTENT_TYPE.into()),
-        ("x-amz-content-sha256".into(), sha(body.as_bytes())),
-        ("x-amz-date".into(), timestamp.into()),
-    ]);
-    if let Some(token) = token {
-        headers.insert("x-amz-security-token".into(), token.into());
-    }
-    let names = headers.keys().cloned().collect::<Vec<_>>().join(";");
-    let canonical_headers = headers
-        .iter()
-        .map(|(k, v)| format!("{k}:{}\n", v.trim()))
-        .collect::<String>();
-    let canonical = format!(
-        "POST\n{}\n\n{canonical_headers}\n{names}\n{}",
-        url.path(),
-        sha(body.as_bytes())
-    );
-    let date = &timestamp[..8];
-    let scope = format!("{date}/us-east-1/iam/aws4_request");
-    let to_sign = format!(
-        "AWS4-HMAC-SHA256\n{timestamp}\n{scope}\n{}",
-        sha(canonical.as_bytes())
-    );
-    let mut signing = ("AWS4".to_owned() + secret).into_bytes();
-    for part in [date, "us-east-1", "iam", "aws4_request"] {
-        signing = hmac(&signing, part);
-    }
-    let signature = hmac(&signing, &to_sign)
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect::<String>();
-    headers.insert("authorization".into(),format!("AWS4-HMAC-SHA256 Credential={key}/{scope}, SignedHeaders={names}, Signature={signature}"));
-    headers.remove("host");
-    headers
+    .sign(
+        "POST",
+        url,
+        body.as_bytes(),
+        timestamp,
+        BTreeMap::from([("content-type".into(), CONTENT_TYPE.into())]),
+    )
 }
+
 fn xml_value(node: roxmltree::Node<'_, '_>, depth: usize) -> Result<Value> {
     if depth > 32 {
         return Err("IAM XML nesting limit exceeded".into());
