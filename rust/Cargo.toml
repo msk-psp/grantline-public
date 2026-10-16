@@ -7,6 +7,7 @@ license = "Apache-2.0"
 description = "Grantline Rust migration: native permission core and Leptos approval playground"
 
 [dependencies]
+grantline-ui = { path = "ui", features = ["ssr"] }
 axum = { version = "0.8", features = ["form", "json"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 clap = { version = "4", features = ["derive"] }
@@ -36,3 +37,8 @@ base64 = "0.22"
 [dev-dependencies]
 http-body-util = "0.1"
 tower = { version = "0.5", features = ["util"] }
+
+[workspace]
+members = ["ui"]
+default-members = ["."]
+resolver = "2"

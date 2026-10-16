@@ -34,8 +34,8 @@ State is disposable, private to the process and erased when it exits.
 |---|---|---|---|
 | R2 | Typed config/intent, snapshots, findings, graph and offline plan CLI | Fixture decisions, diagnostics, PG/CH SQL previews, snapshot round trips and graph paths match Python; S3 commands/coalescing remain R3 | Merged in PR #16 |
 | R3 | PostgreSQL, ClickHouse and S3 native adapters, probes and writers | Existing regression cases ported; separately authorized live read/probe and reversible write validation per adapter | R3a–R3e3 merged; R3f merged; R3g1 merged; R3g2 merged; R3g3 membership writer merged in PR #28; R3g4 merged in PR #29; R3h1/R3h2 merged in #31; R3h3 merged in #32; conditional remote JSON writer implemented; protocol-specific tree/IAM writes remain explicitly unsupported |
-| R4 | Production sessions/OIDC, durable approval store, Slack signatures/DMs, code writer and GitHub PRs | Requester binding, all approvers, callback replay, immutable plan and repo scope verified end to end; approval/PR/applied access reported separately | Pending |
-| R5 | All console pages, Leptos hydration and interactive permission map | Repeated hover highlight/dimming, matrix scrolling, accessible dark mode, logs and four locales verified in browser | Pending |
+| R4 | Production sessions/OIDC, durable approval store, Slack signatures/DMs, code writer and GitHub PRs | Requester binding, all approvers, callback replay, immutable plan and repo scope verified end to end; approval/PR/applied access reported separately | Implemented in this stack; isolated verification, operational promotion pending |
+| R5 | All console pages, Leptos hydration and interactive permission map | Repeated hover highlight/dimming, matrix scrolling, accessible dark mode, logs and four locales verified in browser | Implemented in this stack; isolated verification, operational promotion pending |
 | R6 | Release image, migration/rollback and operating guide | Reproducible native/WASM builds, upgrade of persisted state, image smoke tests and explicitly authorized rollout | Pending |
 
 ## R2 — Offline CLI and data contracts {#R2}
@@ -744,3 +744,27 @@ Non-root native image with WASM/assets, locked reproducible builds, CI smoke
 checks and release gating. Versioned durable state import/backup, migration dry
 run and reversible upgrade procedure. Document explicit limits and Python/Rust
 cutover; no release publication or operational rollout in this task.
+
+## R5 — Native Leptos console
+
+The native `serve` command now renders the login, map, accounts, resources,
+services, matrix, changes, snapshot history, request and approval pages.
+`grantline-ui` shares typed SSR and WASM components; run
+`scripts/build_rust_ui.sh` with the lockfile-matching wasm-bindgen CLI.
+The browser only calls authenticated native APIs. It cannot execute IAM writes.
+Live catalog loading reports unknown on failure; approval/history pages do not
+wait for service observation. Immutable full patches are available on the scoped
+approval detail route; list summaries omit full source documents.
+
+English, Korean, Japanese and Simplified Chinese labels preserve configured
+environment identifiers and source diagnostics. Repeated resource hover uses
+fixed geometry and independent upstream/downstream traversal, excludes sibling
+resources, dims unrelated nodes and supports keyboard selection. Matrix sticky
+cells have opaque backgrounds within a clipped scroll region. Log levels and
+entity chips remain structured. Large maps/tables have explicit display caps.
+
+Validation: workspace Rust tests/Clippy, SSR/API/static asset contract, signed
+OIDC and durable Slack/GitHub loopback tests, release WASM build, and Chrome
+checks for repeated hover, dimming, matrix scrolling, themes, official icons and
+four locale transitions. Real operational SSO, Slack, GitHub and IAM services
+were not contacted. R6 supplies distribution and migration instructions.
