@@ -1,6 +1,8 @@
-//! S3 IAM interpretation and document previews. Remote reads require explicit opt-in.
+//! S3 IAM interpretation, previews and explicit local-file writes. Remote reads are opt-in.
 pub mod probe;
 mod remote;
+#[cfg(unix)]
+pub mod writer;
 use crate::{
     Result,
     config::{Adapter, relative},
@@ -962,7 +964,9 @@ impl Observed {
                         {
                             return Err("Unsupported native S3 scope".into());
                         }
-                        let atom = format!("{}:{scope}", c.grant.privilege);
+                        // SeaweedFS requires a wildcard for descendants; bare paths do not grant them.
+                        let suffix = if scope.contains('/') { "/*" } else { "" };
+                        let atom = format!("{}:{scope}{suffix}", c.grant.privilege);
                         let mut actions = listed(Some(&after))?;
                         actions.retain(|a| {
                             canonical(native(system, &subject, a), system).key() != c.grant.key()

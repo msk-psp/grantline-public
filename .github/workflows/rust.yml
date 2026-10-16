@@ -39,3 +39,5 @@ jobs:
         run: python3 scripts/check_rust_s3_network.py --docker
       - name: Verify native S3 subject probes against isolated HTTP and official SeaweedFS
         run: python3 scripts/check_rust_s3_probes.py --docker
+      - name: Verify native local S3 IAM grant, revoke and restore with official SeaweedFS
+        run: python3 scripts/check_rust_s3_writer.py --docker

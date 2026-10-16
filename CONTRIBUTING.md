@@ -58,15 +58,19 @@ not done until the checks pass locally.
 | experimental native core, offline CLI and Leptos playground | `rust/` — [guide](rust/README.md), [migration stages](docs/prd/006-rust-leptos.md) |
 
 For Rust changes run the native checks and all three differential suites in the
-[Rust guide](rust/README.md#check-the-boundary). `plan` is read-only; only the
-explicit `snapshot` command records state. Native PostgreSQL/ClickHouse/S3 reads require
+[Rust guide](rust/README.md#check-the-boundary). `plan` is read-only;
+`snapshot` explicitly records observations. Native `apply`/`restore` support one
+local S3 IAM file with explicit `--write` and stale-state guards; filesystem
+permissions are the write credential for that file. Native PostgreSQL/ClickHouse/S3 reads require
 `--live` and separately configured readers. PostgreSQL and ClickHouse `probe --live`
 support read-only ACL checks and optional mapped subject logins; see the Rust guide
 for the different guarantees of each adapter. S3 probes use explicit subject keys
-for scoped List/HEAD samples; all writers remain pending. Run `python3 scripts/check_rust_clickhouse.py --docker` and
+for scoped List/HEAD samples; PostgreSQL/ClickHouse/remote S3 writers remain pending.
+Run `python3 scripts/check_rust_clickhouse.py --docker` and
 `python3 scripts/check_rust_postgres.py --docker` plus
 `python3 scripts/check_rust_s3_network.py --docker` and
-`python3 scripts/check_rust_s3_probes.py --docker` for isolated boundary and
+`python3 scripts/check_rust_s3_probes.py --docker` and
+`python3 scripts/check_rust_s3_writer.py --docker` for isolated boundary and
 real-server checks. Local S3 IAM files/trees support observation
 and grouped previews; directory-backed shared policies cannot be rewritten from
 a per-user change.
