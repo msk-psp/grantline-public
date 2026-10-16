@@ -1,5 +1,6 @@
-//! Opt-in PostgreSQL catalog reads and ACL probes. No data reads or permission writes.
+//! PostgreSQL catalog reads, ACL probes and explicit transactional table ACL writes.
 pub mod probe;
+pub mod writer;
 use crate::{
     Result,
     config::Adapter,
@@ -88,7 +89,7 @@ fn config(raw: &str, seconds: u64) -> Result<Config> {
         .options(format!("-c default_transaction_read_only=on -c statement_timeout={} -c lock_timeout=1000 -c idle_in_transaction_session_timeout={} -c search_path=pg_catalog", seconds*1000,seconds*1000));
     Ok(cfg)
 }
-async fn connect(cfg: &Config) -> Result<Client> {
+async fn open(cfg: &Config) -> Result<Client> {
     let tls = tokio_postgres_rustls::MakeRustlsConnect::with_webpki_roots();
     let (client, connection) = cfg
         .connect(tls)
@@ -97,6 +98,10 @@ async fn connect(cfg: &Config) -> Result<Client> {
     tokio::spawn(async move {
         let _ = connection.await;
     });
+    Ok(client)
+}
+async fn connect(cfg: &Config) -> Result<Client> {
+    let client = open(cfg).await?;
     client
         .batch_execute("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY")
         .await
@@ -258,11 +263,19 @@ async fn database(cfg: &Config, system: &str, db: &str, kinds: &Kinds) -> Result
     let mut cfg = cfg.clone();
     cfg.dbname(db);
     let client = connect(&cfg).await?;
+    database_catalog(&client, system, db, kinds).await
+}
+async fn database_catalog(
+    client: &Client,
+    system: &str,
+    db: &str,
+    kinds: &Kinds,
+) -> Result<Observed> {
     let mut out = Observed {
         kinds: kinds.clone(),
         ..Default::default()
     };
-    for row in query::<TableAcl>(&client, TABLE_SQL).await? {
+    for row in query::<TableAcl>(client, TABLE_SQL).await? {
         component(&row.schema)?;
         component(&row.name)?;
         out.acl(
@@ -271,11 +284,11 @@ async fn database(cfg: &Config, system: &str, db: &str, kinds: &Kinds) -> Result
             row.acl,
         )?;
     }
-    for row in query::<SchemaAcl>(&client, SCHEMA_SQL).await? {
+    for row in query::<SchemaAcl>(client, SCHEMA_SQL).await? {
         component(&row.schema)?;
         out.acl(system, format!("schema:{db}.{}", row.schema), row.acl)?;
     }
-    for row in query::<DefaultAcl>(&client, DEFAULT_SQL).await? {
+    for row in query::<DefaultAcl>(client, DEFAULT_SQL).await? {
         component(&row.schema)?;
         component(&row.creator)?;
         if !kinds.contains_key(&row.creator) {
@@ -287,14 +300,14 @@ async fn database(cfg: &Config, system: &str, db: &str, kinds: &Kinds) -> Result
             row.acl,
         )?;
     }
-    let global = query::<Present>(&client, GLOBAL_DEFAULT_SQL).await?;
+    let global = query::<Present>(client, GLOBAL_DEFAULT_SQL).await?;
     if global.len() != 1 {
         return Err("Incomplete global default privilege visibility".into());
     }
     if global[0].present {
         out.unknown.push(unread(system,vec![format!("default:{db}.")],"Global default table privileges cannot be represented; all default scopes in this database are unread"));
     }
-    for row in query::<Column>(&client, COLUMN_SQL).await? {
+    for row in query::<Column>(client, COLUMN_SQL).await? {
         component(&row.schema)?;
         out.unknown.push(unread(
             system,
@@ -302,7 +315,7 @@ async fn database(cfg: &Config, system: &str, db: &str, kinds: &Kinds) -> Result
             "Column privileges cannot be represented; table scopes in this schema are unread",
         ));
     }
-    for row in query::<Frozen>(&client, FROZEN_SQL).await? {
+    for row in query::<Frozen>(client, FROZEN_SQL).await? {
         component(&row.schema)?;
         component(&row.name)?;
         name(&row.owner)?;

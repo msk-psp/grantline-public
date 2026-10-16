@@ -20,10 +20,46 @@ fn json(value: &impl Serialize) -> Result<()> {
 pub fn apply(
     path: &Path,
     system: &str,
+    live: bool,
     write: bool,
     expected: Option<&str>,
     as_json: bool,
 ) -> Result<()> {
+    let loaded = config::load_writer(path)?.0;
+    let adapter = loaded
+        .config
+        .adapters
+        .get(system)
+        .ok_or("Unknown apply system")?;
+    if adapter.typ(system) == "postgres" {
+        if !live {
+            return Err(
+                "PostgreSQL apply preview requires --live and explicit admin_dsn_env".into(),
+            );
+        }
+        let result = crate::postgres::writer::apply(path, system, write, expected)?;
+        if as_json {
+            return json(&result);
+        }
+        println!(
+            "PostgreSQL {} / {}: {}",
+            result.system,
+            result.database,
+            if result.applied {
+                "direct table ACL transaction committed"
+            } else {
+                "dry-run/no change; nothing committed"
+            }
+        );
+        println!("Plan identifier: {}", result.plan_id);
+        for change in &result.changes {
+            println!("{}", change.cmd.as_deref().unwrap_or(""));
+        }
+        return Ok(());
+    }
+    if live {
+        return Err("--live apply currently supports PostgreSQL only".into());
+    }
     #[cfg(unix)]
     {
         let result = crate::s3::writer::apply(path, system, write, expected)?;

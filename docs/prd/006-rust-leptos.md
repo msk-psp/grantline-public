@@ -33,7 +33,7 @@ State is disposable, private to the process and erased when it exits.
 | Stage | Implementation | Acceptance before promotion | Status |
 |---|---|---|---|
 | R2 | Typed config/intent, snapshots, findings, graph and offline plan CLI | Fixture decisions, diagnostics, PG/CH SQL previews, snapshot round trips and graph paths match Python; S3 commands/coalescing remain R3 | Merged in PR #16 |
-| R3 | PostgreSQL, ClickHouse and S3 native adapters, probes and writers | Existing regression cases ported; separately authorized live read/probe and reversible write validation per adapter | R3a–R3e3 merged; R3f local S3 file writer implemented; other writers pending |
+| R3 | PostgreSQL, ClickHouse and S3 native adapters, probes and writers | Existing regression cases ported; separately authorized live read/probe and reversible write validation per adapter | R3a–R3e3 merged; R3f merged; R3g1 PostgreSQL ordinary-table writer implemented; other writers pending |
 | R4 | Production sessions/OIDC, durable approval store, Slack signatures/DMs, code writer and GitHub PRs | Requester binding, all approvers, callback replay, immutable plan and repo scope verified end to end; approval/PR/applied access reported separately | Pending |
 | R5 | All console pages, Leptos hydration and interactive permission map | Repeated hover highlight/dimming, matrix scrolling, accessible dark mode, logs and four locales verified in browser | Pending |
 | R6 | Release image, migration/rollback and operating guide | Reproducible native/WASM builds, upgrade of persisted state, image smoke tests and explicitly authorized rollout | Pending |
@@ -70,16 +70,16 @@ keep Python as a development-only oracle until all stages pass.
 
 ## Next action
 
-Review R3f's local S3 IAM file writer, conditional restore and isolated SeaweedFS
-before/after/restore evidence. The next review unit is a PostgreSQL writer with
-explicit admin credentials, reviewed plan binding, transactional fixed GRANT/REVOKE
-and isolated reversible verification. ClickHouse/remote S3 writers and separately
-authorized production/staging verification follow. Each
-review unit needs acceptance evidence before advancing; R3 is not yet complete.
+Review and merge R3g1's PostgreSQL single-database ordinary-table ACL writer.
+Next implement R3g2 schema/database ACL writes with explicit credentials, reviewed
+state binding and isolated transactional rollback checks; keep role/default-privilege
+writes as subsequent review units, followed by ClickHouse and remote S3 writers. Each unit needs
+acceptance evidence; R3 remains incomplete. Production/staging verification
+requires separate authorization.
 
 ## R3 — Native adapter migration {#R3}
 
-Status: R3a merged in PR #17; R3b merged in PR #18; R3c merged in PR #19; R3d merged in PR #20; R3e1 merged in PR #22; R3e2 merged in PR #23; R3e3 merged in PR #24; R3f local S3 file writer implemented.
+Status: R3a merged in PR #17; R3b merged in PR #18; R3c merged in PR #19; R3d merged in PR #20; R3e1 merged in PR #22; R3e2 merged in PR #23; R3e3 merged in PR #24; R3f merged in PR #25; R3g1 PostgreSQL ordinary-table writer implemented.
 The first review unit implements S3 file/dir
 planes, effective policy observation, group/inline routes and identity-scoped
 document previews. Plan commands remain previews; R3f adds a separate explicit
@@ -407,3 +407,41 @@ Limits: 4MiB source/config/intent, 32MiB backup, 1,000 changes. This is not a CA
 against unrelated editors. ACL/xattr/SELinux, network filesystems, power-loss/fault
 injection, Windows, operational reload and production/staging writes are unsupported
 or unverified. PostgreSQL/ClickHouse/remote S3 writers remain subsequent units.
+
+### R3g1 — Transactional PostgreSQL ordinary-table ACL writer
+
+Scope: one explicitly selected PostgreSQL 16+ database and existing ordinary tables.
+`apply --system NAME --live` reads only the named `admin_dsn_env` and previews a
+fresh native plan. It never falls back to reader, probe or ambient PG credentials.
+`--write --expect PLAN_ID` binds config/intent bytes, endpoint and authenticated
+session, server start, catalog object identities, ACLs and generated statements.
+Only exact table privileges are supported; role/schema/database/default changes,
+ALL/wildcards, PUBLIC/owner/privileged targets, column grants, delegation chains,
+views, partitions and inheritance fail closed. Config must select one literal DB.
+No caller SQL or SET ROLE is accepted. Other adapters are not contacted.
+
+A write uses one READ COMMITTED transaction. It takes NOWAIT ACCESS EXCLUSIVE
+locks on the affected ordinary tables in sorted order, re-reads the catalog and
+matches the reviewed identifier before any GRANT/REVOKE. All changes use fixed
+quoted native SQL with RESTRICT, followed by exact direct-ACL postconditions and
+an empty remaining plan before COMMIT. Failure before COMMIT rolls everything
+back. A COMMIT transport failure has an uncertain outcome and must be inspected
+before retry. The lock can briefly block application queries; this first writer
+is intended for controlled maintenance, with no concurrent role/schema/catalog
+administrators. Relation locks do not freeze cluster-wide role or namespace DDL.
+
+Acceptance: disposable official PostgreSQL tests preview immutability, grant and
+revoke, a separately reviewed inverse plan, stale inputs/catalog/connection,
+unsupported scopes, identifier quoting, statement failure after an earlier grant,
+lock contention, timeouts and credential redaction. Existing readers/probes and
+S3 apply/restore must retain their boundaries. No object data is read or written.
+A successful receipt proves direct catalog ACL changes committed, not subject
+login, effective application access, deployment or general backup restoration.
+
+R3g1 validation: Rust unit/integration checks and the three Python differential
+suites, unchanged PostgreSQL reader/probe checks, and the isolated 17.11 writer
+fixture. The fixture checks a warning-only ineffective GRANT, an event-trigger
+SQL error and a delayed statement after an earlier successful GRANT: all leave
+original direct ACLs intact. Execution logs and PR/CI state live in the task
+handoff, not in this specification. Production, COMMIT network-loss ambiguity and
+concurrent role/namespace administrators remain unverified.
