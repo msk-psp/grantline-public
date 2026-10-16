@@ -58,6 +58,8 @@ pub struct Adapter {
     #[serde(default)]
     pub admin_dsn_env: Option<String>,
     #[serde(default)]
+    pub membership_write_roles: BTreeSet<String>,
+    #[serde(default)]
     pub probe_dsn_envs: std::collections::BTreeMap<String, String>,
     #[serde(default = "all_databases")]
     pub databases: Vec<String>,

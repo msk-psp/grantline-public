@@ -1,4 +1,5 @@
-//! Explicit, single-database table/schema/database ACL writes. No data SQL or role switching.
+//! Explicit object ACL writes and opted-in cluster-wide role memberships. No role switching.
+mod membership;
 use super::*;
 use crate::{config as input, planner};
 use serde::Serialize;
@@ -11,7 +12,8 @@ const DATABASE_STATE: &str = "SELECT d.oid::bigint AS oid, d.datname AS name, d.
 const SCHEMA_STATE: &str = "SELECT n.oid::bigint AS oid, n.nspname AS name, n.nspowner::bigint AS owner_oid, r.rolname AS owner, n.nspacl::text AS acl FROM pg_namespace n LEFT JOIN pg_roles r ON r.oid=n.nspowner WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname !~ '^pg_'";
 // Advisory keys are database-local and coordinate this writer version only.
 const WRITER_LOCK: &str = "SELECT pg_try_advisory_xact_lock(1196576334, 1) AS present";
-const ROLES: &str = "SELECT oid::bigint AS oid, rolname AS name, rolcanlogin AS login, rolsuper OR rolcreaterole OR rolcreatedb OR rolreplication OR rolbypassrls AS privileged, rolinherit AS inherit FROM pg_roles";
+const ROLES: &str = "SELECT oid::bigint AS oid, rolname AS name, rolcanlogin AS login, rolsuper OR rolcreaterole OR rolcreatedb OR rolreplication OR rolbypassrls AS privileged, rolinherit AS inherit, json_build_array(rolsuper,rolcreaterole,rolcreatedb,rolreplication,rolbypassrls) AS privilege_flags FROM pg_roles";
+const OWNER_ROLES: &str = "SELECT DISTINCT refobjid::bigint AS oid FROM pg_shdepend WHERE refclassid='pg_authid'::regclass AND deptype='o'";
 const SESSION: &str = "SELECT current_database() AS database, (SELECT oid::bigint FROM pg_database WHERE datname=current_database()) AS database_oid, session_user::text AS login, current_user::text AS active, inet_server_addr()::text AS address, inet_server_port() AS port, pg_postmaster_start_time()::text AS started, current_setting('server_version_num')::int AS version, current_setting('transaction_read_only')::bool AS readonly";
 
 #[derive(Deserialize, Serialize, PartialEq)]
@@ -41,6 +43,7 @@ struct WriterRole {
     name: String,
     login: bool,
     privileged: bool,
+    privilege_flags: [bool; 5],
     inherit: bool,
 }
 struct Catalog {
@@ -51,6 +54,8 @@ struct Catalog {
     databases: Vec<Object>,
     acls: BTreeSet<AclAtom>,
     other: Value,
+    members: BTreeSet<Membership>,
+    owner_role_oids: BTreeSet<i64>,
 }
 async fn rows(client: &Client, sql: &str) -> Result<Vec<Value>> {
     let mut rows: Vec<Value> = query(client, sql).await?;
@@ -77,12 +82,13 @@ async fn catalog(client: &Client, system: &str, db: &str) -> Result<Catalog> {
         .collect();
     kinds.insert("PUBLIC".into(), "role".into());
     let mut observed = database_catalog(client, system, db, &kinds).await?;
-    let members = rows(client, MEMBER_SQL).await?;
+    let members: BTreeSet<Membership> = query::<Membership>(client, MEMBER_SQL)
+        .await?
+        .into_iter()
+        .collect();
     for m in &members {
-        let m: Membership =
-            serde_json::from_value(m.clone()).map_err(|_| "Invalid membership catalog")?;
         observed.grants.insert(Grant {
-            grantor: Some(m.grantor),
+            grantor: Some(m.grantor.clone()),
             ..Grant::new(system, &m.member, &format!("role:{}", m.role), "MEMBER")
         });
     }
@@ -128,7 +134,16 @@ async fn catalog(client: &Client, system: &str, db: &str) -> Result<Catalog> {
     let mut databases: Vec<Object> = query(client, DATABASE_STATE).await?;
     schemas.sort_by_key(|s| s.oid);
     databases.sort_by_key(|d| d.oid);
-    let other = json!({"roles": roles, "members": members,
+    let owner_role_oids: BTreeSet<_> = rows(client, OWNER_ROLES)
+        .await?
+        .iter()
+        .map(|v| {
+            v["oid"]
+                .as_i64()
+                .ok_or_else(|| "Invalid owner role catalog".to_owned())
+        })
+        .collect::<Result<_>>()?;
+    let other = json!({"roles": roles, "owner_role_oids": owner_role_oids,
         "defaults": rows(client, DEFAULT_SQL).await?});
     Ok(Catalog {
         observed,
@@ -136,12 +151,15 @@ async fn catalog(client: &Client, system: &str, db: &str) -> Result<Catalog> {
         roles,
         acls,
         other,
+        members,
+        owner_role_oids,
         schemas,
         databases,
     })
 }
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
 enum Target {
+    Role(String),
     Database(String),
     Schema(String),
     Table(String, String),
@@ -149,6 +167,7 @@ enum Target {
 impl Target {
     fn sql(&self) -> String {
         match self {
+            Self::Role(role) => identifier(role),
             Self::Database(db) => format!("DATABASE {}", identifier(db)),
             Self::Schema(schema) => format!("SCHEMA {}", identifier(schema)),
             Self::Table(schema, table) => {
@@ -158,6 +177,7 @@ impl Target {
     }
     fn owner<'a>(&self, cat: &'a Catalog) -> Result<&'a str> {
         match self {
+            Self::Role(_) => None,
             Self::Database(db) => cat
                 .databases
                 .iter()
@@ -178,6 +198,13 @@ impl Target {
     }
 }
 fn target(g: &Grant, db: &str) -> Result<Target> {
+    if let Some(role) = g.resource.strip_prefix("role:") {
+        name(role)?;
+        if g.privilege != "MEMBER" {
+            return Err("Role resource requires MEMBER".into());
+        }
+        return Ok(Target::Role(role.into()));
+    }
     let (scope, rest) = g
         .resource
         .split_once(':')
@@ -227,6 +254,7 @@ fn report(
     system: &str,
     db: &str,
     cat: &Catalog,
+    issuer: &str,
 ) -> Result<planner::Report> {
     if !cat.observed.unknown.is_empty() {
         return Err("Incomplete PostgreSQL catalog; writer refuses unknown scopes".into());
@@ -265,9 +293,39 @@ fn report(
     if !plan.commands_complete || plan.changes.len() > 1000 {
         return Err("Incomplete or oversized PostgreSQL write plan".into());
     }
+    let adapter = &loaded.config.adapters[system];
+    let role_changes = plan
+        .changes
+        .iter()
+        .filter(|c| c.grant.resource.starts_with("role:"))
+        .count();
+    if role_changes > 0 && (db != "postgres" || role_changes != plan.changes.len()) {
+        return Err(
+            "Cluster-wide membership changes require a role-only plan through database postgres"
+                .into(),
+        );
+    }
+    for g in &intent.grants {
+        if g.resource
+            .strip_prefix("role:")
+            .is_some_and(|role| adapter.membership_write_roles.contains(role))
+        {
+            membership::command(g, cat, &adapter.membership_write_roles, issuer, None)?;
+        }
+    }
     for change in &mut plan.changes {
         let g = &change.grant;
         let target = target(g, db)?;
+        if let Target::Role(_) = target {
+            change.cmd = membership::command(
+                g,
+                cat,
+                &adapter.membership_write_roles,
+                issuer,
+                Some(&change.action),
+            )?;
+            continue;
+        }
         let owner = target.owner(cat)?;
         let role = cat
             .roles
@@ -324,6 +382,7 @@ pub struct Receipt {
     pub applied: bool,
     pub changed: bool,
     pub effective_access_verified: bool,
+    pub membership_changes_cluster_wide: bool,
     pub changes: Vec<planner::Change>,
 }
 struct Inputs<'a> {
@@ -355,8 +414,8 @@ fn binding(
         .ok_or("Invalid session binding")?
         .remove("readonly");
     let state = serde_json::to_vec(
-        &json!({"format": "postgres-object-writer-v2", "path": path, "system": system,
-        "endpoint": endpoint, "session": session, "tables": cat.tables, "schemas": cat.schemas, "databases": cat.databases, "catalog": cat.other, "changes": plan.changes}),
+        &json!({"format": "postgres-membership-writer-v3", "path": path, "system": system,
+        "endpoint": endpoint, "session": session, "tables": cat.tables, "schemas": cat.schemas, "databases": cat.databases, "catalog": cat.other, "members": cat.members, "changes": plan.changes}),
     )
     .map_err(|_| "Cannot bind PostgreSQL write plan")?;
     let mut hash = Sha256::new();
@@ -407,6 +466,7 @@ async fn transaction(
                 .into(),
         );
     }
+    let issuer = session["login"].as_str().ok_or("Invalid writer identity")?;
     if write {
         let lock: Vec<Present> = query(client, WRITER_LOCK).await?;
         if lock.len() != 1 || !lock[0].present {
@@ -417,7 +477,7 @@ async fn transaction(
         }
     }
     let mut cat = catalog(client, system, db).await?;
-    let mut plan = report(loaded, system, db, &cat)?;
+    let mut plan = report(loaded, system, db, &cat, issuer)?;
     if write {
         let targets: BTreeSet<_> = plan
             .changes
@@ -438,7 +498,7 @@ async fn transaction(
                 .map_err(|_| "Cannot lock affected table; no changes committed")?;
         }
         cat = catalog(client, system, db).await?;
-        plan = report(loaded, system, db, &cat)?;
+        plan = report(loaded, system, db, &cat, issuer)?;
         let locked_plan: BTreeSet<_> = plan
             .changes
             .iter()
@@ -457,22 +517,40 @@ async fn transaction(
     }
     if write && !plan.changes.is_empty() {
         let mut wanted = cat.acls.clone();
+        let mut wanted_members = cat.members.clone();
         for change in &plan.changes {
-            let owner = target(&change.grant, db)?.owner(&cat)?;
-            if change.action == "grant" {
-                wanted.insert((
-                    change.grant.resource.clone(),
-                    change.grant.subject.clone(),
-                    change.grant.privilege.clone(),
-                    owner.into(),
-                    false,
-                ));
+            if let Target::Role(role) = target(&change.grant, db)? {
+                if change.action == "grant" {
+                    wanted_members.insert(Membership {
+                        member: change.grant.subject.clone(),
+                        role,
+                        grantor: issuer.into(),
+                        admin_option: false,
+                        inherit_option: true,
+                        set_option: true,
+                    });
+                } else {
+                    wanted_members.retain(|m| {
+                        !(m.member == change.grant.subject && m.role == role && m.grantor == issuer)
+                    });
+                }
             } else {
-                wanted.retain(|(resource, subject, privilege, _, _)| {
-                    !(resource == &change.grant.resource
-                        && subject == &change.grant.subject
-                        && privilege == &change.grant.privilege)
-                });
+                let owner = target(&change.grant, db)?.owner(&cat)?;
+                if change.action == "grant" {
+                    wanted.insert((
+                        change.grant.resource.clone(),
+                        change.grant.subject.clone(),
+                        change.grant.privilege.clone(),
+                        owner.into(),
+                        false,
+                    ));
+                } else {
+                    wanted.retain(|(resource, subject, privilege, _, _)| {
+                        !(resource == &change.grant.resource
+                            && subject == &change.grant.subject
+                            && privilege == &change.grant.privilege)
+                    });
+                }
             }
             client
                 .batch_execute(change.cmd.as_deref().ok_or("Missing fixed SQL")?)
@@ -481,9 +559,12 @@ async fn transaction(
         }
         let after = catalog(client, system, db).await?;
         if wanted != after.acls
+            || wanted_members != after.members
             || cat.other != after.other
             || metadata(&cat)? != metadata(&after)?
-            || !report(loaded, system, db, &after)?.changes.is_empty()
+            || !report(loaded, system, db, &after, issuer)?
+                .changes
+                .is_empty()
         {
             return Err(
                 "PostgreSQL ACL postcondition failed; transaction will be rolled back".into(),
@@ -505,6 +586,10 @@ async fn transaction(
         applied: false,
         changed: !plan.changes.is_empty(),
         effective_access_verified: false,
+        membership_changes_cluster_wide: plan
+            .changes
+            .iter()
+            .any(|c| c.grant.resource.starts_with("role:")),
         changes: plan.changes,
     })
 }
@@ -635,7 +720,6 @@ mod tests {
         );
         assert_eq!(identifier("odd\";name"), "\"odd\"\";name\"");
         for (resource, privilege, subject) in [
-            ("role:demo", "MEMBER", "demo"),
             ("table:other.public.t", "SELECT", "demo"),
             ("table:demo.public.*", "SELECT", "demo"),
             ("table:demo.public.t", "ALL", "demo"),

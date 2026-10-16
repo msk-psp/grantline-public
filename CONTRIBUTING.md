@@ -69,14 +69,18 @@ for scoped List/HEAD samples. PostgreSQL `apply --live` previews single-database
 ordinary-table/schema/database ACL changes with explicit `admin_dsn_env`; writing additionally
 requires `--write --expect PLAN_ID`. Writers serialize through a database-local
 transaction advisory lock; concurrent external catalog administration remains
-outside the guarantee. PostgreSQL role/default-privilege scopes and
+outside the guarantee. Role-only plans additionally require a literal
+`membership_write_roles` allowlist and the `postgres` coordinator; they affect
+the whole cluster, use canonical options and an exact grantor. PostgreSQL
+default-privilege scopes and
 ClickHouse/remote S3 writers remain pending.
 Run `python3 scripts/check_rust_clickhouse.py --docker` and
 `python3 scripts/check_rust_postgres.py --docker` plus
 `python3 scripts/check_rust_s3_network.py --docker` and
 `python3 scripts/check_rust_s3_probes.py --docker` and
 `python3 scripts/check_rust_s3_writer.py --docker` and
-`python3 scripts/check_rust_postgres_writer.py --docker` for isolated boundary and
+`python3 scripts/check_rust_postgres_writer.py --docker` and
+`python3 scripts/check_rust_postgres_membership.py --docker` for isolated boundary and
 real-server checks. Local S3 IAM files/trees support observation
 and grouped previews; directory-backed shared policies cannot be rewritten from
 a per-user change.

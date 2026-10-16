@@ -43,3 +43,5 @@ jobs:
         run: python3 scripts/check_rust_s3_writer.py --docker
       - name: Verify native PostgreSQL table/schema/database ACL writer, inverse review and full rollback
         run: python3 scripts/check_rust_postgres_writer.py --docker
+      - name: Verify canonical cluster-wide PostgreSQL role membership writes and rollback
+        run: python3 scripts/check_rust_postgres_membership.py --docker
