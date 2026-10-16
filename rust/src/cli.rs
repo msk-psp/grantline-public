@@ -89,6 +89,11 @@ pub fn apply(
                 "Scope: database ACLs cover every current and future table/relation in the named database, regardless of engine"
             );
         }
+        if result.membership_changes_affect_dependants {
+            println!(
+                "Scope: membership carries the role's current and future privileges to the recipient and its dependants; effective access is not verified"
+            );
+        }
         println!("Plan identifier: {}", result.plan_id);
         for c in &result.changes {
             println!("{}", c.cmd.as_deref().unwrap_or(""));

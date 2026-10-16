@@ -9,6 +9,8 @@ use std::path::Path;
 const PRINCIPALS: &str = "SELECT name,toString(id) AS id,storage,'account' AS kind FROM system.users UNION ALL SELECT name,toString(id) AS id,storage,'role' AS kind FROM system.roles LIMIT 10001";
 const SESSION: &str = "SELECT currentUser() AS login,toString(serverUUID()) AS server_uuid,version() AS version LIMIT 1";
 const RAW_GRANTS: &str = "SELECT user_name,role_name,access_type,access_object,nullIf(database,'') AS database,nullIf(table,'') AS table,nullIf(column,'') AS column,is_partial_revoke,grant_option FROM system.grants LIMIT 10001";
+const MEMBER_ROLES: &str = "SELECT user_name,role_name,granted_role_name,toString(granted_role_id) AS granted_role_id,granted_role_is_default,with_admin_option FROM system.role_grants LIMIT 10001";
+const USER_POLICIES: &str = "SELECT name,default_roles_all,default_roles_list,default_roles_except,grantees_any,grantees_list,grantees_except FROM system.users LIMIT 10001";
 
 #[derive(Serialize, PartialEq)]
 struct State {
@@ -18,6 +20,7 @@ struct State {
     grants: Vec<Value>,
     tables: Vec<Value>,
     databases: Vec<Value>,
+    user_policies: Vec<Value>,
 }
 fn sorted(mut rows: Vec<Value>) -> Vec<Value> {
     rows.sort_by_cached_key(Value::to_string);
@@ -151,13 +154,76 @@ fn state(http: &Http, adapter: &Adapter) -> Result<State> {
             return Err("ClickHouse writer requires existing UUID-backed Atomic databases".into());
         }
     }
+    let members: Vec<Value> = sorted(http.query(if adapter.membership_write_roles.is_empty() {
+        ROLE_SQL
+    } else {
+        MEMBER_ROLES
+    })?);
+    let user_policies: Vec<Value> = if adapter.membership_write_roles.is_empty() {
+        vec![]
+    } else {
+        sorted(http.query(USER_POLICIES)?)
+    };
+    if !adapter.membership_write_roles.is_empty() {
+        let mut edges = BTreeSet::new();
+        for m in &members {
+            let subject = match (m["user_name"].as_str(), m["role_name"].as_str()) {
+                (Some(u), None)
+                    if m["role_name"].is_null() && kinds.get(u).is_some_and(|k| k == "account") =>
+                {
+                    u
+                }
+                (None, Some(r))
+                    if m["user_name"].is_null() && kinds.get(r).is_some_and(|k| k == "role") =>
+                {
+                    r
+                }
+                _ => return Err("Invalid membership recipient catalog".into()),
+            };
+            let role = m["granted_role_name"].as_str().ok_or("Invalid role name")?;
+            if !principals.iter().any(|p| {
+                p["name"] == role && p["kind"] == "role" && p["id"] == m["granted_role_id"]
+            }) || !matches!(m["with_admin_option"].as_u64(), Some(0 | 1))
+                || !matches!(m["granted_role_is_default"].as_u64(), Some(0 | 1))
+                || !edges.insert((subject, role))
+            {
+                return Err("Ambiguous role UUID or membership options".into());
+            }
+        }
+        let mut users = BTreeSet::new();
+        for p in &user_policies {
+            let name = p["name"].as_str().ok_or("Invalid user policy catalog")?;
+            if kinds.get(name).is_none_or(|k| k != "account")
+                || !users.insert(name)
+                || !matches!(p["default_roles_all"].as_u64(), Some(0 | 1))
+                || !matches!(p["grantees_any"].as_u64(), Some(0 | 1))
+                || [
+                    "default_roles_list",
+                    "default_roles_except",
+                    "grantees_list",
+                    "grantees_except",
+                ]
+                .iter()
+                .any(|k| {
+                    p[k].as_array()
+                        .is_none_or(|a| a.iter().any(|v| !v.is_string()))
+                })
+            {
+                return Err("Invalid or duplicate default-role/grantee policy".into());
+            }
+        }
+        if users.len() != principals.iter().filter(|p| p["kind"] == "account").count() {
+            return Err("Incomplete user policy catalog".into());
+        }
+    }
     Ok(State {
         session,
         principals,
-        members: sorted(http.query(ROLE_SQL)?),
+        members,
         grants: sorted(http.query(RAW_GRANTS)?),
         tables: selected,
         databases,
+        user_policies,
     })
 }
 fn ancestors(s: &State, user: &str) -> BTreeSet<String> {
@@ -238,6 +304,114 @@ fn atom(g: &Grant, p: &Value, grant_option: u8) -> Result<Value> {
         json!({"user_name": if p["kind"] == "account" { json!(g.subject) } else { Value::Null }, "role_name": if p["kind"] == "role" { json!(g.subject) } else { Value::Null }, "access_type":g.privilege,"access_object":"","database":db,"table":t,"column":Value::Null,"is_partial_revoke":0,"grant_option":grant_option}),
     )
 }
+fn local_principal<'a>(s: &'a State, name: &str) -> Result<&'a Value> {
+    literal(name)?;
+    s.principals
+        .iter()
+        .find(|p| p["name"] == name && p["storage"] == "local_directory")
+        .ok_or_else(|| "Membership endpoints must already exist in local_directory".into())
+}
+fn member_atom(g: &Grant, p: &Value, role: &Value) -> Value {
+    json!({"user_name": if p["kind"] == "account" { json!(g.subject) } else { Value::Null },
+        "role_name": if p["kind"] == "role" { json!(g.subject) } else { Value::Null },
+        "granted_role_name":role["name"],"granted_role_id":role["id"],
+        "granted_role_is_default":1,"with_admin_option":0})
+}
+fn membership(s: &State, g: &Grant, adapter: &Adapter, issuer: &str) -> Result<Value> {
+    let role = g
+        .resource
+        .strip_prefix("role:")
+        .ok_or("Exact role:name required")?;
+    if g.privilege != "MEMBER" || !adapter.membership_write_roles.contains(role) {
+        return Err(
+            "ClickHouse MEMBER writes require an exact membership_write_roles entry".into(),
+        );
+    }
+    let p = local_principal(s, &g.subject)?;
+    let r = local_principal(s, role)?;
+    if r["kind"] != "role" || ancestors(s, issuer).contains(&g.subject) {
+        return Err(
+            "Membership cannot target an account as role, the writer or its ancestors".into(),
+        );
+    }
+    let chain = ancestors(s, role);
+    if chain.contains(&g.subject) {
+        return Err("Self or cyclic role membership is refused".into());
+    }
+    for name in &chain {
+        if local_principal(s, name)?["kind"] != "role" {
+            return Err("Role chain contains a non-role principal".into());
+        }
+    }
+    for m in &s.members {
+        let subject = m["user_name"].as_str().or(m["role_name"].as_str());
+        if subject.is_some_and(|n| chain.contains(n)) && m["with_admin_option"] != 0 {
+            return Err("Target role chain carries unmodelled ADMIN delegation".into());
+        }
+    }
+    for acl in &s.grants {
+        if acl["role_name"].as_str().is_some_and(|n| chain.contains(n)) {
+            let db = acl["database"]
+                .as_str()
+                .ok_or("Role chain has a global privilege")?;
+            let resource = match acl["table"].as_str() {
+                Some(t) => format!("table:{db}.{t}"),
+                None if acl["table"].is_null() => format!("db:{db}"),
+                _ => return Err("Invalid role ACL scope".into()),
+            };
+            scope(&resource)?;
+            if acl["grant_option"] != 0
+                || acl["is_partial_revoke"] != 0
+                || !acl["column"].is_null()
+                || acl["access_object"] != ""
+                || !matches!(acl["access_type"].as_str(), Some("SELECT" | "INSERT"))
+            {
+                return Err("Role chain has delegated, partial, column or unsupported ACLs".into());
+            }
+        }
+    }
+    if p["kind"] == "account" {
+        let policy = s
+            .user_policies
+            .iter()
+            .find(|u| u["name"] == g.subject)
+            .ok_or("Missing recipient default-role policy")?;
+        if policy["default_roles_all"] != 1
+            || policy["default_roles_list"] != json!([])
+            || policy["default_roles_except"] != json!([])
+        {
+            return Err(
+                "Membership recipient requires canonical DEFAULT ROLE ALL without exceptions"
+                    .into(),
+            );
+        }
+    }
+    let row = member_atom(g, p, r);
+    for held in s.members.iter().filter(|m| {
+        (m["user_name"] == g.subject || m["role_name"] == g.subject)
+            && m["granted_role_name"] == role
+    }) {
+        if *held != row {
+            return Err(
+                "Existing membership options are not canonical; manual reconciliation required"
+                    .into(),
+            );
+        }
+    }
+    let mut authority = row.clone();
+    authority["user_name"] = json!(issuer);
+    authority["role_name"] = Value::Null;
+    authority["with_admin_option"] = json!(1);
+    // Default status of the writer's held role does not change its direct ADMIN authority.
+    if !s.members.iter().any(|m| {
+        let mut a = authority.clone();
+        a["granted_role_is_default"] = m["granted_role_is_default"].clone();
+        *m == a
+    }) {
+        return Err("Writer must directly hold ADMIN OPTION on the exact changed role".into());
+    }
+    Ok(row)
+}
 fn report(
     loaded: &input::Loaded,
     system: &str,
@@ -284,8 +458,14 @@ fn report(
         return Err("Overlapping held/declared DB and table privileges require separate manual reconciliation".into());
     }
     for g in &intent.grants {
-        // Retain declared memberships read-only; any planned membership change is refused below.
+        // Undeclared write authorization still permits retaining unchanged membership rows.
         if g.resource.starts_with("role:") && g.privilege == "MEMBER" {
+            if g.resource
+                .strip_prefix("role:")
+                .is_some_and(|r| adapter.membership_write_roles.contains(r))
+            {
+                membership(s, g, adapter, issuer)?;
+            }
             continue;
         }
         target_sql(g)?;
@@ -316,6 +496,20 @@ fn report(
         );
     }
     for c in &mut plan.changes {
+        let (verb, to) = match c.action.as_str() {
+            "grant" => ("GRANT", "TO"),
+            "revoke" => ("REVOKE", "FROM"),
+            _ => return Err("Unsupported ACL action".into()),
+        };
+        if let Some(role) = c.grant.resource.strip_prefix("role:") {
+            membership(s, &c.grant, adapter, issuer)?;
+            c.cmd = Some(format!(
+                "{verb} {} {to} {};",
+                quoted(role),
+                quoted(&c.grant.subject)
+            ));
+            continue;
+        }
         let target = target_sql(&c.grant)?;
         if !allowed(adapter, &c.grant.resource) {
             return Err("ClickHouse writes require a literal table or database allowlist for the exact scope".into());
@@ -334,11 +528,6 @@ fn report(
                     .into(),
             );
         }
-        let (verb, to) = match c.action.as_str() {
-            "grant" => ("GRANT", "TO"),
-            "revoke" => ("REVOKE", "FROM"),
-            _ => return Err("Unsupported ACL action".into()),
-        };
         c.cmd = Some(format!(
             "{verb} {} ON {target} {to} {};",
             c.grant.privilege,
@@ -349,8 +538,15 @@ fn report(
 }
 fn checked(http: &Http, loaded: &input::Loaded, system: &str) -> Result<(State, planner::Report)> {
     let adapter = &loaded.config.adapters[system];
-    if adapter.clickhouse_write_tables.len() + adapter.clickhouse_write_databases.len() > 128 {
+    if adapter.clickhouse_write_tables.len()
+        + adapter.clickhouse_write_databases.len()
+        + adapter.membership_write_roles.len()
+        > 128
+    {
         return Err("ClickHouse write allowlists exceed 128 entries".into());
+    }
+    for role in &adapter.membership_write_roles {
+        literal(role)?;
     }
     let before = state(http, adapter)?;
     let observed = observe_http(http, system)?;
@@ -418,6 +614,7 @@ pub struct Receipt {
     pub effective_access_verified: bool,
     pub single_statement_only: bool,
     pub database_changes_include_future_tables: bool,
+    pub membership_changes_affect_dependants: bool,
     pub changes: Vec<planner::Change>,
 }
 pub fn apply(path: &Path, system: &str, write: bool, expected: Option<&str>) -> Result<Receipt> {
@@ -444,7 +641,7 @@ pub fn apply(path: &Path, system: &str, write: bool, expected: Option<&str>) -> 
     }
     let http = Http::from_env(key, adapter.read_timeout_seconds, Instant::now())?;
     let (state, plan) = checked(&http, &loaded, system)?;
-    let value = serde_json::to_vec(&json!({"format":"clickhouse-single-acl-v2","path":path,"system":system,"endpoint":http.url.as_str(),"state":state,"changes":plan.changes})).map_err(|_| "Cannot bind ClickHouse plan")?;
+    let value = serde_json::to_vec(&json!({"format":"clickhouse-single-acl-v3","path":path,"system":system,"endpoint":http.url.as_str(),"state":state,"changes":plan.changes})).map_err(|_| "Cannot bind ClickHouse plan")?;
     let mut hash = Sha256::new();
     for part in [&config_bytes, &intent_bytes, &value] {
         hash.update((part.len() as u64).to_be_bytes());
@@ -469,20 +666,30 @@ pub fn apply(path: &Path, system: &str, write: bool, expected: Option<&str>) -> 
             );
         }
         let c = &plan.changes[0];
-        let p = recipient(
-            &state,
-            &c.grant.subject,
-            &ancestors(&state, &http.user),
-            adapter,
-        )?;
-        let row = atom(&c.grant, p, 0)?;
-        let mut wanted = state;
-        if c.action == "grant" {
-            wanted.grants.push(row);
+        let is_member = c.grant.resource.starts_with("role:");
+        let row = if is_member {
+            membership(&state, &c.grant, adapter, &http.user)?
         } else {
-            wanted.grants.retain(|r| r != &row);
+            let p = recipient(
+                &state,
+                &c.grant.subject,
+                &ancestors(&state, &http.user),
+                adapter,
+            )?;
+            atom(&c.grant, p, 0)?
+        };
+        let mut wanted = state;
+        let rows = if is_member {
+            &mut wanted.members
+        } else {
+            &mut wanted.grants
+        };
+        if c.action == "grant" {
+            rows.push(row);
+        } else {
+            rows.retain(|r| r != &row);
         }
-        wanted.grants = sorted(wanted.grants);
+        rows.sort_by_cached_key(Value::to_string);
         execute(&http, c.cmd.as_deref().ok_or("Missing fixed SQL")?)?;
         let unknown = "ClickHouse write outcome unknown: post-check failed; inspect ACLs before retry or inverse; no automatic rollback";
         let (after, remaining) = checked(&http, &loaded, system).map_err(|_| unknown)?;
@@ -501,6 +708,10 @@ pub fn apply(path: &Path, system: &str, write: bool, expected: Option<&str>) -> 
             .changes
             .iter()
             .any(|c| c.grant.resource.starts_with("db:")),
+        membership_changes_affect_dependants: plan
+            .changes
+            .iter()
+            .any(|c| c.grant.resource.starts_with("role:")),
         changes: plan.changes,
     })
 }

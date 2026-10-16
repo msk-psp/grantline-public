@@ -51,3 +51,5 @@ jobs:
         run: python3 scripts/check_rust_clickhouse_writer.py --docker
       - name: Verify single-statement ClickHouse database writer and future table scope
         run: python3 scripts/check_rust_clickhouse_database.py --docker
+      - name: Verify canonical ClickHouse membership writer, inverses and uncertain outcomes
+        run: python3 scripts/check_rust_clickhouse_membership.py --docker

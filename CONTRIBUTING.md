@@ -81,7 +81,11 @@ dispatch or post-check failure requires inspection before retry. R3h2 adds exact
 DB scopes through independent `clickhouse_write_databases = ["db:demo"]`; these
 cover all current/future relation names and engines in the DB. Overlapping held/declared
 DB/table rights for the same subject and privilege are refused. Global/other-object
-PostgreSQL defaults, ClickHouse role writes and remote S3 writers remain pending.
+PostgreSQL defaults and remote S3 writers remain pending. ClickHouse MEMBER changes
+require literal `membership_write_roles`, direct ADMIN OPTION, canonical account
+DEFAULT ROLE ALL and no delegation; membership carries the role's current/future
+privileges to recipient accounts/roles and their dependants. One statement still
+has no multi-statement rollback or effective-access guarantee.
 Run `python3 scripts/check_rust_clickhouse.py --docker` and
 `python3 scripts/check_rust_postgres.py --docker` plus
 `python3 scripts/check_rust_s3_network.py --docker` and
@@ -91,7 +95,8 @@ Run `python3 scripts/check_rust_clickhouse.py --docker` and
 `python3 scripts/check_rust_postgres_membership.py --docker` and
 `python3 scripts/check_rust_postgres_defaults.py --docker` and
 `python3 scripts/check_rust_clickhouse_writer.py --docker` and
-`python3 scripts/check_rust_clickhouse_database.py --docker` for isolated boundary and
+`python3 scripts/check_rust_clickhouse_database.py --docker` and
+`python3 scripts/check_rust_clickhouse_membership.py --docker` for isolated boundary and
 real-server checks. Local S3 IAM files/trees support observation
 and grouped previews; directory-backed shared policies cannot be rewritten from
 a per-user change.
