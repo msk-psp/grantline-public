@@ -3,9 +3,9 @@ on:
   workflow_call:
   push:
     branches: [main]
-    paths: ["rust/**", "grantline/**", "grantline.toml", "examples/**", "scripts/check_rust_*", "scripts/build_rust_ui.sh", "Dockerfile.rust", ".dockerignore", ".github/workflows/release.yml", ".github/workflows/rust.yml"]
+    paths: ["rust/**", "grantline/**", "grantline.toml", "examples/**", "scripts/check_rust_*", "scripts/build_rust_ui.sh", "scripts/collect_rust_licenses.sh", "Dockerfile.rust", ".dockerignore", ".github/workflows/release.yml", ".github/workflows/rust.yml"]
   pull_request:
-    paths: ["rust/**", "grantline/**", "grantline.toml", "examples/**", "scripts/check_rust_*", "scripts/build_rust_ui.sh", "Dockerfile.rust", ".dockerignore", ".github/workflows/release.yml", ".github/workflows/rust.yml"]
+    paths: ["rust/**", "grantline/**", "grantline.toml", "examples/**", "scripts/check_rust_*", "scripts/build_rust_ui.sh", "scripts/collect_rust_licenses.sh", "Dockerfile.rust", ".dockerignore", ".github/workflows/release.yml", ".github/workflows/rust.yml"]
 
 permissions:
   contents: read
