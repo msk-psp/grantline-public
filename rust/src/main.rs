@@ -45,6 +45,8 @@ enum Command {
     /// Restore a private original-byte backup only if the target still matches its applied state.
     Restore {
         #[arg(long)]
+        live: bool,
+        #[arg(long)]
         system: String,
         #[arg(long)]
         backup: PathBuf,
@@ -133,11 +135,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             cli::apply(&args.config, &system, live, write, expect.as_deref(), json)?;
         }
         Command::Restore {
+            live,
             system,
             backup,
             write,
             json,
         } => {
+            #[cfg(unix)]
+            if live {
+                let r = grantline_rs::s3::remote_writer::restore(
+                    &args.config,
+                    &system,
+                    &backup,
+                    write,
+                )?;
+                println!("{}", serde_json::to_string_pretty(&r)?);
+            } else {
+                cli::restore(&args.config, &system, &backup, write, json)?;
+            }
+            #[cfg(not(unix))]
             cli::restore(&args.config, &system, &backup, write, json)?;
         }
         Command::Probe {

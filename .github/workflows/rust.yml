@@ -53,3 +53,5 @@ jobs:
         run: python3 scripts/check_rust_clickhouse_database.py --docker
       - name: Verify canonical ClickHouse membership writer, inverses and uncertain outcomes
         run: python3 scripts/check_rust_clickhouse_membership.py --docker
+      - name: Verify conditional remote IAM writes and private recovery
+        run: python3 scripts/check_rust_remote_writer.py

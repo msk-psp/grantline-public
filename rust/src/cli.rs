@@ -100,8 +100,13 @@ pub fn apply(
         }
         return Ok(());
     }
+    #[cfg(unix)]
+    if live && adapter.typ(system) == "s3" {
+        let result = crate::s3::remote_writer::apply(path, system, write, expected)?;
+        return json(&result);
+    }
     if live {
-        return Err("--live apply currently supports PostgreSQL and ClickHouse only".into());
+        return Err("Unsupported native live writer".into());
     }
     #[cfg(unix)]
     {
