@@ -1,6 +1,6 @@
 # Grantline — Rust + Leptos migration
 
-Experimental **R1 + R2 + R3a/R3b/R3c/R3d/R3e1/R3e2/R3e3/R3f/R3g1/R3g2 foundation**, alongside the supported Python console.
+Experimental **R1 + R2 + R3a/R3b/R3c/R3d/R3e1/R3e2/R3e3/R3f/R3g1/R3g2/R3g3 foundation**, alongside the supported Python console.
 This binary runs natively with no Python process. Commands are offline by default;
 native PostgreSQL/ClickHouse catalogs and remote S3 IAM require explicit `--live`
 and configured reader endpoints/credentials.
@@ -448,8 +448,9 @@ The SQL writer supports **existing ordinary tables and schemas in one database,
 and ACLs on that same database**. Supported schema privileges are USAGE/CREATE;
 database privileges are CONNECT/CREATE/TEMPORARY. Use canonical `TEMPORARY` in
 intent; the `TEMP` alias is refused to avoid a nonconvergent plan.
-It uses the existing native planner; role and `ALTER DEFAULT PRIVILEGES` changes
-remain refused in full. Declare any already-held permissions you intend to retain
+It uses the existing native planner. Role changes require the separate R3g3
+opt-in described below and cannot mix with object changes; `ALTER DEFAULT
+PRIVILEGES` changes remain refused in full. Declare any already-held permissions you intend to retain
 for managed subjects. Only catalogs in the selected database (and shared role/database ACLs) are observed here;
 this is not a cluster-wide reconciliation or effective-access check.
 
@@ -480,8 +481,7 @@ The identifier binds input bytes, non-secret endpoint, authenticated session,
 server start, database/schema/table/role object identities, catalog ACL state and fixed
 quoted SQL. Passwords are not included in the identifier or receipt. A server
 restart, a changed object/ACL/role, another login or changed input requires a new
-preview. The R3g2 plan-ID format is v2; older R3g1 IDs need a fresh preview
-after upgrading. Dry-run and no-op calls create no files and commit no ACL changes.
+preview. The R3g3 plan-ID format is v3; older IDs need a fresh preview after upgrading. Dry-run and no-op calls create no files and commit no ACL changes.
 Only exact supported object privileges are accepted. ALL, PUBLIC/owner/privileged targets,
 column privileges, non-owner grantors, grant options, views, partitions and
 inheritance are unsupported. These conservative restrictions can refuse the
@@ -514,6 +514,61 @@ cooperative lock contention/release, and a reviewed inverse. Direct ACL revocati
 does not remove privileges inherited from PUBLIC or roles and does not terminate
 existing sessions. This receipt still does not prove effective access. Production writes,
 network loss during COMMIT and general disaster recovery are unverified.
+
+### Apply canonical role memberships (R3g3)
+
+Role memberships affect **the whole PostgreSQL cluster**, including privileges
+in databases outside `databases`. They are disabled by default. Authorize only
+reviewed, existing non-login groups with `membership_write_roles`. This list
+permits their existing cluster-wide privileges; it is not a per-database ACL
+allowlist or an audit of every grant/RLS policy associated with the group.
+
+```toml
+[adapters.pg-members]
+type = "postgres"
+admin_dsn_env = "GRANTLINE_PG_MEMBERS_WRITER"
+databases = ["postgres"]
+membership_write_roles = ["analytics_reader", "reporting_reader"]
+```
+
+Supply a separate named DSN for the authenticated writer in `postgres`. Role
+plans must run through this fixed coordinator so this writer version's role
+transactions share one advisory lock. A cluster without a database named
+`postgres` is unsupported here. Object writers in other databases, raw SQL and
+older versions do not participate. Use a maintenance interval without concurrent
+administration. `apply --system pg-members --live` previews; adding
+`--write --expect PLAN_ID` applies only that current plan. Role changes cannot be
+mixed with object ACL changes. Intent uses existing `role:analytics_reader` and
+`privs = ["MEMBER"]`; declare other held memberships you intend to retain.
+
+The writer must **directly** hold ADMIN OPTION for the group. New edges always
+use `ADMIN FALSE, INHERIT TRUE, SET TRUE` and `GRANTED BY` the authenticated writer.
+A NOINHERIT account can therefore inherit through this explicitly configured
+edge. Revokes use RESTRICT and require a single canonical edge created by that
+same writer. No SET ROLE, arbitrary SQL, borrowed grantor, option editing or ADMIN
+grants are performed. Existing declared edges in the write allowlist are checked
+even when the binary MEMBER atom already exists; multiple grantors, delegation or
+noncanonical options are refused. Unchanged memberships outside the write
+allowlist remain read-only.
+
+Self/writer changes, login groups, PUBLIC/predefined/privileged or object-owning
+endpoints/ancestors and unsafe ancestor membership options are refused. Ownership
+checks use shared dependencies across databases, not just the coordinator's
+schemas. The writer's INHERIT/SET ancestry cannot be changed. These guards do not
+prove the complete effective authority of an allowlisted role: review its ACLs,
+RLS and application privileges before authorizing it.
+
+Plan ID v3 binds role OIDs, flags, complete membership options/grantors and owner
+role IDs. Exact expected memberships, untouched direct object ACLs and other
+catalog state are verified before one COMMIT. JSON receipts flag
+`membership_changes_cluster_wide=true` for role change plans and keep
+`effective_access_verified=false`. Undo requires a newly reviewed inverse intent;
+other role paths or an already active SET ROLE session can retain effective access.
+The fixture checks actual inherited SELECT and SET ROLE plus multi-statement
+cycle failure and blocked-GRANT timeout rollback. Production, PostgreSQL 16 and
+COMMIT network-loss behavior remain unverified. See PostgreSQL's
+[role GRANT](https://www.postgresql.org/docs/17/sql-grant.html) and
+[REVOKE](https://www.postgresql.org/docs/17/sql-revoke.html) semantics.
 
 ### Apply or restore one local S3 IAM file (R3f)
 
@@ -632,10 +687,11 @@ their own ports and are unaffected.
 - R3f explicitly applies/restores one local S3 IAM file with stale-state guards and private backups.
 - R3g1 applies one PostgreSQL ordinary-table ACL plan transactionally with explicit credentials and review.
 - R3g2 extends that transaction to schema/database ACLs, with cooperative writer locking and full direct ACL postconditions.
+- R3g3 adds opt-in role-only membership transactions through postgres, with canonical options and an exact grantor.
 
 ## What remains
 
-PostgreSQL role/default-privilege writers, ClickHouse/remote S3
+PostgreSQL default-privilege writers, ClickHouse/remote S3
 writers, production authentication,
 durable approvals, real Slack/GitHub writers, all existing console pages,
 WASM map interactions, four-language UI and release images are later stages.
@@ -662,6 +718,7 @@ python3 scripts/check_rust_s3_network.py --docker
 python3 scripts/check_rust_s3_probes.py --docker
 python3 scripts/check_rust_s3_writer.py --docker
 python3 scripts/check_rust_postgres_writer.py --docker
+python3 scripts/check_rust_postgres_membership.py --docker
 ```
 
 The checks cover canonical grants, coverage, convergence actions, diagnostic

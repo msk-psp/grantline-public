@@ -33,7 +33,7 @@ State is disposable, private to the process and erased when it exits.
 | Stage | Implementation | Acceptance before promotion | Status |
 |---|---|---|---|
 | R2 | Typed config/intent, snapshots, findings, graph and offline plan CLI | Fixture decisions, diagnostics, PG/CH SQL previews, snapshot round trips and graph paths match Python; S3 commands/coalescing remain R3 | Merged in PR #16 |
-| R3 | PostgreSQL, ClickHouse and S3 native adapters, probes and writers | Existing regression cases ported; separately authorized live read/probe and reversible write validation per adapter | R3a–R3e3 merged; R3f merged; R3g1 merged; R3g2 PostgreSQL schema/database writer implemented; other writers pending |
+| R3 | PostgreSQL, ClickHouse and S3 native adapters, probes and writers | Existing regression cases ported; separately authorized live read/probe and reversible write validation per adapter | R3a–R3e3 merged; R3f merged; R3g1 merged; R3g2 merged; R3g3 PostgreSQL membership writer implemented; other writers pending |
 | R4 | Production sessions/OIDC, durable approval store, Slack signatures/DMs, code writer and GitHub PRs | Requester binding, all approvers, callback replay, immutable plan and repo scope verified end to end; approval/PR/applied access reported separately | Pending |
 | R5 | All console pages, Leptos hydration and interactive permission map | Repeated hover highlight/dimming, matrix scrolling, accessible dark mode, logs and four locales verified in browser | Pending |
 | R6 | Release image, migration/rollback and operating guide | Reproducible native/WASM builds, upgrade of persisted state, image smoke tests and explicitly authorized rollout | Pending |
@@ -70,16 +70,16 @@ keep Python as a development-only oracle until all stages pass.
 
 ## Next action
 
-Review and merge R3g2's schema/database ACL extension and its mixed-scope
-transaction tests. Next implement R3g3 PostgreSQL role membership writes as a
-separate unit with explicit membership option/grantor modelling and privilege
-boundary/rollback tests. Default-privilege writes follow, then ClickHouse and
-remote S3 writers. R3 remains incomplete. Production/staging verification
-requires separate authorization.
+Review and merge R3g3's canonical, opt-in role membership writer and its
+cluster-scope/rollback evidence. Next implement R3g4 PostgreSQL default-privilege
+writes as a separate review unit, with creating-role/schema/database scope,
+explicit grantor/credentials and reversible tests. ClickHouse and remote S3
+writers follow. R3 remains incomplete; production/staging verification requires
+separate authorization.
 
 ## R3 — Native adapter migration {#R3}
 
-Status: R3a merged in PR #17; R3b merged in PR #18; R3c merged in PR #19; R3d merged in PR #20; R3e1 merged in PR #22; R3e2 merged in PR #23; R3e3 merged in PR #24; R3f merged in PR #25; R3g1 merged in PR #26; R3g2 PostgreSQL schema/database writer implemented.
+Status: R3a merged in PR #17; R3b merged in PR #18; R3c merged in PR #19; R3d merged in PR #20; R3e1 merged in PR #22; R3e2 merged in PR #23; R3e3 merged in PR #24; R3f merged in PR #25; R3g1 merged in PR #26; R3g2 merged in PR #27; R3g3 PostgreSQL membership writer implemented.
 The first review unit implements S3 file/dir
 planes, effective policy observation, group/inline routes and identity-scoped
 document previews. Plan commands remain previews; R3f adds a separate explicit
@@ -450,6 +450,8 @@ concurrent role/namespace administrators remain unverified.
 
 ### R3g2 — Single-database schema and database ACL writes
 
+Merged in PR #27. Role changes are introduced separately by R3g3 below.
+
 Extend the same reviewed writer to existing `schema:DB.NAME` USAGE/CREATE and
 `db:DB` CONNECT/CREATE/TEMPORARY atoms, alongside ordinary-table ACLs in the same
 transaction. TEMP aliases, ALL/wildcards, PUBLIC/owner/privileged targets,
@@ -490,3 +492,52 @@ PostgreSQL 17.11, covers PUBLIC's preserved effective defaults, the special
 names. Exact run results and PR/CI evidence are recorded in the task handoff.
 The initial Docker readiness check now verifies TCP, avoiding the image's
 temporary initialization server that accepts only local socket connections.
+
+### R3g3 — Explicitly scoped PostgreSQL role membership writer
+
+Membership changes are cluster-wide, unlike object ACLs. Default off: the adapter
+must name literal `membership_write_roles`. This list authorizes membership in
+those roles and their existing cluster-wide privileges; database selection does
+not constrain those privileges. Role plans must connect to/select `postgres` as
+a fixed coordinator and contain no object ACL changes. This version's role
+writers then share the existing postgres-local transaction advisory lock; object
+writers in other DBs, older writers and raw SQL do not participate. Deployments
+without a postgres database are unsupported for this unit. No operational writes
+are authorized by the specification.
+
+Only existing non-login group roles are assignable, to existing ordinary roles
+or accounts. Fixed options are `ADMIN FALSE, INHERIT TRUE, SET TRUE`, with explicit
+`GRANTED BY` the authenticated writer. The writer must directly hold ADMIN OPTION
+on the target group. Revoke only a single canonical edge granted by that writer,
+with RESTRICT. Do not edit options, borrow another grantor or use SET ROLE.
+Validate opted-in declared edges even if the MEMBER atom already exists, refusing
+ambiguous grantors/options instead of treating them as a proven canonical grant.
+Unchanged memberships outside the write allowlist remain read-only.
+
+Reject self/writer changes, login groups, PUBLIC/predefined/privileged or owner
+endpoints/ancestors, unsafe membership options/delegation in their ancestor paths,
+and changes affecting the writer's own INHERIT/SET role ancestry. Detect ownership across
+DBs using role ownership dependencies in pg_shdepend. This is not an audit of all
+role ACLs/RLS/application behavior: the operator must review the allowlisted
+role's existing privileges. Bind roles/OIDs, exact membership options/grantors,
+owner-role IDs, config and session to plan-ID v3. Compare the complete expected
+membership set, all direct object ACLs and unchanged other catalog state before
+one COMMIT. Failure/timeout rolls back the entire role plan; COMMIT uncertainty
+still needs inspection. No role creation, attributes, ADMIN grants, default
+privileges or cluster-wide effective-access guarantee.
+
+Acceptance: official isolated PostgreSQL verifies canonical grant/revoke and
+reviewed inverse, quoted names, NOINHERIT account behavior with explicit options,
+actual inherited SELECT/SET ROLE and cluster-wide scope, stale roles/OIDs/options/
+grantors/admin rights, owner/privilege ancestry and allowlist/coordinator/mixed
+scope refusal, advisory contention/release, multi-command SQL failure and blocked
+grant timeout rollback. Existing object writer, readers/probes, S3 and core
+regressions must retain their boundaries.
+
+R3g3 validates cluster ownership from shared dependencies, binds each separate
+privilege attribute (not just their combined privileged classification), and
+retains unchanged object writer behavior. Isolated tests use a non-superuser
+writer with direct ADMIN OPTION and no INHERIT/SET access to administered groups.
+They verify actual cross-database SELECT, nested groups and SET ROLE for a
+NOINHERIT account, and roll back both a later cycle error and a later blocked
+membership insertion. Evidence and CI/PR results belong in the task handoff.

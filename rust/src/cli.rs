@@ -46,11 +46,14 @@ pub fn apply(
             result.system,
             result.database,
             if result.applied {
-                "direct object ACL transaction committed"
+                "permission transaction committed"
             } else {
                 "dry-run/no change; nothing committed"
             }
         );
+        if result.membership_changes_cluster_wide {
+            println!("Scope: role memberships affect the entire PostgreSQL cluster");
+        }
         println!("Plan identifier: {}", result.plan_id);
         for change in &result.changes {
             println!("{}", change.cmd.as_deref().unwrap_or(""));

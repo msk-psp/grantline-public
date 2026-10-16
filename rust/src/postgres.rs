@@ -141,7 +141,7 @@ struct Role {
     login: bool,
     superuser: bool,
 }
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize, serde::Serialize, PartialEq, Eq, PartialOrd, Ord)]
 struct Membership {
     member: String,
     role: String,
