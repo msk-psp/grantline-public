@@ -2,6 +2,8 @@
 pub mod probe;
 mod remote;
 #[cfg(unix)]
+pub mod remote_writer;
+#[cfg(unix)]
 pub mod writer;
 use crate::{
     Result,
@@ -27,6 +29,10 @@ pub struct Plane {
     pub filer_url_env: Option<String>,
     pub url_env: Option<String>,
     pub auth_env: Option<String>,
+    pub admin_url_env: Option<String>,
+    pub admin_auth_env: Option<String>,
+    #[serde(default)]
+    pub conditional_write: bool,
     pub filer_auth_env: Option<String>,
     pub iam_key_env: Option<String>,
     pub iam_secret_env: Option<String>,
