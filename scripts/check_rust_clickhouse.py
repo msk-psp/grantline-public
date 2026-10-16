@@ -33,10 +33,11 @@ def encoded(rows):
     return json.dumps(dict(data=rows, rows=len(rows)), ensure_ascii=False).encode()
 
 
-def run(binary, config, endpoint, *command, live=True, check=True):
+def run(binary, config, endpoint, *command, live=True, check=True, extra_env=None):
     env = dict(os.environ, GRANTLINE_R3B_READER=endpoint,
                GRANTLINE_R3B_ADMIN='http://127.0.0.1:1/' + MARKER,
                HTTP_PROXY='http://127.0.0.1:1', HTTPS_PROXY='http://127.0.0.1:1', ALL_PROXY='http://127.0.0.1:1')
+    env.update(extra_env or {})
     if endpoint is None:
         env.pop('GRANTLINE_R3B_READER', None)
     result = subprocess.run([binary, '-c', str(config), *command, *(['--live'] if live else [])],
@@ -48,6 +49,18 @@ def run(binary, config, endpoint, *command, live=True, check=True):
     return json.loads(result.stdout)
 
 
+def probe_baseline(root, rows):
+    path = root / 'probe-baseline.jsonl'
+    records = [dict(run=dict(ts='2026-10-01T00:00:00+00:00', user='demo', systems=['ch-test']))]
+    records += [dict(grant=dict(system='ch-test', subject=s, resource=r, priv=p)) for s, r, p in rows]
+    path.write_text(''.join(json.dumps(row) + '\n' for row in records))
+    return path
+
+
+def probe_rows(report):
+    return {(p['subject'], p['resource'], p['priv']): p for p in report['probes']}
+
+
 def config_at(root):
     config = root / 'config.toml'
     config.write_text('intent="intent.toml"\nsnapshots="history"\n[adapters.ch-test]\ntype="clickhouse"\nurl_env="GRANTLINE_R3B_READER"\nadmin_url_env="GRANTLINE_R3B_ADMIN"\nread_timeout_seconds=1\n')
@@ -56,7 +69,7 @@ def config_at(root):
 
 
 def protocol(binary):
-    state = dict(mode='healthy', calls=[])
+    state = dict(mode='healthy', calls=[], user='reader')
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -70,13 +83,33 @@ def protocol(binary):
             status, body, headers = 200, None, {}
             query = params.get('query', [''])[0]
             assert path.path == '/catalog/'
-            assert self.headers.get('X-ClickHouse-User') == 'reader'
+            assert self.headers.get('X-ClickHouse-User') == state['user']
             assert self.headers.get('X-ClickHouse-Key') == MARKER + '+:pw'
             assert 'user' not in params and 'password' not in params and MARKER not in self.path
             assert params['readonly'] == ['2'] and params['result_overflow_mode'] == ['throw']
             assert params['max_rows_to_read'] == ['100000'] and params['max_execution_time'] == ['30']
             assert params['default_format'] == ['JSON'] and params['wait_end_of_query'] == ['1']
-            if query.startswith('CHECK GRANT'):
+            if query.startswith('SELECT currentUser()'):
+                rows = [dict(user='another' if mode == 'identity-wrong' else state['user'])]
+            elif query.startswith('SHOW GRANTS') and (mode.startswith('probe-') or mode == 'identity-wrong'):
+                match = re.match(r'SHOW GRANTS FOR `([^`]+)`', query)
+                subject = match[1] if match else state['user']
+                if 'WITH IMPLICIT FINAL' in query:
+                    lines = [f'GRANT SELECT ON analytics.* TO `{subject}`']
+                    if mode == 'probe-column':
+                        lines = [f'GRANT SELECT(a) ON analytics.events TO `{subject}`']
+                    if mode == 'probe-partial':
+                        lines += [f'REVOKE SELECT ON analytics.events FROM `{subject}`']
+                    if mode == 'probe-prefix':
+                        lines = [f'GRANT SELECT ON prefix*.* TO `{subject}`']
+                    if mode == 'probe-wrong-recipient':
+                        lines = ['GRANT SELECT ON analytics.* TO another']
+                    if mode == 'probe-unrecognized':
+                        lines = ['garbage ' + MARKER]
+                else:
+                    lines = [f'GRANT reader TO `{subject}`']
+                rows = [dict(grants=line) for line in lines]
+            elif query.startswith('CHECK GRANT'):
                 rows = [dict(result=0 if mode == 'restricted' else 1)]
             elif 'system.role_grants' in query:
                 assert 'LIMIT 10001' in query
@@ -119,6 +152,8 @@ def protocol(binary):
                 headers['X-ClickHouse-Exception-Code'] = '497'
             if mode == 'byte-limit':
                 body = b'x' * (16 * 1024 * 1024 + 1)
+            if mode == 'probe-late-timeout':
+                time.sleep(0.65)
             if mode == 'timeout':
                 time.sleep(1.2)
             if body is None:
@@ -182,6 +217,58 @@ def protocol(binary):
             assert run(binary, config, endpoint, 'plan', '--json', check=False).returncode != 0
             assert not state['calls']
             config.write_text(original)
+            cases_probe = [('demo', 'table:analytics.events', 'SELECT'),
+                           ('demo', 'db:missing', 'SELECT'), ('demo', 'role:reader', 'MEMBER')]
+            baseline = probe_baseline(root, cases_probe)
+            command = ('probe', '--observed', str(baseline), '--json')
+            state.update(mode='probe-healthy', calls=[], user='reader')
+            offline = run(binary, config, endpoint, *command, live=False)
+            assert offline['summary'] == dict(allow=0, deny=0, unknown=3) and not state['calls']
+            report = run(binary, config, endpoint, *command)
+            assert [probe_rows(report)[c]['verdict'] for c in cases_probe] == ['allow', 'deny', 'allow'], report
+            assert len(report['findings']) == 1
+            assert all('not a login' in p['how'] for p in report['probes'])
+            # Explicit observer override works without a reader, and never falls back if missing.
+            original = config.read_text()
+            config.write_text(original + 'probe_url_env="GRANTLINE_R3E_OBSERVER"\n')
+            dedicated = run(binary, config, None, *command, extra_env={'GRANTLINE_R3E_OBSERVER': endpoint})
+            assert dedicated['summary'] == report['summary']
+            count = len(state['calls'])
+            unavailable = run(binary, config, endpoint, *command, extra_env={'GRANTLINE_R3E_OBSERVER': ''})
+            assert unavailable['summary'] == dict(allow=0, deny=0, unknown=3) and len(state['calls']) == count
+            config.write_text(original + '[adapters.ch-test.probe_url_envs]\ndemo="GRANTLINE_R3E_SUBJECT"\n')
+            state.update(user='demo', calls=[])
+            subject_url = endpoint.replace('reader:', 'demo:')
+            logged = run(binary, config, None, *command, extra_env={'GRANTLINE_R3E_SUBJECT': subject_url})
+            assert logged['summary'] == report['summary']
+            assert all('subject HTTP login' in p['how'] for p in logged['probes'])
+            state.update(mode='identity-wrong', calls=[])
+            mismatch = run(binary, config, endpoint, *command, extra_env={'GRANTLINE_R3E_SUBJECT': subject_url})
+            assert mismatch['summary'] == dict(allow=0, deny=0, unknown=3) and len(state['calls']) == 1
+            assert not mismatch['findings']
+            state.update(mode='probe-healthy', calls=[])
+            absent = run(binary, config, endpoint, *command, extra_env={'GRANTLINE_R3E_SUBJECT': ''})
+            assert absent['summary']['unknown'] == 3 and not state['calls']
+            config.write_text(original)
+            state.update(user='reader', calls=[])
+            for mode in ['probe-column', 'probe-partial', 'probe-prefix', 'probe-wrong-recipient', 'probe-unrecognized',
+                         'redirect', 'http403', 'bad-json', 'bad-count', 'exception-header', 'embedded-exception', 'hidden-limit', 'byte-limit', 'timeout']:
+                state.update(mode=mode, calls=[])
+                failed = run(binary, config, endpoint, *command)
+                assert failed['summary'] == dict(allow=0, deny=0, unknown=3) and not failed['findings'], (mode, failed)
+                if mode == 'redirect':
+                    assert len(state['calls']) == 1
+            # A later subject timing out invalidates even an earlier successful subject.
+            delayed = probe_baseline(root, [('demo', 'db:analytics', 'SELECT'), ('zlate', 'db:analytics', 'SELECT')])
+            state.update(mode='probe-late-timeout', calls=[])
+            failed = run(binary, config, endpoint, 'probe', '--observed', str(delayed), '--json')
+            assert failed['summary'] == dict(allow=0, deny=0, unknown=2)
+            assert all('partial results discarded' in p['how'] for p in failed['probes'])
+            state.update(mode='probe-healthy', calls=[])
+            too_many = probe_baseline(root, [(f'u{i}', 'db:analytics', 'SELECT') for i in range(129)])
+            capped = run(binary, config, endpoint, 'probe', '--observed', str(too_many), '--json')
+            assert capped['summary']['unknown'] == 129 and not state['calls']
+            print('ClickHouse probe HTTP: offline isolation, ACL/role verdicts, explicit observer and subject credential isolation, identity mismatch, 14 unknown/error cases, total-deadline partial discard, subject cap and redaction passed')
             print(f'ClickHouse HTTP: offline/import isolation, live plan/graph/snapshot, 2 inherited unknown cases and {len(cases)} failure cases passed')
     finally:
         server.shutdown()
@@ -267,10 +354,71 @@ REVOKE SELECT ON gl_data.events FROM gl_partial;
             else:
                 raise AssertionError('read-only observer accepted a write')
             assert sql('EXISTS DATABASE gl_forbidden') == '0\n'
+            # Server-resolved ACLs flatten all granted roles. Direct membership is queried separately.
+            root = Path(folder)
+            cases_probe = [('gl_subject', 'table:gl_data.events', 'SELECT'),
+                           ('gl_subject', 'table:gl_data.events', 'INSERT'),
+                           ('gl_subject', 'role:gl_nested', 'MEMBER'),
+                           ('gl_subject', 'role:gl_base', 'MEMBER'),
+                           ('gl_table', 'db:gl_data', 'SELECT'),
+                           ('gl_global', 'table:anywhere.events', 'SELECT'),
+                           ('gl_stale', 'db:gl_dropped', 'SELECT'),
+                           ('gl_column', 'table:gl_data.events', 'SELECT'),
+                           ('gl_partial', 'table:gl_data.events', 'SELECT'),
+                           ('gl_base', 'db:gl_data', 'SELECT'),
+                           ('missing-user', 'db:gl_data', 'SELECT'),
+                           ('gl_subject', 'db:gl_data', 'ALL')]
+            baseline = probe_baseline(root, cases_probe)
+            command = ('probe', '--observed', str(baseline), '--json')
+            report = run(binary, config, endpoint, *command)
+            expected = ['allow', 'deny', 'allow', 'deny', 'deny', 'allow', 'allow', 'unknown', 'unknown', 'allow', 'unknown', 'unknown']
+            assert [probe_rows(report)[c]['verdict'] for c in cases_probe] == expected, report
+            assert len(report['findings']) == 3
+            assert all('not a login' in p['how'] for p in report['probes'] if p['verdict'] != 'unknown')
+            restricted = run(binary, config, endpoint.replace('gl_observer', 'gl_restricted'), *command)
+            assert restricted['summary']['allow'] == restricted['summary']['deny'] == 0
+            # Quoted user, database and table identifiers must survive SHOW GRANTS and SQL quoting.
+            sql('CREATE DATABASE `gl space`; CREATE TABLE `gl space`.`odd``table` (a UInt8) ENGINE=Memory; CREATE USER `gl``quoted`; GRANT SELECT ON `gl space`.`odd``table` TO `gl``quoted`;')
+            quoted_baseline = probe_baseline(root, [('gl`quoted', 'table:gl space.odd`table', 'SELECT')])
+            quoted_report = run(binary, config, endpoint, 'probe', '--observed', str(quoted_baseline), '--json')
+            assert quoted_report['summary'] == dict(allow=1, deny=0, unknown=0), quoted_report
+            # A real password login. readonly=2 must not turn a held INSERT ACL into a false denial.
+            sql("CREATE USER gl_login IDENTIFIED WITH sha256_password BY 'NEVER-OUTPUT-CREDENTIAL' SETTINGS readonly=2; GRANT SELECT, INSERT ON gl_data.* TO gl_login;")
+            login_baseline = probe_baseline(root, [('gl_login', 'table:gl_data.events', p) for p in ['SELECT', 'INSERT']])
+            original = config.read_text()
+            config.write_text(original + '[adapters.ch-test.probe_url_envs]\ngl_login="GRANTLINE_R3E_SUBJECT"\n')
+            login_url = f'http://gl_login:{MARKER}@{hostport}/'
+            logged = run(binary, config, None, 'probe', '--observed', str(login_baseline), '--json', extra_env={'GRANTLINE_R3E_SUBJECT': login_url})
+            assert logged['summary'] == dict(allow=2, deny=0, unknown=0), logged
+            assert all('subject HTTP login' in p['how'] for p in logged['probes'])
+            for credentials in ['', login_url.replace(MARKER, 'WRONG-SYNTHETIC-PASSWORD'), endpoint]:
+                failed = run(binary, config, endpoint, 'probe', '--observed', str(login_baseline), '--json', extra_env={'GRANTLINE_R3E_SUBJECT': credentials})
+                assert failed['summary'] == dict(allow=0, deny=0, unknown=2) and not failed['findings'], failed
+            config.write_text(original)
+            req = urllib.request.Request(url, data=b'CHECK GRANT INSERT ON gl_data.events',
+                                         headers={'X-ClickHouse-User': 'gl_login', 'X-ClickHouse-Key': MARKER}, method='POST')
+            # Server profile is readonly=2, so CHECK GRANT reflects that context rather than the stored ACL.
+            assert urllib.request.urlopen(req, timeout=5).read().strip() == b'0'
+            # Disabled default roles are still included in FINAL; this is not an activation/data proof.
+            sql('CREATE USER gl_disabled; GRANT gl_nested TO gl_disabled; SET DEFAULT ROLE NONE TO gl_disabled;')
+            disabled_baseline = probe_baseline(root, [('gl_disabled', 'table:gl_data.events', 'SELECT')])
+            config.write_text(original + '[adapters.ch-test.probe_url_envs]\ngl_disabled="GRANTLINE_R3E_SUBJECT"\n')
+            disabled = run(binary, config, None, 'probe', '--observed', str(disabled_baseline), '--json', extra_env={'GRANTLINE_R3E_SUBJECT': f'http://gl_disabled@{hostport}/'})
+            assert disabled['summary'] == dict(allow=1, deny=0, unknown=0), disabled
+            assert 'all granted roles' in disabled['probes'][0]['how']
+            req = urllib.request.Request(url, data=b'CHECK GRANT SELECT ON gl_data.events',
+                                         headers={'X-ClickHouse-User': 'gl_disabled'}, method='POST')
+            assert urllib.request.urlopen(req, timeout=5).read().strip() == b'0'
+            config.write_text(original)
+            prefix_baseline = probe_baseline(root, [('gl_prefix', 'db:prefixdemo', 'SELECT')])
+            print('ClickHouse probe Docker: real nested/global/table ACLs, direct role membership, partial/column unknowns, quoted names, missing/restricted observers, password login/mismatch/failure, read-only INSERT semantics and non-default roles passed')
             sql('CREATE USER gl_prefix; GRANT SELECT ON prefixdemo*.* TO gl_prefix;')
+            prefix_probe = run(binary, config, endpoint, 'probe', '--observed', str(prefix_baseline), '--json')
+            assert prefix_probe['summary'] == dict(allow=0, deny=0, unknown=1), prefix_probe
             prefix = run(binary, config, endpoint, 'plan', '--json')
             assert not prefix['observed'] and not prefix['changes'] and prefix['unobserved']
             assert any('Wildcard-prefix' in u['note'] for u in prefix['unobserved'])
+            print('ClickHouse server version:', sql('SELECT version()').strip())
             print('ClickHouse Docker: 26.6.2.160 catalog scopes, nested roles, stale DB, column/partial unknowns, restricted visibility, write refusal and legacy wildcard guard passed')
     finally:
         subprocess.run([*docker, 'stop', name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30, check=False)

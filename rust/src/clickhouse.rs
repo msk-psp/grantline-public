@@ -1,4 +1,5 @@
-//! Explicit read-only catalog observation. No caller-supplied SQL or write credential.
+//! Explicit read-only catalog observation and probes. No arbitrary SQL or writes.
+pub mod probe;
 use crate::{
     Result,
     config::Adapter,
@@ -43,6 +44,9 @@ impl Http {
             .as_deref()
             .filter(|s| !s.is_empty())
             .ok_or("ClickHouse url_env read credential is not configured")?;
+        Self::from_env(name, adapter.read_timeout_seconds, Instant::now())
+    }
+    fn from_env(name: &str, timeout: u64, started: Instant) -> Result<Self> {
         let raw = std::env::var(name).map_err(|_| "ClickHouse read credential is unavailable")?;
         let mut url = Url::parse(&raw).map_err(|_| "Invalid ClickHouse reader URL")?;
         if !matches!(url.scheme(), "http" | "https")
@@ -68,7 +72,6 @@ impl Http {
         }
         url.set_username("").map_err(|_| "Invalid reader URL")?;
         url.set_password(None).map_err(|_| "Invalid reader URL")?;
-        let timeout = adapter.read_timeout_seconds;
         if !(1..=120).contains(&timeout) {
             return Err("read_timeout_seconds must be between 1 and 120".into());
         }
@@ -80,7 +83,7 @@ impl Http {
                 user
             },
             key,
-            started: Instant::now(),
+            started,
             timeout: Duration::from_secs(timeout),
         })
     }

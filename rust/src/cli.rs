@@ -361,6 +361,8 @@ pub fn probe(
         }
         if live && adapter.typ(system) == "postgres" {
             probes.extend(crate::postgres::probe::run(adapter, &grants));
+        } else if live && adapter.typ(system) == "clickhouse" {
+            probes.extend(crate::clickhouse::probe::run(adapter, &grants));
         } else {
             let why = if !live {
                 "Network probes disabled; pass --live to opt in"
