@@ -70,18 +70,17 @@ keep Python as a development-only oracle until all stages pass.
 
 ## Next action
 
-Review and merge the main-targeting R3h1/R3h2 integration, including DB scope,
-future-relation and overlap/partial-revoke evidence. PR #30 merged into a feature
-branch after #29; its table writer was absent from main, so this unit includes
-that unchanged commit plus R3h2. Next implement R3h3 canonical ClickHouse role
-membership changes separately, with literal role authorization, exact identities,
-ADMIN authority and reviewed single-statement inverse tests. Remote S3 follows.
+R3h1/R3h2 main integration merged in PR #31. Review and merge R3h3 canonical
+ClickHouse role memberships after CI, including direct ADMIN, exact UUID/options,
+raw-state inverse and future/dependant access evidence. Next address remote S3
+writers as a separate reviewed unit; establish endpoint conditional-write and
+recovery semantics before enabling mutations.
 Global/other-object PostgreSQL defaults remain unsupported. R3 is incomplete;
 production/staging verification requires separate authorization.
 
 ## R3 — Native adapter migration {#R3}
 
-Status: R3a merged in PR #17; R3b merged in PR #18; R3c merged in PR #19; R3d merged in PR #20; R3e1 merged in PR #22; R3e2 merged in PR #23; R3e3 merged in PR #24; R3f merged in PR #25; R3g1 merged in PR #26; R3g2 merged in PR #27; R3g3 membership writer merged in PR #28; R3g4 merged in PR #29; R3h1 from PR #30 (merged into a feature branch) and R3h2 implemented, awaiting main integration.
+Status: R3a merged in PR #17; R3b merged in PR #18; R3c merged in PR #19; R3d merged in PR #20; R3e1 merged in PR #22; R3e2 merged in PR #23; R3e3 merged in PR #24; R3f merged in PR #25; R3g1 merged in PR #26; R3g2 merged in PR #27; R3g3 membership writer merged in PR #28; R3g4 merged in PR #29; R3h1/R3h2 integrated into main in PR #31; R3h3 implemented with isolated local verification, pending PR/CI/main integration.
 The first review unit implements S3 file/dir
 planes, effective policy observation, group/inline routes and identity-scoped
 document previews. Plan commands remain previews; R3f adds a separate explicit
@@ -662,3 +661,40 @@ R3h1 and reader/probe regressions must pass. No production/staging rollout.
 
 References: [wildcard GRANT](https://clickhouse.com/docs/sql-reference/statements/grant#wildcard-grants)
 and [partial REVOKE](https://clickhouse.com/docs/sql-reference/statements/revoke#partial-revokes).
+
+### R3h3 — Canonical ClickHouse role memberships
+
+Reuse default-empty `membership_write_roles = ["analytics_reader"]` for exact
+role names, independent of object ACL allowlists. One existing `role:name` MEMBER
+atom per invocation; no role creation, ADMIN/REPLACE/ON CLUSTER or SET DEFAULT ROLE.
+Require authenticated writer's direct ADMIN OPTION on that exact role; inherited
+ADMIN or global ROLE ADMIN alone is insufficient. Recipients and target/ancestor
+roles must be UUID-backed local_directory principals. Refuse writer/its ancestor
+recipients, self/cycles, noncanonical existing edge options, and target role chains
+with delegation or unsupported privileges. Role chains may carry ordinary exact
+table/DB SELECT/INSERT; membership authorizes their current and future privileges,
+including descendant accounts of a recipient role, not a frozen resource list.
+
+For account recipients require DEFAULT ROLE ALL with empty lists/exceptions.
+Bind full non-secret default-role/grantee policies plus raw role UUID/default/admin
+rows when membership authorization is configured; never read authentication data.
+Canonical new rows have ADMIN=0, default=1. Fresh inverse intent/review restores
+the exact membership row without altering direct ACLs or default-role policy.
+Bind all raw ACLs, principals, memberships, policies, session and input bytes;
+refresh before dispatch, compare exact expected state and convergence afterward.
+Keep one POST and uncertain outcome after dispatch failures; no retries,
+compensation, transaction/CAS or effective-access guarantee.
+
+Acceptance: isolated HTTP single POST and error/timeout/redirect/post-check
+uncertainty; official digest-pinned server account/role/nested membership actual
+SELECT and denial, INSERT and denial, quoted names, grant/revoke and both inverses,
+retained unrelated rights/alternate paths, no-op, stale UUID/role ACL/edge/default
+policy/source/session rejection. Refuse default-off, wildcards, missing/wrong-kind
+roles, writer/cycles, admin edges, noncanonical defaults, inherited/global-only
+authority, unsafe role chains and multiple/mixed changes. Preserve R3h1/R3h2,
+reader/probe/core/privacy regressions; no production/staging access or deployment.
+
+References: [role GRANT](https://clickhouse.com/docs/sql-reference/statements/grant#assigning-role-syntax),
+[REVOKE](https://clickhouse.com/docs/sql-reference/statements/revoke),
+[role metadata](https://github.com/ClickHouse/ClickHouse/blob/v26.6.2.160-stable/src/Storages/System/StorageSystemRoleGrants.cpp),
+[default-role policy](https://github.com/ClickHouse/ClickHouse/blob/v26.6.2.160-stable/src/Storages/System/StorageSystemUsers.cpp).

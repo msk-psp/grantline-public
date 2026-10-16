@@ -559,6 +559,55 @@ It reuses the full HTTP failure/timeout/redirect/postcondition injection suite
 for DB statements. See [GRANT scope](https://clickhouse.com/docs/sql-reference/statements/grant#wildcard-grants)
 and [partial REVOKE](https://clickhouse.com/docs/sql-reference/statements/revoke#partial-revokes).
 
+### Apply one ClickHouse role membership (R3h3)
+
+```toml
+[adapters.analytics]
+type = "clickhouse"
+admin_url_env = "GRANTLINE_CH_WRITER_URL"
+membership_write_roles = ["analytics_reader"]
+```
+
+Use an existing `role:analytics_reader` resource with `privs = ["MEMBER"]` in
+intent. The allowlist contains literal role names and defaults to empty. It is
+independent of table/DB ACL lists; one invocation still changes at most one atom.
+Preview with `apply --live --system analytics`, review the SQL and plan ID, then
+run with `--write --expect PLAN_ID`. Old v2 plans require a fresh preview (v3).
+
+The authenticated writer must directly hold ADMIN OPTION on the exact role.
+Global ROLE ADMIN or inherited ADMIN alone never substitutes. New memberships
+have no ADMIN OPTION and use the account's existing DEFAULT ROLE ALL policy;
+accounts with explicit lists/exceptions or NONE are refused. Existing option
+mismatches require manual reconciliation. Roles and recipients must already
+exist in local_directory with UUIDs; writer/ancestor recipients and self/cycles
+are refused. Target role chains may hold only ordinary exact table/DB SELECT or
+INSERT, without delegation, global/system/column/partial/parameterized scopes.
+Unchanged memberships outside the allowlist can remain declared read-only.
+
+**The role allowlist authorizes its current and future privileges**, including
+inherited privileges and propagation to accounts under a recipient role. It is
+not a frozen object list; separately review the role's owners and future changes.
+The CLI and JSON `membership_changes_affect_dependants` flag disclose this scope.
+Inspect the role graph and ACLs before approval. Default-role/grantee policies
+and full raw role UUID/default/admin rows are bound to the reviewed plan, along
+with all direct ACLs, principal IDs and source/session state. Authentication
+parameters are never read. Changing a role's ACL, UUID, membership options,
+default-role policy or inputs invalidates an older review.
+
+The result confirms one server's exact direct membership, unchanged other
+catalog state and plan convergence. `effective_access_verified=false` remains:
+other role paths or active sessions can retain access after a revoke. No session
+switching, role/default-policy creation, ADMIN grants, REPLACE, ON CLUSTER,
+transaction, CAS or multi-statement rollback is supported. After dispatch failure
+inspect state before any retry; inverse intent requires a fresh review. Only the
+membership row is undone, never inserted data or future role administration.
+
+`python3 scripts/check_rust_clickhouse_membership.py --docker` verifies isolated
+HTTP uncertainty and official 26.6.2.160 grant/revoke/inverses, real SELECT/INSERT
+and denial, nested/quoted roles, retained/alternate/future privileges and unsafe
+or stale-state refusal. Per `agent-query-safety`, catalog reads retain row/scan/
+byte/time caps and readonly=2; writes remain a separate single POST.
+
 ### Apply PostgreSQL table, schema and database ACLs (R3g1/R3g2)
 
 The SQL writer supports **existing ordinary tables and schemas in one database,
@@ -861,10 +910,11 @@ their own ports and are unaffected.
 - R3g4 adds authenticated-creator, schema-specific default table privileges and future-object/rollback checks.
 - R3h1 applies one exact local ClickHouse SELECT/INSERT ACL with review and explicit uncertain outcomes.
 - R3h2 adds explicitly authorized DB scopes, future-relation scope disclosure and overlap/partial-revoke guards.
+- R3h3 adds canonical single-role memberships with direct ADMIN authority and exact inverse checks.
 
 ## What remains
 
-Global and other-object PostgreSQL defaults, ClickHouse role writes, remote S3
+Global and other-object PostgreSQL defaults and remote S3
 writers, production authentication,
 durable approvals, real Slack/GitHub writers, all existing console pages,
 WASM map interactions, four-language UI and release images are later stages.
@@ -895,6 +945,7 @@ python3 scripts/check_rust_postgres_membership.py --docker
 python3 scripts/check_rust_postgres_defaults.py --docker
 python3 scripts/check_rust_clickhouse_writer.py --docker
 python3 scripts/check_rust_clickhouse_database.py --docker
+python3 scripts/check_rust_clickhouse_membership.py --docker
 ```
 
 The checks cover canonical grants, coverage, convergence actions, diagnostic

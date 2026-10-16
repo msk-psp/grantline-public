@@ -26,14 +26,16 @@ def intent(root, rows, managed=('gl_user',)):
     (root / 'intent.toml').write_text(text)
 
 
-def config_at(root, resources=('table:analytics.events',), *, databases=()):
+def config_at(root, resources=('table:analytics.events',), *, databases=(), roles=()):
     p = root / 'config.toml'
     p.write_text('intent="intent.toml"\n[adapters.ch-test]\ntype="clickhouse"\n'
                  'url_env="GL_CH_UNUSED_READER"\nadmin_url_env="GL_CH_WRITER"\n'
                  'probe_url_envs={gl_user="GL_CH_UNUSED_PROBE"}\nread_timeout_seconds=3\n'
                  'clickhouse_write_tables=' + json.dumps(resources) + '\n'
-                 'clickhouse_write_databases=' + json.dumps(databases) + '\n')
-    intent(root, [('gl_user', (*resources, *databases)[0], ['SELECT'])])
+                 'clickhouse_write_databases=' + json.dumps(databases) + '\n'
+                 'membership_write_roles=' + json.dumps(roles) + '\n')
+    resource = 'role:' + roles[0] if roles else (*resources, *databases)[0]
+    intent(root, [('gl_user', resource, ['MEMBER'] if roles else ['SELECT'])])
     return p
 
 
@@ -56,7 +58,7 @@ def run(binary, config, endpoint, *, write=None, live=True, ok=True):
     return json.loads(r.stdout) if ok else r
 
 
-def protocol(binary, *, database_scope=False):
+def protocol(binary, *, database_scope=False, membership_scope=False):
     target = None if database_scope else 'events'
     target_sql = '`analytics`.*' if database_scope else '`analytics`.`events`'
     base = [grant(subject='writer', database='analytics', table=target, grant_option=1)]
@@ -65,6 +67,13 @@ def protocol(binary, *, database_scope=False):
     table = dict(database='analytics', name='events', id=str(uuid.uuid4()), engine='Memory', create_table_query='CREATE TABLE analytics.events(a UInt8) ENGINE=Memory')
     database = dict(name='analytics', id=str(uuid.uuid4()), engine='Atomic')
     server_id = str(uuid.uuid4())
+    if membership_scope:
+        base = []
+        s['grants'] = []
+        principals.append(dict(name='gl_group', id=str(uuid.uuid4()), storage='local_directory', kind='role'))
+    member_base = [dict(user_name='writer', role_name=None, granted_role_name='gl_group', granted_role_id=principals[-1]['id'], granted_role_is_default=1, with_admin_option=1)] if membership_scope else []
+    s['members'] = copy.deepcopy(member_base)
+    policies = [dict(name=n, default_roles_all=1, default_roles_list=[], default_roles_except=[], grantees_any=1, grantees_list=[], grantees_except=[]) for n in ['writer', 'gl_user']]
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -89,20 +98,27 @@ def protocol(binary, *, database_scope=False):
                 rows = [dict(result=1)]
             elif q.startswith('SELECT currentUser()'):
                 rows = [dict(login='writer', server_uuid=server_id, version='26.6.2.160')]
+            elif 'default_roles_all' in q:
+                rows = policies
             elif 'FROM system.users' in q:
                 rows = principals
             elif 'FROM system.role_grants' in q:
-                rows = []
+                rows = s['members']
             elif 'FROM system.grants' in q:
                 rows = s['grants']
             elif 'FROM system.tables' in q:
-                rows = [table]
+                rows = [] if membership_scope else [table]
             elif 'FROM system.databases' in q:
                 rows = [database]
             elif q.startswith('SHOW GRANTS'):
-                rows = [dict(statement=f'GRANT SELECT ON {target_sql} TO writer WITH GRANT OPTION')]
-                if len(s['grants']) > 1:
-                    rows.append(dict(statement=f'GRANT SELECT ON {target_sql} TO gl_user'))
+                if membership_scope:
+                    rows = [dict(statement='GRANT gl_group TO writer WITH ADMIN OPTION')]
+                    if len(s['members']) > 1:
+                        rows.append(dict(statement='GRANT gl_group TO gl_user'))
+                else:
+                    rows = [dict(statement=f'GRANT SELECT ON {target_sql} TO writer WITH GRANT OPTION')]
+                    if len(s['grants']) > 1:
+                        rows.append(dict(statement=f'GRANT SELECT ON {target_sql} TO gl_user'))
             else:
                 raise AssertionError(q)
             body = encoded(rows)
@@ -119,12 +135,15 @@ def protocol(binary, *, database_scope=False):
             assert path.path == '/catalog/' and 'query' not in params and MARKER not in self.path
             assert self.headers.get('X-ClickHouse-User') == 'writer' and self.headers.get('X-ClickHouse-Key') == MARKER
             assert params['readonly'] == ['0'] and params['wait_end_of_query'] == ['1']
-            assert q == f'GRANT SELECT ON {target_sql} TO `gl_user`;'
+            assert q == ('GRANT `gl_group` TO `gl_user`;' if membership_scope else f'GRANT SELECT ON {target_sql} TO `gl_user`;')
             if s['mode'] == 'timeout':
                 time.sleep(4)
                 return
             if s['mode'] in ['normal', 'post-failure', 'post-extra']:
-                s['grants'].append(grant(subject='gl_user', database='analytics', table=target))
+                if membership_scope:
+                    s['members'].append(dict(member_base[0], user_name='gl_user', with_admin_option=0))
+                else:
+                    s['grants'].append(grant(subject='gl_user', database='analytics', table=target))
             if s['mode'] == 'post-extra':
                 s['grants'].append(grant(subject='writer', database='analytics', table=target, access_type='INSERT'))
             self.send_response(500 if s['mode'] == 'error' else 302 if s['mode'] == 'redirect' else 200)
@@ -143,17 +162,18 @@ def protocol(binary, *, database_scope=False):
     try:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            config = config_at(root, (), databases=('db:analytics',)) if database_scope else config_at(root)
+            config = config_at(root, (), roles=('gl_group',)) if membership_scope else config_at(root, (), databases=('db:analytics',)) if database_scope else config_at(root)
             for url in [None, 'invalid-' + MARKER, endpoint + '?bad=1', endpoint + '#bad', endpoint.replace('writer:', ':')]:
                 run(binary, config, url, ok=False)
             run(binary, config, endpoint, live=False, ok=False)
             run(binary, config, endpoint, write='', ok=False)
             assert not s['gets'] and not s['posts'], 'missing live/write consent contacted server'
             for mode in ['normal', 'error', 'exception', 'body-error', 'redirect', 'timeout', 'ineffective', 'post-failure', 'post-extra']:
-                s.update(mode=mode, grants=copy.deepcopy(base), posts=[], gets=[])
+                s.update(mode=mode, grants=copy.deepcopy(base), members=copy.deepcopy(member_base), posts=[], gets=[])
                 p = run(binary, config, endpoint)
                 assert p['changed'] and not p['applied'] and not p['effective_access_verified'] and p['single_statement_only']
                 assert p['database_changes_include_future_tables'] == database_scope
+                assert p['membership_changes_affect_dependants'] == membership_scope
                 assert not s['posts']
                 if mode == 'normal':
                     assert run(binary, config, endpoint, write=p['plan_id'])['applied']
@@ -162,21 +182,47 @@ def protocol(binary, *, database_scope=False):
                     failure = run(binary, config, endpoint, write=p['plan_id'], ok=False)
                     assert 'outcome unknown' in failure.stderr and time.monotonic() - before < 8
                 assert len(s['posts']) == 1 and '/leak' not in s['gets'], 'write was retried, redirected or compensated'
-            s.update(mode='normal', grants=copy.deepcopy(base), posts=[], gets=[])
+            s.update(mode='normal', grants=copy.deepcopy(base), members=copy.deepcopy(member_base), posts=[], gets=[])
             p = run(binary, config, endpoint)
             principals[1]['id'] = str(uuid.uuid4())
             run(binary, config, endpoint, write=p['plan_id'], ok=False)
             assert not s['posts']
             p = run(binary, config, endpoint)
-            table['id'] = str(uuid.uuid4())
+            if membership_scope:
+                principals[-1]['id'] = str(uuid.uuid4())
+                s['members'][0]['granted_role_id'] = principals[-1]['id']
+            else:
+                table['id'] = str(uuid.uuid4())
             run(binary, config, endpoint, write=p['plan_id'], ok=False)
             assert not s['posts']
+            if membership_scope:
+                for defect in ['uuid', 'admin', 'default', 'duplicate-edge', 'duplicate-policy', 'missing-policy', 'invalid-policy']:
+                    held = copy.deepcopy(s['members'])
+                    users = copy.deepcopy(policies)
+                    if defect == 'uuid':
+                        s['members'][0]['granted_role_id'] = str(uuid.uuid4())
+                    elif defect == 'admin':
+                        s['members'][0]['with_admin_option'] = 2
+                    elif defect == 'default':
+                        s['members'][0]['granted_role_is_default'] = 2
+                    elif defect == 'duplicate-edge':
+                        s['members'].append(copy.deepcopy(s['members'][0]))
+                    elif defect == 'duplicate-policy':
+                        policies.append(copy.deepcopy(policies[0]))
+                    elif defect == 'missing-policy':
+                        policies.pop()
+                    else:
+                        policies[0]['grantees_list'] = None
+                    run(binary, config, endpoint, ok=False)
+                    assert not s['posts'], defect
+                    s['members'] = held
+                    policies[:] = users
             assert sorted(p.name for p in root.iterdir()) == ['config.toml', 'intent.toml']
     finally:
         server.shutdown()
         server.server_close()
         worker.join(timeout=5)
-    print(('ClickHouse DB' if database_scope else 'ClickHouse table') + ' writer HTTP: explicit credentials/live/expect, preview/one POST, row/byte/time bounds, stale IDs, errors/timeout/redirect/ineffective/post-check uncertainty, no retry/compensation and redaction passed')
+    print(('ClickHouse membership' if membership_scope else 'ClickHouse DB' if database_scope else 'ClickHouse table') + ' writer HTTP: explicit credentials/live/expect, preview/one POST, row/byte/time bounds, stale IDs, errors/timeout/redirect/ineffective/post-check uncertainty, no retry/compensation and redaction passed')
 
 
 def docker_test(binary, context):
