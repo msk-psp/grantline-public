@@ -149,6 +149,7 @@ impl Auth {
             || origin.fragment().is_some()
             || !matches!(config.mode.as_str(), "local" | "proxy" | "oidc")
             || (!loopback && config.mode != "oidc")
+            || (!loopback && origin.scheme() != "https")
         {
             return Err(
                 "Console requires a secure origin; local/proxy modes bind to loopback only".into(),
@@ -412,6 +413,19 @@ impl Auth {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn shared_oidc_requires_https_even_for_a_loopback_public_url() {
+        let config = Config {
+            mode: "oidc".into(),
+            issuer: Some("https://identity.example.com/".into()),
+            client_id: Some("fixture".into()),
+            allowed_subjects: BTreeSet::from(["fixture-sub".into()]),
+            ..Config::default()
+        };
+        assert!(Auth::new(config.clone(), "http://127.0.0.1:8424/", false).is_err());
+        assert!(Auth::new(config.clone(), "https://access.example.com/", false).is_ok());
+        assert!(Auth::new(config, "http://127.0.0.1:8424/", true).is_ok());
+    }
     #[test]
     fn redirects_and_proxy_are_unambiguous() {
         for v in [

@@ -14,8 +14,11 @@ jobs:
   test:
     uses: ./.github/workflows/ci.yml
 
+  native:
+    uses: ./.github/workflows/rust.yml
+
   publish:
-    needs: test
+    needs: [test, native]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -41,6 +44,7 @@ jobs:
         id: image
         with:
           context: .
+          file: Dockerfile.rust
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}

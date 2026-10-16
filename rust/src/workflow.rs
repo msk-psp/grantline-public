@@ -205,14 +205,75 @@ impl Workflow {
                 .map_err(|_| "Cannot bind approval policy")?
                 .as_slice(),
         );
-        Ok(Self {
+        let store = Self {
             policy_hash,
             config,
             root,
             origin: origin.trim_end_matches('/').into(),
             _lock: lock,
             mutex: Mutex::new(()),
-        })
+        };
+        store.recover_interrupted()?;
+        Ok(store)
+    }
+    fn recover_interrupted(&self) -> Result<()> {
+        let mut count = 0;
+        for entry in fs::read_dir(&self.root).map_err(|_| "Cannot inspect approval recovery")? {
+            let name = entry
+                .map_err(|_| "Cannot inspect approval recovery entry")?
+                .file_name()
+                .to_string_lossy()
+                .into_owned();
+            if let Some(id) = name.strip_suffix(".json").filter(|id| valid_id(id)) {
+                count += 1;
+                if count > 1000 {
+                    return Err("Approval recovery limit exceeded".into());
+                }
+                let mut r = self.load(id)?;
+                let mut changed = false;
+                if r.status == "publishing" {
+                    r.status = "publish_unknown".into();
+                    changed = true;
+                }
+                if r.notifications == "sending" {
+                    r.notifications = "unknown".into();
+                    changed = true;
+                }
+                if changed {
+                    event(
+                        &mut r,
+                        "system",
+                        "restart requires external outcome inspection",
+                    );
+                    self.save(&r)?;
+                }
+            }
+        }
+        Ok(())
+    }
+    fn archives(&self) -> Result<Vec<crate::migration::Archive>> {
+        let dir = self.root.join("archive");
+        if !dir.exists() {
+            return Ok(vec![]);
+        }
+        let meta = fs::symlink_metadata(&dir).map_err(|_| "Cannot inspect archive")?;
+        if !meta.is_dir() || meta.is_symlink() || meta.mode() & 0o077 != 0 {
+            return Err("Unsafe archive directory".into());
+        }
+        let mut out = vec![];
+        for e in fs::read_dir(dir).map_err(|_| "Cannot list archive")? {
+            let e = e.map_err(|_| "Cannot read archive entry")?;
+            let name = e.file_name().to_string_lossy().into_owned();
+            let Some(id) = name.strip_suffix(".json").filter(|s| valid_id(s)) else {
+                return Err("Unexpected archive entry".into());
+            };
+            let a: crate::migration::Archive = private_json(&e.path())?;
+            if a.version != 1 || a.id != id || out.len() >= 1000 {
+                return Err("Unsupported archive schema or size".into());
+            }
+            out.push(a);
+        }
+        Ok(out)
     }
     fn identity<'a>(&'a self, actor: &'a str) -> &'a str {
         self.config
@@ -258,17 +319,28 @@ impl Workflow {
                     summary.as_object_mut().unwrap().remove("before");
                     summary.as_object_mut().unwrap().remove("after");
                     out.push(summary);
-                    if out.len() >= 100 {
-                        break;
-                    }
                 }
             }
         }
+        for a in self.archives()? {
+            if a.visible(actor, self.identity(actor)) {
+                out.push(a.view());
+            }
+        }
         out.sort_by(|a, b| b["created_at"].as_i64().cmp(&a["created_at"].as_i64()));
+        out.truncate(100);
         Ok(out)
     }
     pub fn get(&self, id: &str, actor: &str) -> Result<Value> {
         let _guard = self.mutex.lock().map_err(|_| "Approval lock unavailable")?;
+        if let Some(legacy) = id.strip_prefix("legacy-") {
+            return self
+                .archives()?
+                .into_iter()
+                .find(|a| a.id == legacy && a.visible(actor, self.identity(actor)))
+                .map(|a| a.view())
+                .ok_or("Archive unavailable to this identity".into());
+        }
         let record = self.load(id)?;
         if !self.can_read(&record, actor) {
             return Err("Request unavailable to this identity".into());
@@ -359,13 +431,14 @@ impl Workflow {
         if let Some(slack) = &self.config.slack {
             r.notifications = "sending".into();
             self.save(&r)?;
-            r.notifications = if self.notify(slack, &r).is_ok() {
-                "sent"
-            } else {
-                "unknown"
-            }
-            .into();
-            self.save(&r)?;
+            drop(_guard);
+            let sent = self.notify(slack, &r).is_ok();
+            let _guard = self.mutex.lock().map_err(|_| "Approval lock unavailable")?;
+            // A callback may have approved the request while a DM was in flight.
+            let mut current = self.load(&r.id)?;
+            current.notifications = if sent { "sent" } else { "unknown" }.into();
+            self.save(&current)?;
+            return Ok(current.view());
         }
         Ok(r.view())
     }
@@ -518,13 +591,20 @@ impl Workflow {
         r.status = "publishing".into();
         event(&mut r, &actor.subject, "publishing");
         self.save(&r)?;
-        match self
+        drop(_guard);
+        let result = self
             .config
             .code_writer
             .as_ref()
             .ok_or("Code writer unavailable")?
-            .publish(&r.code, &r.id, &r.grant, &r.action)
-        {
+            .publish(&r.code, &r.id, &r.grant, &r.action);
+        let _guard = self.mutex.lock().map_err(|_| "Approval lock unavailable")?;
+        let current = self.load(&r.id)?;
+        if current.status != "publishing" || current.plan_hash != r.plan_hash {
+            return Err("Publication state changed; inspect the external outcome".into());
+        }
+        r = current;
+        match result {
             Ok(url) => {
                 r.status = "proposed".into();
                 r.pr_url = Some(url);

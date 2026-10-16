@@ -16,3 +16,11 @@ examples/demo/audit.jsonl
 examples/demo/approvals
 **/*.env
 **/.env*
+!Dockerfile.rust
+!rust/
+!rust/**
+!scripts/
+!scripts/build_rust_ui.sh
+!scripts/collect_rust_licenses.sh
+rust/target
+rust/pkg
