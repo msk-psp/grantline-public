@@ -28,12 +28,13 @@ OBJECT = 'PRIVATE-OBJECT +%漢?.txt'
 OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
-def sign(method, url, key, secret, body=b'', timestamp=None, token=None, region='us-east-1'):
+def sign(method, url, key, secret, body=b'', timestamp=None, token=None, region='us-east-1', extra_headers=None):
     """Independent oracle: raw encoded URI, encoded/sorted query and SHA256/HMAC chain."""
     stamp = timestamp or datetime.datetime.now(datetime.UTC).strftime('%Y%m%dT%H%M%SZ')
     parsed = urllib.parse.urlsplit(url)
     digest = lambda b: hashlib.sha256(b).hexdigest()  # noqa: E731
     headers = {'host': parsed.netloc, 'x-amz-date': stamp, 'x-amz-content-sha256': digest(body)}
+    headers.update(extra_headers or {})
     if token:
         headers['x-amz-security-token'] = token
     names = ';'.join(sorted(headers))
@@ -68,7 +69,7 @@ def baseline(root, rows):
     return path
 
 
-def run(binary, config, endpoint, observed=None, live=True, extra=None):
+def run(binary, config, endpoint, observed=None, live=True, extra=None, write=False):
     env = dict(os.environ, GL_PROBE_ENDPOINT=endpoint or '', GL_PROBE_KEY=KEY, GL_PROBE_SECRET=SECRET,
                AWS_ACCESS_KEY_ID='GLOBServer', AWS_SECRET_ACCESS_KEY=SECRET,
                HTTP_PROXY='http://127.0.0.1:1', HTTPS_PROXY='http://127.0.0.1:1', ALL_PROXY='http://127.0.0.1:1')
@@ -82,6 +83,8 @@ def run(binary, config, endpoint, observed=None, live=True, extra=None):
         command += ['--observed', str(observed)]
     if live:
         command += ['--live']
+    if write:
+        command += ['--write']
     result = subprocess.run(command, cwd='/', env=env, text=True, capture_output=True, timeout=40)
     assert result.returncode == 0, result.stderr
     assert all(s not in result.stdout + result.stderr for s in [SECRET, TOKEN, OBJECT, urllib.parse.quote(OBJECT, safe='')]), 'secret or sampled object name escaped output'
@@ -291,7 +294,7 @@ def docker_test(binary, context):
         fixtures.chmod(0o755)
         # SeaweedFS native object scopes require a wildcard to cover descendant keys.
         accounts = [('observer', 'GLOBServer', ['Admin']), ('demo', KEY, ['List:probe', 'Read:probe/team/*']),
-                    ('read-only', 'GLREADONLY', ['Read:probe/team/*']), ('list-only', 'GLLISTONLY', ['List:probe']), ('denied', 'GLDENIED', ['List:another'])]
+                    ('write-test', 'GLWRITE', ['Write:probe/team/*']), ('read-only', 'GLREADONLY', ['Read:probe/team/*']), ('list-only', 'GLLISTONLY', ['List:probe']), ('denied', 'GLDENIED', ['List:another'])]
         seed = fixtures / 's3.json'
         seed.write_text(json.dumps(dict(identities=[dict(name=n, credentials=[dict(accessKey=k, secretKey=SECRET)], actions=a) for n, k, a in accounts])))
         seed.chmod(0o644)
@@ -353,7 +356,15 @@ def docker_test(binary, context):
                     raise AssertionError('Forbidden write left an object')
             except urllib.error.HTTPError as exc:
                 assert exc.code == 404
-            print('SeaweedFS S3 probes: actual encoded-key SigV4 List/HEAD, read-only sample without List, List AccessDenied, ambiguous HEAD/empty scope, invalid keys/signature, no Write probe and independent write refusal passed')
+            config_at(root, ('write-test',))
+            b = baseline(root, [('write-test', 'bucket:probe/team', 'Write')])
+            result = run(binary, config, endpoint, b, extra={'GL_PROBE_KEY': 'GLWRITE'}, write=True)
+            assert result['summary'] == dict(allow=1, deny=0, unknown=0), result
+            assert 'probe object deleted' in result['probes'][0]['how'], result
+            url = endpoint + '/probe?list-type=2&prefix=team%2F_grantline-probe%2F'
+            with OPENER.open(urllib.request.Request(url, headers=sign('GET', url, 'GLOBServer', SECRET)), timeout=5) as response:
+                assert b'<Contents>' not in response.read(), 'write probe object was not cleaned up'
+            print('SeaweedFS S3 probes: actual encoded-key SigV4 List/HEAD, read-only sample without List, List AccessDenied, ambiguous HEAD/empty scope, invalid keys/signature, default-off Write, independent write refusal and explicit unique-object PUT/DELETE cleanup passed')
         finally:
             subprocess.run([*docker, 'rm', '-f', '-v', name], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
 

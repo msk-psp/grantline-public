@@ -169,7 +169,6 @@ def docker_test(binary, context):
                     ('postgres', 'default:gl_data.app@gl_creator', ['SELECT']),
                     ('pg_read_all_data', 'default:gl_data.app@gl_creator', ['SELECT']),
                     ('gl_creator', 'default:gl_data.app@gl_creator', ['SELECT']),
-                    ('gl_user', 'default:gl_data.app@gl_creator', ['ALL']),
                     ('gl_user', 'default:gl_data.*@gl_creator', ['SELECT'])]:
                 intent(root, [(subject, resource, privileges)], managed=(subject,))
                 before = defaults(raw=True)

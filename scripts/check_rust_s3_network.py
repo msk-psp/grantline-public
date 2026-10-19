@@ -360,7 +360,25 @@ def docker_test(binary, context):
             assert result['s3_previews'] and all(p['blocked'] for p in result['s3_previews'])
             assert 'forbidden' not in ET.tostring(call('ListUsers')).decode()
             assert writable != readonly
-            print('SeaweedFS Docker: actual SigV4 IAM reads, nested policy routes, no-policy unknown, server-side IAM write refusal and direct Filer IAM tree passed')
+            # A direct Filer writer changes only an owning fixture identity, even when another identity is unknown.
+            direct_url = filer + '/etc/iam/identities/parity.json'
+            direct = dict(name='parity', actions=['Read:demo/parity/*'], credentials=[dict(accessKey='GLPARITY', secretKey=SECRET)])
+            urllib.request.urlopen(urllib.request.Request(direct_url, data=json.dumps(direct).encode(), method='PUT', headers={'Content-Type':'application/json'}), timeout=5).close()
+            cfg.write_text(cfg.read_text().replace('admin_filer_url_env="GRANTLINE_R3D_ADMIN"', 'admin_filer_url_env="GRANTLINE_R3D_ENDPOINT"'))
+            (root / 'intent.toml').write_text('managed_subjects=["parity"]\nmanaged_systems=["object-store"]\n[[grants]]\nsystem="object-store"\nsubject="parity"\nresource="bucket:demo/parity"\nprivs=["Read","Write"]\n')
+            args = ['apply','--system','object-store','--subject','parity','--json']
+            preview = run(binary, cfg, filer, *args)
+            assert preview['changed'] and not preview['applied']
+            result = run(binary, cfg, filer, *args, '--write','--expect',preview['plan_id'])
+            assert result['applied'] and not result['concurrent_admin_guarantee']
+            with urllib.request.urlopen(direct_url, timeout=5) as response:
+                after = json.load(response)
+            assert after['credentials'] == direct['credentials'] and 'Write:demo/parity/*' in after['actions']
+            assert not run(binary, cfg, filer, *args)['changed']
+            # The unrelated policy and membership still resolve after the write.
+            final = run(binary, cfg, filer, 'plan', '--json')
+            assert any(g['subject']=='demo' and g['resource']=='bucket:demo/team' for g in final['observed'])
+            print('SeaweedFS Docker: actual SigV4 IAM reads, nested policy routes, no-policy unknown, server-side IAM write refusal, direct Filer IAM tree and isolated owning-identity writer/no-op with unchanged keys/inheritance passed')
         except Exception:
             logs = subprocess.run([*docker, 'logs', '--tail', '80', name], text=True, capture_output=True, timeout=10)
             diagnostic = (logs.stdout + logs.stderr).replace(SECRET, '[redacted]').replace(MARKER, '[redacted]')

@@ -20,6 +20,15 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Record a fresh observation and preview drift notifications; external delivery requires --send.
+    Notify {
+        #[arg(long)]
+        live: bool,
+        #[arg(long)]
+        send: bool,
+        #[arg(long)]
+        json: bool,
+    },
     /// Print a read-only plan; native PostgreSQL/ClickHouse/S3 observation requires --live.
     Plan {
         #[command(flatten)]
@@ -31,6 +40,10 @@ enum Command {
     },
     /// Preview local S3 IAM or (--live) PostgreSQL/ClickHouse ACLs; --write requires a reviewed plan.
     Apply {
+        #[arg(long)]
+        database: Option<String>,
+        #[arg(long)]
+        subject: Option<String>,
         #[arg(long)]
         live: bool,
         #[arg(long)]
@@ -55,7 +68,7 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Read-only native ACL checks. Network activity requires --live; no writes or data reads.
+    /// Native ACL checks. Network requires --live; S3 temporary-object writes also require --write.
     Probe {
         #[arg(long)]
         live: bool,
@@ -66,6 +79,9 @@ enum Command {
         system: Vec<String>,
         #[arg(long)]
         subject: Vec<String>,
+        /// S3 Write only: create a unique probe object and attempt cleanup with the same identity.
+        #[arg(long, requires = "live")]
+        write: bool,
         #[arg(long)]
         json: bool,
     },
@@ -137,27 +153,69 @@ enum Command {
     /// Development-only differential test interface: JSON cases on stdin.
     Parity,
 }
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Cli::parse();
+    let needs_env = match args.command.as_ref() {
+        Some(
+            Command::Plan { source, .. }
+            | Command::Snapshot { source, .. }
+            | Command::Graph { source, .. },
+        ) => source.live,
+        Some(
+            Command::Apply { live, .. }
+            | Command::Restore { live, .. }
+            | Command::Probe { live, .. },
+        ) => *live,
+        Some(Command::Notify { live, send, .. }) => *live || *send,
+        Some(Command::Serve { .. }) => true,
+        _ => false,
+    };
+    if needs_env {
+        for (key, value) in grantline_rs::config::env_file(&args.config)? {
+            // Single-threaded startup, before the Tokio runtime exists.
+            unsafe {
+                std::env::set_var(key, value);
+            }
+        }
+    }
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(run(args))
+}
+async fn run(args: Cli) -> Result<(), Box<dyn std::error::Error>> {
     match args.command.unwrap_or(Command::Plan {
         source: cli::Source::default(),
         json: false,
         verbose: false,
     }) {
+        Command::Notify { live, send, json } => {
+            grantline_rs::notify::run(&args.config, live, send, json)?
+        }
         Command::Plan {
             source,
             json,
             verbose,
         } => cli::plan(&args.config, &source, json, verbose)?,
         Command::Apply {
+            database,
+            subject,
             live,
             system,
             write,
             expect,
             json,
         } => {
-            cli::apply(&args.config, &system, live, write, expect.as_deref(), json)?;
+            cli::apply(
+                &args.config,
+                &system,
+                live,
+                write,
+                expect.as_deref(),
+                json,
+                database.as_deref(),
+                subject.as_deref(),
+            )?;
         }
         Command::Restore {
             live,
@@ -186,6 +244,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             observed,
             system,
             subject,
+            write,
             json,
         } => cli::probe(
             &args.config,
@@ -194,6 +253,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             &system,
             &subject,
             json,
+            write,
         )?,
         Command::Snapshot {
             source,

@@ -60,6 +60,7 @@ struct Catalog {
     owner_role_oids: BTreeSet<i64>,
     default_acls: BTreeSet<AclAtom>,
     default_state: Vec<Value>,
+    table_privileges: Vec<String>,
 }
 async fn rows(client: &Client, sql: &str) -> Result<Vec<Value>> {
     let mut rows: Vec<Value> = query(client, sql).await?;
@@ -166,6 +167,7 @@ async fn catalog(client: &Client, system: &str, db: &str) -> Result<Catalog> {
                 .ok_or("Invalid default creator identity")?,
         );
     }
+    let table_privileges = rows(client,"SELECT privilege_type AS privilege FROM aclexplode(acldefault('r',(SELECT oid FROM pg_roles WHERE rolname=current_user)))").await?.into_iter().map(|r|r["privilege"].as_str().map(str::to_owned).ok_or_else(||"Invalid privilege catalog".to_owned())).collect::<Result<Vec<_>>>()?;
     let other = json!({"roles": roles, "other_owner_role_oids": other_owner_role_oids});
     Ok(Catalog {
         observed,
@@ -179,6 +181,7 @@ async fn catalog(client: &Client, system: &str, db: &str) -> Result<Catalog> {
         databases,
         default_acls,
         default_state,
+        table_privileges,
     })
 }
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -269,7 +272,7 @@ fn target(g: &Grant, db: &str) -> Result<Target> {
         return Err("Writer requires exact supported table/schema/database privileges; use TEMPORARY, not TEMP; ALL is unsupported".into());
     }
     name(&g.subject)?;
-    if g.subject == "PUBLIC" || g.subject.starts_with("pg_") {
+    if g.subject.starts_with("pg_") {
         return Err("PUBLIC and predefined targets are unsupported by this writer".into());
     }
     Ok(match scope {
@@ -281,6 +284,13 @@ fn target(g: &Grant, db: &str) -> Result<Target> {
 
 fn identifier(value: &str) -> String {
     format!("\"{}\"", value.replace('"', "\"\""))
+}
+fn recipient_identifier(value: &str) -> String {
+    if value == "PUBLIC" {
+        "PUBLIC".into()
+    } else {
+        identifier(value)
+    }
 }
 fn report(
     loaded: &input::Loaded,
@@ -298,7 +308,29 @@ fn report(
             .grants
             .iter()
             .filter(|g| g.system == system)
-            .cloned()
+            .flat_map(|g| {
+                let privileges: Vec<String> = if g.privilege == "ALL" {
+                    match g.resource.split(':').next().unwrap_or("") {
+                        "db" => ["CONNECT", "CREATE", "TEMPORARY"]
+                            .into_iter()
+                            .map(str::to_owned)
+                            .collect(),
+                        "schema" => ["USAGE", "CREATE"].into_iter().map(str::to_owned).collect(),
+                        "table" | "default" => cat.table_privileges.clone(),
+                        _ => vec![g.privilege.clone()],
+                    }
+                } else {
+                    vec![if g.privilege == "TEMP" {
+                        "TEMPORARY".into()
+                    } else {
+                        g.privilege.clone()
+                    }]
+                };
+                privileges.into_iter().map(|privilege| Grant {
+                    privilege,
+                    ..g.clone()
+                })
+            })
             .collect(),
         managed: loaded.intent.managed.clone(),
         managed_systems: loaded
@@ -322,7 +354,14 @@ fn report(
             }
         }
     }
-    let mut plan = planner::build(&intent, &cat.observed.grants, &[], &loaded.kinds, vec![]);
+    let observed = cat
+        .observed
+        .grants
+        .iter()
+        .filter(|g| g.resource.strip_prefix("db:").is_none_or(|name| name == db))
+        .cloned()
+        .collect();
+    let mut plan = planner::build(&intent, &observed, &[], &loaded.kinds, vec![]);
     if !plan.commands_complete || plan.changes.len() > 1000 {
         return Err("Incomplete or oversized PostgreSQL write plan".into());
     }
@@ -355,7 +394,15 @@ fn report(
         }
         if g.resource.starts_with("default:") && adapter.default_write_scopes.contains(&g.resource)
         {
-            defaults::command(g, db, cat, &adapter.default_write_scopes, issuer, None)?;
+            defaults::command(
+                g,
+                db,
+                cat,
+                &adapter.default_write_scopes,
+                issuer,
+                None,
+                adapter.postgres_write_public,
+            )?;
         }
     }
     for change in &mut plan.changes {
@@ -369,6 +416,7 @@ fn report(
                 &adapter.default_write_scopes,
                 issuer,
                 Some(&change.action),
+                adapter.postgres_write_public,
             )?;
             continue;
         }
@@ -383,17 +431,20 @@ fn report(
             continue;
         }
         let owner = target.owner(cat)?;
-        let role = cat
-            .roles
-            .iter()
-            .find(|r| r.name == g.subject)
-            .ok_or("Target role must already exist")?;
+        let role = cat.roles.iter().find(|r| r.name == g.subject);
+        if g.subject == "PUBLIC" {
+            if !adapter.postgres_write_public {
+                return Err("PUBLIC writes require explicit postgres_write_public".into());
+            }
+        } else if role.is_none() {
+            return Err("Target role must already exist".into());
+        }
         let database_owner = cat
             .databases
             .iter()
             .find(|d| d.name == db)
             .ok_or("Selected database disappeared")?;
-        if role.privileged
+        if role.is_some_and(|r| r.privileged)
             || owner == g.subject
             || (owner == "pg_database_owner" && database_owner.owner == g.subject)
         {
@@ -405,7 +456,10 @@ fn report(
                 .iter()
                 .find(|t| &t.schema == schema && &t.name == table)
                 .ok_or("Target table disappeared")?;
-            if t.kind != "r" || t.inherited || t.columns {
+            if t.columns
+                || ((t.kind != "r" || t.inherited)
+                    && !adapter.postgres_write_relations.contains(&g.resource))
+            {
                 return Err(
                     "Column ACLs, views, partitions and inherited tables are unsupported".into(),
                 );
@@ -425,7 +479,7 @@ fn report(
             "{verb} {} ON {} {to} {}{tail};",
             g.privilege,
             target.sql(),
-            identifier(&g.subject)
+            recipient_identifier(&g.subject)
         ));
     }
     Ok(plan)
@@ -674,11 +728,46 @@ async fn transaction(
     })
 }
 pub fn apply(path: &Path, system: &str, write: bool, expected: Option<&str>) -> Result<Receipt> {
+    apply_in_database(path, system, write, expected, None)
+}
+pub fn apply_in_database(
+    path: &Path,
+    system: &str,
+    write: bool,
+    expected: Option<&str>,
+    database: Option<&str>,
+) -> Result<Receipt> {
     if write && expected.is_none() {
         return Err("PostgreSQL --write requires a reviewed --expect PLAN_ID".into());
     }
     let path = std::path::absolute(path).map_err(|_| "Cannot resolve config path")?;
-    let (loaded, config_bytes, intent_bytes) = input::load_writer(&path)?;
+    let (mut loaded, config_bytes, intent_bytes) = input::load_writer(&path)?;
+    if let Some(db) = database {
+        component(db)?;
+        let a = loaded
+            .config
+            .adapters
+            .get_mut(system)
+            .ok_or("Unknown PostgreSQL system")?;
+        let matches = |p: &str| glob::Pattern::new(p).is_ok_and(|p| p.matches(db));
+        if !a.databases.iter().any(|p| matches(p)) || a.exclude_databases.iter().any(|p| matches(p))
+        {
+            return Err("Selected database is excluded by configuration".into());
+        }
+        a.databases = vec![db.into()];
+        a.exclude_databases.clear();
+        loaded.intent.grants.retain(|g| {
+            g.system != system
+                || g.resource.strip_prefix("role:").is_some()
+                || (g.resource.split_once(':').is_some_and(|(kind, rest)| {
+                    if kind == "db" {
+                        rest == db
+                    } else {
+                        rest.split('.').next() == Some(db)
+                    }
+                }))
+        });
+    }
     let adapter = loaded
         .config
         .adapters
@@ -701,6 +790,9 @@ pub fn apply(path: &Path, system: &str, write: bool, expected: Option<&str>) -> 
         .ok_or("PostgreSQL admin_dsn_env write credential is not configured")?;
     let raw = std::env::var(key).map_err(|_| "PostgreSQL admin credential is unavailable")?;
     let mut cfg = config(&raw, adapter.read_timeout_seconds)?;
+    if database.is_some() {
+        cfg.dbname(db);
+    }
     if cfg.get_dbname() != Some(db.as_str()) {
         return Err("Admin DSN database must equal the single configured database".into());
     }
@@ -722,7 +814,7 @@ pub fn apply(path: &Path, system: &str, write: bool, expected: Option<&str>) -> 
             let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|_| "Cannot create PostgreSQL writer runtime")?;
             let result = runtime.block_on(async {
                 let deadline = Duration::from_secs(seconds);
-                let client = tokio::time::timeout(deadline, open(&cfg)).await.map_err(|_| "PostgreSQL writer connection deadline exceeded")??;
+                let client = tokio::time::timeout(deadline, open(&cfg, adapter.ca_bundle_env.as_deref())).await.map_err(|_| "PostgreSQL writer connection deadline exceeded")??;
                 tokio::time::timeout(deadline, client.batch_execute(if write { "BEGIN ISOLATION LEVEL READ COMMITTED READ WRITE" } else { "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY" })).await.map_err(|_| "PostgreSQL transaction start deadline exceeded")?.map_err(|_| "Cannot start PostgreSQL writer transaction")?;
                 let prepared = tokio::time::timeout(deadline, transaction(&client, &inputs, write, expected)).await;
                 let mut receipt = match prepared {
@@ -798,11 +890,18 @@ mod tests {
             Target::Table("public".into(), "odd\";table".into())
         );
         assert_eq!(identifier("odd\";name"), "\"odd\"\";name\"");
+        // Parsing is separate from the explicit postgres_write_public authorization in report().
+        assert!(
+            target(
+                &Grant::new("pg", "PUBLIC", "table:demo.public.t", "SELECT"),
+                "demo"
+            )
+            .is_ok()
+        );
         for (resource, privilege, subject) in [
             ("table:other.public.t", "SELECT", "demo"),
             ("table:demo.public.*", "SELECT", "demo"),
             ("table:demo.public.t", "ALL", "demo"),
-            ("table:demo.public.t", "SELECT", "PUBLIC"),
         ] {
             assert!(target(&Grant::new("pg", subject, resource, privilege), "demo").is_err());
         }

@@ -15,7 +15,7 @@ pub struct Bridge {
 fn any_system() -> String {
     "*".into()
 }
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct GraphConfig {
     #[serde(default = "services")]
     pub services: Vec<String>,
@@ -47,7 +47,7 @@ impl GraphConfig {
         Ok(())
     }
 }
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Edge {
     pub src: String,
     pub dst: String,
@@ -78,7 +78,7 @@ impl Edge {
         label
     }
 }
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Graph {
     pub edges: Vec<Edge>,
     pub principals: BTreeSet<String>,

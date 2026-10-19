@@ -219,7 +219,7 @@ fn missing_shared_policies_and_empty_attached_policies_shadow_actions() {
         "a cancelled allow must not remain a highlighted policy route"
     );
     assert!(!obs.snapshot.grants.iter().any(|g| g.subject == "demo"));
-    // Malformed group or conflicting identity-specific policy name cannot appear healthy.
+    // A malformed group remains unknown; an inline policy name is scoped to its owner.
     fs::write(
         tree.join("groups/research.json"),
         "bad NEVER-OUTPUT-CREDENTIAL",
@@ -236,9 +236,27 @@ fn missing_shared_policies_and_empty_attached_policies_shadow_actions() {
         r#"{"inlinePolicies":{"demo":{"shared":{"Statement":[]}}}}"#,
     )
     .unwrap();
+    assert!(plan(root)["observation_complete"].as_bool().unwrap());
+    let obs = engine::observe(&config::load(&cfg).unwrap(), None).unwrap();
+    let inline = obs
+        .routes
+        .iter()
+        .find(|r| r[1] == "demo" && r[3] == "inline")
+        .unwrap();
+    assert_ne!(
+        inline[2], "policy:shared",
+        "different documents must have distinct policy nodes"
+    );
     assert!(
-        !plan(root)["observation_complete"].as_bool().unwrap(),
-        "different inline and group documents must not share one graph node"
+        obs.routes
+            .iter()
+            .any(|r| r[1] == "group:research" && r[2] == "policy:shared")
+    );
+    assert!(
+        obs.snapshot
+            .grants
+            .iter()
+            .any(|g| g.subject == "demo" && g.privilege == "Read")
     );
 }
 

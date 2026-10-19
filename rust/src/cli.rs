@@ -17,6 +17,10 @@ fn json(value: &impl Serialize) -> Result<()> {
     );
     Ok(())
 }
+#[expect(
+    clippy::too_many_arguments,
+    reason = "CLI dispatch keeps write authorization and scope selectors explicit"
+)]
 pub fn apply(
     path: &Path,
     system: &str,
@@ -24,6 +28,8 @@ pub fn apply(
     write: bool,
     expected: Option<&str>,
     as_json: bool,
+    database: Option<&str>,
+    subject: Option<&str>,
 ) -> Result<()> {
     let loaded = config::load_writer(path)?.0;
     let adapter = loaded
@@ -31,13 +37,26 @@ pub fn apply(
         .adapters
         .get(system)
         .ok_or("Unknown apply system")?;
+    if database.is_some() && adapter.typ(system) != "postgres" {
+        return Err("--database is only a PostgreSQL apply selector".into());
+    }
+    if subject.is_some()
+        && (adapter.typ(system) != "s3"
+            || !adapter
+                .planes
+                .get(&adapter.enforced)
+                .is_some_and(|p| p.filer_url_env.is_some()))
+    {
+        return Err("--subject is only an S3 Filer identity selector".into());
+    }
     if adapter.typ(system) == "postgres" {
         if !live {
             return Err(
                 "PostgreSQL apply preview requires --live and explicit admin_dsn_env".into(),
             );
         }
-        let result = crate::postgres::writer::apply(path, system, write, expected)?;
+        let result =
+            crate::postgres::writer::apply_in_database(path, system, write, expected, database)?;
         if as_json {
             return json(&result);
         }
@@ -102,6 +121,15 @@ pub fn apply(
     }
     #[cfg(unix)]
     if live && adapter.typ(system) == "s3" {
+        if adapter
+            .planes
+            .get(&adapter.enforced)
+            .is_some_and(|p| p.filer_url_env.is_some())
+        {
+            return json(&crate::s3::filer_writer::apply(
+                path, system, subject, write, expected,
+            )?);
+        }
         let result = crate::s3::remote_writer::apply(path, system, write, expected)?;
         return json(&result);
     }
@@ -477,6 +505,7 @@ pub fn probe(
     systems: &[String],
     subjects: &[String],
     as_json: bool,
+    write: bool,
 ) -> Result<()> {
     use crate::probe::{self, Probe, Verdict};
     let mut loaded = config::load(path)?;
@@ -514,7 +543,7 @@ pub fn probe(
         } else if live && adapter.typ(system) == "clickhouse" {
             probes.extend(crate::clickhouse::probe::run(adapter, &grants));
         } else if live && adapter.typ(system) == "s3" {
-            probes.extend(crate::s3::probe::run(adapter, &grants));
+            probes.extend(crate::s3::probe::run_with_write(adapter, &grants, write));
         } else {
             let why = if !live {
                 "Network probes disabled; pass --live to opt in"
