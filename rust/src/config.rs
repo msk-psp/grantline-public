@@ -23,6 +23,8 @@ pub struct Config {
     pub graph: GraphConfig,
     #[serde(default)]
     pub web: crate::console::Config,
+    #[cfg(unix)]
+    pub approvals: Option<crate::workflow::Config>,
 }
 fn snapshot_dir() -> String {
     "snapshots".into()

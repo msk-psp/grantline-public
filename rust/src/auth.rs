@@ -38,7 +38,7 @@ fn mode() -> String {
 fn identity_header() -> String {
     "X-Forwarded-Email".into()
 }
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Config {
     #[serde(default = "mode")]
     pub mode: String,
