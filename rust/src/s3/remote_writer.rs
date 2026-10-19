@@ -16,6 +16,7 @@ struct Http {
     bearer: Option<String>,
     started: Instant,
     timeout: Duration,
+    tls: ureq::tls::TlsConfig,
 }
 impl Http {
     fn agent(&self) -> Result<ureq::Agent> {
@@ -25,6 +26,7 @@ impl Http {
             .filter(|d| !d.is_zero())
             .ok_or("Remote IAM deadline exceeded")?;
         Ok(ureq::Agent::config_builder()
+            .tls_config(self.tls.clone())
             .timeout_global(Some(left))
             .timeout_connect(Some(left.min(Duration::from_secs(5))))
             .max_redirects(0)
@@ -125,9 +127,11 @@ fn apply_inner(
         || p.filer_url_env.is_some()
         || p.file.is_some()
         || p.dir.is_some()
-        || p.ca_bundle_env.is_some()
     {
-        return Err("Remote JSON writes require explicit conditional_write, no mixed/tree/IAM sources or custom CA".into());
+        return Err(
+            "Remote JSON writes require explicit conditional_write, no mixed/tree/IAM sources"
+                .into(),
+        );
     }
     let raw = std::env::var(
         p.admin_url_env
@@ -160,6 +164,7 @@ fn apply_inner(
         return Err("Invalid remote IAM credential or timeout".into());
     }
     let http = Http {
+        tls: crate::tls::http(p.ca_bundle_env.as_deref())?,
         url,
         bearer,
         started: Instant::now(),

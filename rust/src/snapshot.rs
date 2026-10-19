@@ -18,7 +18,7 @@ pub fn redact(text: &str) -> String {
         LazyLock::new(|| Regex::new(r"(://[^\s:/@]+:)[^\s@/]+(@)").unwrap());
     CREDENTIAL.replace_all(text, "${1}***${2}").into_owned()
 }
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Snapshot {
     pub path: PathBuf,
     pub ts: DateTime<FixedOffset>,

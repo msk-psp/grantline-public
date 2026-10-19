@@ -161,7 +161,7 @@ async fn evaluate(adapter: &Adapter, grants: &[Grant]) -> Result<Vec<Probe>> {
             if let Some(db) = &db {
                 cfg.dbname(db);
             }
-            let client = connect(&cfg).await?;
+            let client = connect(&cfg, adapter.ca_bundle_env.as_deref()).await?;
             if let Some(subject) = &subject {
                 let row = client
                     .query_one("SELECT session_user::text, current_user::text", &[])

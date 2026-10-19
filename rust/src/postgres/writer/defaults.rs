@@ -44,6 +44,7 @@ pub(super) fn command(
     allowlist: &BTreeSet<String>,
     issuer: &str,
     action: Option<&str>,
+    allow_public: bool,
 ) -> Result<Option<String>> {
     let t = target(g, db)?;
     let Target::Default(schema, creator) = &t else {
@@ -67,17 +68,16 @@ pub(super) fn command(
         .iter()
         .find(|d| d.name == db)
         .ok_or("Default database disappeared")?;
-    let recipient = cat
-        .roles
-        .iter()
-        .find(|r| r.name == g.subject)
-        .ok_or("Default recipient must already exist")?;
+    let recipient = cat.roles.iter().find(|r| r.name == g.subject);
+    if g.subject != "PUBLIC" && recipient.is_none() {
+        return Err("Default recipient must already exist".into());
+    }
     name(&g.subject)?;
     if actor.privileged
         || creator.starts_with("pg_")
-        || recipient.privileged
+        || recipient.is_some_and(|r| r.privileged)
         || g.subject.starts_with("pg_")
-        || g.subject == "PUBLIC"
+        || (g.subject == "PUBLIC" && !allow_public)
         || g.subject == *creator
         || g.subject == schema.owner
         || g.subject == database.owner
@@ -105,7 +105,7 @@ pub(super) fn command(
         "ALTER DEFAULT PRIVILEGES {} {verb} {} ON TABLES {to} {}{tail};",
         t.sql(),
         g.privilege,
-        identifier(&g.subject)
+        recipient_identifier(&g.subject)
     )))
 }
 

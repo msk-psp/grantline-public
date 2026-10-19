@@ -16,14 +16,30 @@ use std::{
     sync::Arc,
 };
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Config {
     pub public_url: Option<String>,
     #[serde(default)]
     pub auth: auth::Config,
     pub assets: Option<String>,
+    #[serde(default = "cache_ttl")]
+    pub cache_ttl_seconds: u64,
+}
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            public_url: None,
+            auth: Default::default(),
+            assets: None,
+            cache_ttl_seconds: 60,
+        }
+    }
+}
+fn cache_ttl() -> u64 {
+    60
 }
 pub struct App {
+    cache: crate::cache::Cache<serde_json::Value>,
     pub auth: auth::Auth,
     pub path: PathBuf,
     pub live: bool,
@@ -78,16 +94,54 @@ async fn session(State(s): State<Shared>, headers: HeaderMap) -> Response {
     }
 }
 pub async fn data(s: Shared) -> crate::Result<serde_json::Value> {
+    data_refresh(s, false).await
+}
+async fn data_refresh(s: Shared, force: bool) -> crate::Result<serde_json::Value> {
     tokio::task::spawn_blocking(move||{
-        let l=config::load(&s.path)?;let o=engine::observe_with_live(&l,None,s.live)?;let p=engine::plan(&l,&o);let g=engine::graph(&l,&o)?;
-        Ok(serde_json::json!({"plan":p,"graph":g,"snapshot":o.snapshot,"declared":l.intent.grants,"service_kinds":l.config.adapters.iter().map(|(s,a)|(s.clone(),a.kind(s).to_owned())).collect::<std::collections::BTreeMap<_,_>>(),"services":l.config.adapters.keys().collect::<Vec<_>>(),"environments":l.config.graph.environments,"live":s.live}))
+        let (l,cfg,intent)=config::load_writer(&s.path)?;let key=crate::integrations::sha(&serde_json::to_vec(&(cfg,intent)).map_err(|_|"Cannot bind observation inputs")?);
+        s.cache.get(&key,std::time::Duration::from_secs(l.config.web.cache_ttl_seconds.min(3600)),force,||{let o=engine::observe_with_live(&l,None,s.live)?;let p=engine::plan(&l,&o);let g=engine::graph(&l,&o)?;
+        Ok(serde_json::json!({"plan":p,"graph":g,"snapshot":o.snapshot,"declared":l.intent.grants,"service_kinds":l.config.adapters.iter().map(|(s,a)|(s.clone(),a.kind(s).to_owned())).collect::<std::collections::BTreeMap<_,_>>(),"services":l.config.adapters.keys().collect::<Vec<_>>(),"environments":l.config.graph.environments,"live":s.live}))})
     }).await.map_err(|_|"Observation worker failed".to_owned())?
 }
-async fn catalog(State(s): State<Shared>, headers: HeaderMap) -> Response {
+async fn query_data(
+    s: Shared,
+    q: &std::collections::BTreeMap<String, String>,
+) -> crate::Result<serde_json::Value> {
+    let days = q
+        .get("days")
+        .filter(|s| !s.is_empty())
+        .map(|s| crate::recent::days(s))
+        .transpose()?;
+    let mut data = data_refresh(s.clone(), q.contains_key("refresh")).await?;
+    if let Some(days) = days {
+        tokio::task::spawn_blocking(move || {
+            crate::recent::apply(&s.path, &mut data, days)?;
+            Ok(data)
+        })
+        .await
+        .map_err(|_| "Recent route worker failed".to_owned())?
+    } else {
+        Ok(data)
+    }
+}
+async fn catalog(
+    State(s): State<Shared>,
+    headers: HeaderMap,
+    Query(q): Query<std::collections::BTreeMap<String, String>>,
+) -> Response {
     if s.auth.current(&headers).is_none() {
         return (StatusCode::UNAUTHORIZED, "Sign in required").into_response();
     }
-    match data(s).await {
+    if q.get("days")
+        .is_some_and(|s| !s.is_empty() && crate::recent::days(s).is_err())
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error":"Days must be a whole number between 1 and 3650"})),
+        )
+            .into_response();
+    }
+    match query_data(s, &q).await {
         Ok(v) => Json(v).into_response(),
         Err(_) => (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -210,7 +264,7 @@ async fn home(
     let (data, mut error) = if loading || !needs_data {
         (grantline_ui::Data::default(), None)
     } else {
-        match data(s.clone())
+        match query_data(s.clone(), &q)
             .await
             .and_then(|v| serde_json::from_value(v).map_err(|_| "Invalid console data".into()))
         {
@@ -277,7 +331,40 @@ async fn home(
             .collect();
         data.environments = l.config.graph.environments.into_iter().collect();
     }
+    let history_comparison =
+        if page == "history" && (q.contains_key("from") || q.contains_key("since")) {
+            match compare_history(&s.path, &q) {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    error = Some(e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
     let bootstrap = grantline_ui::Bootstrap {
+        history_comparison,
+        days: q.get("days").cloned().unwrap_or_default(),
+        subject: q.get("subject").cloned().unwrap_or_default(),
+        resource: q.get("resource").cloned().unwrap_or_default(),
+        privilege: q
+            .get("priv")
+            .or_else(|| q.get("privilege"))
+            .cloned()
+            .unwrap_or_default(),
+        action: q.get("action").cloned().unwrap_or_default(),
+        refresh: q.contains_key("refresh"),
+        refresh_url: {
+            let mut query = q.clone();
+            query.insert("refresh".into(), "1".into());
+            format!(
+                "?{}",
+                url::form_urlencoded::Serializer::new(String::new())
+                    .extend_pairs(&query)
+                    .finish()
+            )
+        },
         data,
         actor: Some(actor_value),
         page,
@@ -334,6 +421,56 @@ async fn sign_in(
     let body=Owner::new().with(move||view!{<main class="login card"><img width="48" height="48" src="/static/grantline-icon.svg" alt=""/><h1>"Grantline"</h1><p>{phrase}</p><a class="button" href=href>{text}</a></main>}.to_html());
     Html(html_document(&lang, &theme, &body, None))
 }
+fn compare_history(
+    path: &std::path::Path,
+    q: &std::collections::BTreeMap<String, String>,
+) -> crate::Result<serde_json::Value> {
+    let l = config::load(path)?;
+    let dir = config::relative(&l.base, &l.config.snapshots)?;
+    let files = crate::snapshot::list(&dir)?;
+    if files.len() > 1000 {
+        return Err("Snapshot history limit exceeded".into());
+    }
+    let load = |p: &std::path::Path| -> crate::Result<crate::snapshot::Snapshot> {
+        if std::fs::metadata(p)
+            .map_err(|_| "Snapshot unavailable")?
+            .len()
+            > 32 * 1024 * 1024
+        {
+            return Err("Snapshot exceeds console limit".into());
+        }
+        crate::snapshot::Snapshot::load(p, &l.kinds)
+    };
+    let choose = |key: &str| -> crate::Result<std::path::PathBuf> {
+        let name = q.get(key).ok_or("Choose both snapshots")?;
+        files
+            .iter()
+            .find(|p| p.file_name().and_then(|s| s.to_str()) == Some(name))
+            .cloned()
+            .ok_or_else(|| "Snapshot is not in this history".to_owned())
+    };
+    let to = if q.contains_key("to") {
+        choose("to")?
+    } else {
+        files.last().cloned().ok_or("No snapshots")?
+    };
+    let from = if let Some(since) = q.get("since") {
+        let when = crate::snapshot::since(since, chrono::Utc::now().fixed_offset())?;
+        files
+            .iter()
+            .map(|p| load(p).map(|s| (s.ts, p.clone())))
+            .collect::<crate::Result<Vec<_>>>()?
+            .into_iter()
+            .filter(|(ts, _)| *ts <= when)
+            .max_by_key(|(ts, _)| *ts)
+            .map(|(_, p)| p)
+            .ok_or("No snapshot before that time")?
+    } else {
+        choose("from")?
+    };
+    let cmp = crate::snapshot::compare(&load(&from)?, &load(&to)?);
+    serde_json::to_value(cmp).map_err(|_| "Cannot encode comparison".into())
+}
 fn history_data(path: &std::path::Path) -> crate::Result<Vec<serde_json::Value>> {
     let l = config::load(path)?;
     let directory = config::relative(&l.base, &l.config.snapshots)?;
@@ -362,7 +499,7 @@ fn history_data(path: &std::path::Path) -> crate::Result<Vec<serde_json::Value>>
         let compared = previous
             .as_ref()
             .map(|p| crate::snapshot::compare(p, &current));
-        result.push(serde_json::json!({"ts":current.ts,"grants":current.grants.len(),"unknown":current.unobserved.len(),"added":compared.as_ref().map(|c|c.added.len()),"removed":compared.as_ref().map(|c|c.removed.len()),"visibility":compared.as_ref().map(|c|c.revealed.len()+c.obscured.len())}));
+        result.push(serde_json::json!({"name":path.file_name().and_then(|s|s.to_str()),"ts":current.ts,"grants":current.grants.len(),"unknown":current.unobserved.len(),"added":compared.as_ref().map(|c|c.added.len()),"removed":compared.as_ref().map(|c|c.removed.len()),"visibility":compared.as_ref().map(|c|c.revealed.len()+c.obscured.len())}));
         previous = Some(current);
     }
     result.reverse();
@@ -553,22 +690,32 @@ pub async fn serve(
                 .unwrap_or_else(|| PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/pkg")))
         });
     println!("Grantline native console: {origin}");
-    axum::serve(
-        listener,
-        app(Arc::new(App {
-            auth,
-            path,
-            live,
-            #[cfg(unix)]
-            workflow,
-            assets,
-        })),
-    )
-    .with_graceful_shutdown(async {
-        let _ = tokio::signal::ctrl_c().await;
-    })
-    .await
-    .map_err(|_| "Native console stopped with an error".into())
+    let shared = Arc::new(App {
+        auth,
+        path,
+        live,
+        #[cfg(unix)]
+        workflow,
+        assets,
+        cache: Default::default(),
+    });
+    let ttl = config.config.web.cache_ttl_seconds.min(3600);
+    if live && ttl > 0 {
+        let weak = Arc::downgrade(&shared);
+        tokio::spawn(async move {
+            loop {
+                let Some(s) = weak.upgrade() else { break };
+                let _ = data_refresh(s, true).await;
+                tokio::time::sleep(std::time::Duration::from_secs(ttl)).await;
+            }
+        });
+    }
+    axum::serve(listener, app(shared))
+        .with_graceful_shutdown(async {
+            let _ = tokio::signal::ctrl_c().await;
+        })
+        .await
+        .map_err(|_| "Native console stopped with an error".into())
 }
 
 #[cfg(unix)]
@@ -621,7 +768,7 @@ fn workflow_routes() -> Router<Shared> {
             let loaded=config::load(&s.path)?;let adapter=loaded.config.adapters.get(&f.system).ok_or("Unknown request system")?;
             if [&f.system,&f.subject,&f.resource,&f.privilege].iter().any(|s|s.is_empty()||s.len()>1024||s.chars().any(char::is_control)){return Err("Invalid request fields".into())}
             let grant=crate::model::Grant::new(&f.system,&f.subject,&f.resource,&f.privilege).normalized(&loaded.kinds);
-            if adapter.kind(&f.system)=="s3"{if !grant.resource.starts_with("bucket:")||!matches!(grant.privilege.as_str(),"Read"|"Write"|"List"){return Err("Unsupported S3 request".into())}}else{crate::commands::preview(&grant,&f.action,adapter.kind(&f.system))?;}
+            if adapter.kind(&f.system)=="s3"{if !grant.resource.starts_with("bucket:")||!matches!(grant.privilege.as_str(),"Read"|"Write"|"List"|"Tagging"|"Admin"){return Err("Unsupported S3 request".into())}}else{crate::commands::preview(&grant,&f.action,adapter.kind(&f.system))?;}
             s.workflow.as_ref().ok_or("Approval code writer is not configured")?.create(&actor,grant,f.action)
         }).await;
         workflow_result(result)

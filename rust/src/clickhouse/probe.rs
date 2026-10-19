@@ -338,7 +338,12 @@ pub fn run(adapter: &Adapter, grants: &[Grant]) -> Vec<Probe> {
             }
             .filter(|s| !s.is_empty())
             .ok_or("ClickHouse probe credential is not configured")?;
-            let http = Http::from_env(key, adapter.read_timeout_seconds, started)?;
+            let http = Http::from_env(
+                key,
+                adapter.read_timeout_seconds,
+                started,
+                adapter.ca_bundle_env.as_deref(),
+            )?;
             if login {
                 let rows = http.query::<Login>("SELECT currentUser() AS user LIMIT 1")?;
                 if !matches!(rows.as_slice(),[Login{user}] if user==subject) {

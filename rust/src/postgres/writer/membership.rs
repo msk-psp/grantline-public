@@ -129,6 +129,7 @@ mod tests {
             inherit: true,
         };
         Catalog {
+            table_privileges: vec![],
             observed: Observed::default(),
             default_acls: BTreeSet::new(),
             default_state: vec![],

@@ -1,7 +1,11 @@
 //! Shared Leptos SSR/hydration UI. API data and source diagnostics stay distinct.
+mod details;
 pub mod i18n;
+mod map;
 use i18n::tr;
 use leptos::prelude::*;
+use map::PermissionMap;
+pub use map::highlighted;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -14,6 +18,8 @@ pub struct Grant {
     pub resource: String,
     #[serde(rename = "priv")]
     pub privilege: String,
+    pub source: String,
+    pub grantor: Option<String>,
 }
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
@@ -85,6 +91,7 @@ pub struct Data {
     pub services: Vec<String>,
     pub service_kinds: BTreeMap<String, String>,
     pub environments: BTreeMap<String, Vec<String>>,
+    pub recent: Option<Value>,
 }
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
@@ -111,6 +118,14 @@ pub struct Bootstrap {
     pub interactive: bool,
     pub error: Option<String>,
     pub loading: bool,
+    pub refresh: bool,
+    pub refresh_url: String,
+    pub days: String,
+    pub subject: String,
+    pub resource: String,
+    pub action: String,
+    pub privilege: String,
+    pub history_comparison: Option<Value>,
 }
 fn text(v: &Value, key: &str) -> String {
     v[key].as_str().unwrap_or_default().into()
@@ -132,8 +147,18 @@ fn status(lang: &str, value: &str) -> String {
         },
     )
 }
+fn in_recent(b: &Bootstrap, g: &Grant) -> bool {
+    b.data.recent.is_none()
+        || b.data.graph.edges.iter().any(|e| {
+            e.system == g.system
+                && e.src == g.subject
+                && (e.dst == g.resource || g.resource.strip_prefix("role:") == Some(e.dst.as_str()))
+                && e.privs.contains(&g.privilege)
+        })
+}
 fn matched(b: &Bootstrap, g: &Grant) -> bool {
-    (b.service.is_empty() || b.service == g.system)
+    in_recent(b, g)
+        && (b.service.is_empty() || b.service == g.system)
         && (b.environment.is_empty()
             || b.data
                 .graph
@@ -179,19 +204,21 @@ fn grants_table(lang: &str, rows: Vec<Grant>) -> AnyView {
 <th>{tr(lang,"Subject")}</th>
 <th>{tr(lang,"Resource")}</th>
 <th>{tr(lang,"Privilege")}</th>
+<th>{tr(lang,"Source")}</th>
 </tr>
 </thead>
 <tbody>{rows.into_iter().take(500).map(|g|view!{<tr>
 <td>
-<code class="entity">{g.system}</code>
+<code class="entity">{g.system.clone()}</code>
 </td>
 <td>
-<a href=format!("/account?q={}",encode(&g.subject))>{g.subject.clone()}</a>
+<a href=format!("/account?subject={}&system={}",encode(&g.subject),encode(&g.system))>{g.subject.clone()}</a>
 </td>
 <td>
-<a href=format!("/resource?q={}",encode(&g.resource))>{g.resource.clone()}</a>
+<a href=format!("/resource?resource={}&system={}",encode(&g.resource),encode(&g.system))>{g.resource.clone()}</a>
 </td>
-<td>{badge(g.privilege)}</td>
+<td>{badge(g.privilege.clone())}<div class="grant-actions">{["grant","revoke"].into_iter().map(|action|view!{<a href=format!("/act?system={}&subject={}&resource={}&priv={}&action={}&lang={}",encode(&g.system),encode(&g.subject),encode(&g.resource),encode(&g.privilege),action,encode(lang))>{tr(lang,if action=="grant"{"Grant"}else{"Revoke"})}</a>}).collect_view()}</div></td>
+<td><span>{g.source}</span>{g.grantor.map(|who|view!{<span class="muted">" · "{tr(lang,"Grantor")}": "<code class="entity">{who}</code></span>})}</td>
 </tr>}).collect_view()}</tbody>
 </table>
 </div>{limited.then(||view!{<p class="notice">{tr(lang,"Rows are limited; narrow the filter to see more.")}</p>})}}.into_any()
@@ -227,7 +254,7 @@ pub fn Console(bootstrap: Bootstrap) -> impl IntoView {
     let body = if b.error.is_some() || b.loading {
         view!{<p class="notice" role="status">{if b.loading{tr(&b.lang,"Loading catalog…")}else{tr(&b.lang,"Catalog unavailable; access is unknown.")}}</p>}.into_any()
     } else {
-        match b.page.as_str(){"services"=>services(&b),"matrix"=>matrix_page(&b),"changes"=>changes(&b),"history"=>history(&b),"approvals"=>reviews(&b),"act"=>view!{<RequestForm bootstrap=b.clone()/>}.into_any(),"accounts"|"account"|"resources"|"resource"=>grants_table(&lang,b.data.plan.observed.iter().filter(|g|matched(&b,g)).cloned().collect()),_=>view!{<PermissionMap graph=b.data.graph.clone() service=b.service.clone() environment=b.environment.clone() query=b.query.clone() lang=lang.clone()/>}.into_any()}
+        match b.page.as_str(){"services"=>services(&b),"matrix"=>matrix_page(&b),"changes"=>changes(&b),"history"=>history(&b),"approvals"=>reviews(&b),"act"=>view!{<RequestForm bootstrap=b.clone()/>}.into_any(),"account"=>details::subject(&b),"resource"=>details::resource(&b),"accounts"|"resources"=>grants_table(&lang,b.data.plan.observed.iter().filter(|g|matched(&b,g)).cloned().collect()),_=>view!{<PermissionMap graph=b.data.graph.clone() service_kinds=b.data.service_kinds.clone() service=b.service.clone() environment=b.environment.clone() query=b.query.clone() lang=lang.clone()/>}.into_any()}
     };
     let menus = nav
         .into_iter()
@@ -254,13 +281,13 @@ pub fn Console(bootstrap: Bootstrap) -> impl IntoView {
     </form>}.into_any()}else{view!{<a href="/auth/login">{tr(&b.lang,"Sign in")}</a>}.into_any()}}</div>
     </header>
     <nav aria-label="Primary">{menus}</nav>
-    <main>
+    <main class:map-page=title=="Map">
     <div class="page-heading">
     <div>
     <p class="eyebrow">{b.actor.as_ref().map(|a|a.display.clone()).unwrap_or_default()}</p>
     <h1>{tr(&b.lang,title)}</h1>
     </div>
-    <a class="button secondary" href="">{tr(&b.lang,"Refresh")}</a>
+    <a class="button secondary" href=b.refresh_url.clone()>{tr(&b.lang,"Refresh")}</a>
     </div>{b.error.as_ref().map(|_|view!{<div role="alert" class="notice error">{tr(&b.lang,"Catalog unavailable; access is unknown.")}</div>})}{(!b.data.snapshot.unobserved.is_empty()).then(||view!{<div role="status" class="notice warning">
     <strong>{tr(&b.lang,"Access is unknown for unread services.")}</strong>{b.data.snapshot.unobserved.iter().map(|u|view!{<p>
     <code class="entity">{u.system.clone()}</code>{u.note.clone()}</p>}).collect_view()}</div>})}{(!b.interactive).then(||view!{<div class="notice">{tr(&b.lang,"Interactive bundle unavailable; build the UI to enable interactions.")}</div>})}{(!matches!(b.page.as_str(),"history"|"approvals"|"act")).then(||view!{<form class="filters" method="get">
@@ -272,115 +299,11 @@ pub fn Console(bootstrap: Bootstrap) -> impl IntoView {
     <option value="">{tr(&b.lang,"All services")}</option>{b.data.services.iter().map(|s|view!{<option value=s.clone() selected=*s==b.service>{s.clone()}</option>}).collect_view()}</select>
     <select name="environment" aria-label=tr(&b.lang,"All environments")>
     <option value="">{tr(&b.lang,"All environments")}</option>{environments.into_iter().map(|e|view!{<option value=e.clone() selected=e==b.environment>{e.clone()}</option>}).collect_view()}</select>
-    <input type="hidden" name="lang" value=b.lang.clone()/>
+    <input type="hidden" name="subject" value=b.subject.clone()/><input type="hidden" name="resource" value=b.resource.clone()/><input type="hidden" name="lang" value=b.lang.clone()/>
+    {matches!(b.page.as_str(),"map"|""|"resources"|"resource").then(||view!{<label><span class="sr-only">{tr(&b.lang,"Recent changes (days)")}</span><input name="days" type="number" min="1" max="3650" step="1" placeholder=tr(&b.lang,"Recent changes (days)") value=b.days.clone()/></label>})}
     <button>{tr(&b.lang,"Filter")}</button>
-    </form>})}{body}</main>
+    </form>})}{b.data.recent.as_ref().map(|info|view!{<p class="notice" role="status">{tr(&b.lang,"Observed change routes")}": "{format!("{}d · +{} / −{}",info["days"],info["added"],info["removed"])}" · "{tr(&b.lang,if info["complete"]==true{"Complete observation window"}else{"Incomplete observation window"})}</p>})}{body}</main>
     <footer>"Grantline · "{tr(&b.lang,"Preview only; no permission has been applied.")}</footer>
-    </div>}
-}
-pub fn highlighted(graph: &Graph, start: &str) -> BTreeSet<String> {
-    let mut out = BTreeSet::from([start.to_owned()]);
-    for reverse in [false, true] {
-        let mut seen = BTreeSet::new();
-        let mut stack = vec![start.to_owned()];
-        while let Some(n) = stack.pop() {
-            if seen.insert(n.clone()) {
-                out.insert(n.clone());
-                for e in &graph.edges {
-                    let (a, b) = if reverse {
-                        (&e.dst, &e.src)
-                    } else {
-                        (&e.src, &e.dst)
-                    };
-                    if *a == n {
-                        stack.push(b.clone());
-                    }
-                }
-            }
-        }
-    }
-    out
-}
-#[component]
-fn PermissionMap(
-    graph: Graph,
-    service: String,
-    environment: String,
-    query: String,
-    lang: String,
-) -> impl IntoView {
-    let mut graph = graph;
-    let envs = graph.envs.clone();
-    graph.edges.retain(|e| {
-        (service.is_empty() || e.system == service || e.system == "*")
-            && (environment.is_empty()
-                || e.system == "*"
-                || envs
-                    .get(&e.system)
-                    .is_some_and(|env| env.contains(&environment)))
-    });
-    let all: BTreeSet<_> = graph
-        .edges
-        .iter()
-        .flat_map(|e| [e.src.clone(), e.dst.clone()])
-        .collect();
-    let mut visible = all.clone();
-    if !query.is_empty() {
-        visible.clear();
-        for n in all
-            .iter()
-            .filter(|n| n.to_lowercase().contains(&query.to_lowercase()))
-        {
-            visible.extend(highlighted(&graph, n));
-        }
-    }
-    let mut positions = BTreeMap::new();
-    let mut max_rows = 5;
-    for (col, nodes) in [
-        graph.principals.clone(),
-        graph.hops.clone(),
-        graph.terminals.clone(),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let mut row = 0;
-        for n in nodes.into_iter().filter(|n| visible.contains(n)) {
-            if positions.len() >= 1000 {
-                break;
-            }
-            positions.insert(n, (30 + col * 420, 100 + row * 54));
-            row += 1;
-        }
-        max_rows = max_rows.max(row);
-    }
-    let limited = visible.len() > positions.len();
-    let labels = graph.names.clone();
-    let hover = RwSignal::new(None::<String>);
-    let selected = RwSignal::new(None::<String>);
-    let edges = graph.edges.clone();
-    let stored = StoredValue::new(graph);
-    let active = Memo::new(move |_| {
-        hover
-            .get()
-            .or(selected.get())
-            .map(|n| stored.with_value(|g| highlighted(g, &n)))
-    });
-    let edge_views=edges.into_iter().filter_map(|e|{let(&(x,y),&(dx,dy))=(positions.get(&e.src)?,positions.get(&e.dst)?);let src=e.src.clone();let dst=e.dst.clone();let title=format!("{} · {}",e.system,e.privs.join(", "));let path=format!("M {} {} C {} {}, {} {}, {} {}",x+350,y+18,x+385,y+18,dx-35,dy+18,dx,dy+18);Some(view!{<path d=path class=move ||if active.get().is_none_or(|set|set.contains(&src)&&set.contains(&dst)){"map-edge"}else{"map-edge dim"}>
-<title>{title}</title>
-</path>})}).collect_view();
-    let nodes=positions.into_iter().map(|(id,(x,y))|{let id_class=id.clone();let id_enter=id.clone();let id_focus=id.clone();let id_click=id.clone();let id_key=id.clone();let label=labels.get(&id).cloned().unwrap_or_else(||id.clone());let short=if label.chars().count()>39{label.chars().take(37).collect::<String>()+"…"}else{label};view!{<g data-node-id=id.clone() role="button" tabindex="0" aria-label=id.clone() transform=format!("translate({x},{y})") class=move||if active.get().is_none_or(|set|set.contains(&id_class)){"map-node"}else{"map-node dim"} on:mouseenter=move |_|hover.set(Some(id_enter.clone())) on:mouseleave=move |_|hover.set(None) on:focus=move |_|hover.set(Some(id_focus.clone())) on:blur=move |_|hover.set(None) on:click=move |_|{selected.update(|s|*s=if s.as_ref()==Some(&id_click){None}else{Some(id_click.clone())});} on:keydown=move|e|{if matches!(e.key().as_str(),"Enter"|" "){e.prevent_default();selected.set(Some(id_key.clone()));}}>
-<title>{id.clone()}</title>
-<rect width="350" height="36" rx="8"/>
-<text x="12" y="23">{short}</text>
-</g>}}).collect_view();
-    view! {<p class="muted">{tr(&lang,"Hover or focus a resource to follow its access routes.")}</p>
-    <button class="quiet" on:click=move |_|{hover.set(None);selected.set(None);}>{tr(&lang,"Clear selection")}</button>
-    {limited.then(||view!{<p class="notice">{tr(&lang,"Rows are limited; narrow the filter to see more.")}</p>})}<div class="map-scroll">
-    <svg class="permission-map" role="group" aria-label=tr(&lang,"Map") viewBox=format!("0 0 1260 {}",max_rows*54+160)>
-    <text class="column-title" x="30" y="60">{tr(&lang,"Principals")}</text>
-    <text class="column-title" x="450" y="60">{tr(&lang,"Roles and policies")}</text>
-    <text class="column-title" x="870" y="60">{tr(&lang,"Resources")}</text>{edge_views}{nodes}</svg>
     </div>}
 }
 fn services(b: &Bootstrap) -> AnyView {
@@ -430,12 +353,12 @@ fn matrix_table(lang: &str, rows: &[Grant]) -> AnyView {
         .map(|(s, r)| {
             view! {<th>
             <code>{s.clone()}</code>
-            <span>{r.clone()}</span>
+            <a href=format!("/resource?system={}&resource={}&lang={}",encode(s),encode(r),encode(lang))>{r.clone()}</a>
             </th>}
         })
         .collect_view();
     let body=subjects.into_iter().take(150).map(|s|{let cells=columns.iter().map(|(sys,res)|{let ps:Vec<_>=index.get(&(s.as_str(),sys.as_str(),res.as_str())).into_iter().flatten().map(|p|badge(p.clone())).collect();view!{<td>{if ps.is_empty(){view!{<span class="muted">"—"</span>}.into_any()}else{ps.into_view().into_any()}}</td>}}).collect_view();view!{<tr>
-<th scope="row">{s}</th>{cells}</tr>}}).collect_view();
+<th scope="row"><a href=format!("/account?subject={}&lang={}",encode(&s),encode(lang))>{s.clone()}</a></th>{cells}</tr>}}).collect_view();
     view!{<div class="table-scroll matrix-scroll" tabindex="0" role="region" aria-label=tr(lang,"Matrix")>
 <table class="matrix">
 <thead>
@@ -493,7 +416,7 @@ fn history(b: &Bootstrap) -> AnyView {
     view!{<button disabled=move||!enabled||busy.get() on:click=move |_|act("/api/snapshots".into(),json!({"csrf":csrf}),busy,msg)>{tr(&b.lang,"Record snapshot")}</button>
 <p role="status">{move||msg.get()}</p>
 <section class="card">
-<h2>{tr(&b.lang,"Snapshots")}</h2>
+<h2>{tr(&b.lang,"Snapshots")}</h2><form method="get" class="filters"><label>{tr(&b.lang,"From")}<select name="from">{b.history.iter().map(|r|view!{<option value=text(r,"name")>{text(r,"ts")}</option>}).collect_view()}</select></label><label>{tr(&b.lang,"To")}<select name="to">{b.history.iter().map(|r|view!{<option value=text(r,"name")>{text(r,"ts")}</option>}).collect_view()}</select></label><button>{tr(&b.lang,"Compare")}</button></form>
 <div class="table-scroll">
 <table>
 <thead>
@@ -512,7 +435,7 @@ fn history(b: &Bootstrap) -> AnyView {
 </tr>}).collect_view()}</tbody>
 </table>
 </div>
-</section>}.into_any()
+</section>{details::history_comparison(b)}}.into_any()
 }
 #[component]
 fn RequestForm(bootstrap: Bootstrap) -> impl IntoView {
@@ -520,9 +443,13 @@ fn RequestForm(bootstrap: Bootstrap) -> impl IntoView {
     let enabled = b.workflow && b.actor.as_ref().is_some_and(|a| a.authenticated) && b.interactive;
     let busy = RwSignal::new(false);
     let msg = RwSignal::new(String::new());
-    let system = RwSignal::new(b.data.services.first().cloned().unwrap_or_default());
-    let subject = RwSignal::new(String::new());
-    let resource = RwSignal::new(String::new());
+    let system = RwSignal::new(if b.service.is_empty() {
+        b.data.services.first().cloned().unwrap_or_default()
+    } else {
+        b.service.clone()
+    });
+    let subject = RwSignal::new(b.subject.clone());
+    let resource = RwSignal::new(b.resource.clone());
     let kinds = StoredValue::new(b.data.service_kinds.clone());
     let privilege = RwSignal::new(
         if kinds.with_value(|k| k.get(&system.get_untracked()).is_some_and(|s| s == "s3")) {
@@ -532,23 +459,33 @@ fn RequestForm(bootstrap: Bootstrap) -> impl IntoView {
         }
         .to_owned(),
     );
-    let action = RwSignal::new("grant".to_owned());
+    let action = RwSignal::new(
+        if b.action == "revoke" {
+            "revoke"
+        } else {
+            "grant"
+        }
+        .to_owned(),
+    );
+    if !b.privilege.is_empty() {
+        privilege.set(b.privilege.clone());
+    }
     let csrf = b.actor.as_ref().map(|a| a.csrf.clone()).unwrap_or_default();
     let working = tr(&b.lang, "Working…");
     let submit = tr(&b.lang, "Submit request");
     view! {<p class="notice">{tr(&b.lang,"Approval and PR creation do not apply IAM permissions.")}</p>{(!enabled).then(||view!{<p class="notice">{tr(&b.lang,"Configure authenticated approvals and a code writer to request changes.")}</p>})}<form class="request-form card" on:submit=move|e|{e.prevent_default();act("/api/requests".into(),json!({"csrf":csrf,"system":system.get(),"subject":subject.get(),"resource":resource.get(),"privilege":privilege.get(),"action":action.get()}),busy,msg);}>
             <fieldset disabled=move||!enabled||busy.get()>
-    <label>{tr(&b.lang,"Service")}<select on:change=move|e|{let value=event_target_value(&e);privilege.set(if kinds.with_value(|k|k.get(&value).is_some_and(|s|s=="s3")){"Read"}else{"SELECT"}.into());system.set(value);}>{b.data.services.into_iter().map(|s|view!{<option value=s.clone()>{s.clone()}</option>}).collect_view()}</select>
+    <label>{tr(&b.lang,"Service")}<select on:change=move|e|{let value=event_target_value(&e);privilege.set(if kinds.with_value(|k|k.get(&value).is_some_and(|s|s=="s3")){"Read"}else{"SELECT"}.into());system.set(value);}>{b.data.services.into_iter().map(|s|view!{<option value=s.clone() selected=move||system.get()==s>{s.clone()}</option>}).collect_view()}</select>
     </label>
-    <label>{tr(&b.lang,"Subject")}<input required maxlength="1024" on:input=move|e|subject.set(event_target_value(&e))/>
+    <label>{tr(&b.lang,"Subject")}<input required maxlength="1024" prop:value=move||subject.get() value=b.subject.clone() on:input=move|e|subject.set(event_target_value(&e))/>
     </label>
-    <label>{tr(&b.lang,"Resource")}<input required maxlength="1024" on:input=move|e|resource.set(event_target_value(&e))/>
+    <label>{tr(&b.lang,"Resource")}<input required maxlength="1024" prop:value=move||resource.get() value=b.resource.clone() on:input=move|e|resource.set(event_target_value(&e))/>
     </label>
-    <label>{tr(&b.lang,"Privilege")}<select on:change=move|e|privilege.set(event_target_value(&e))>{["SELECT","INSERT","UPDATE","DELETE","USAGE","CONNECT","CREATE","MEMBER","Read","Write","List"].into_iter().map(|p|view!{<option value=p selected=move||privilege.get()==p>{p}</option>}).collect_view()}</select>
+    <label>{tr(&b.lang,"Privilege")}<select on:change=move|e|privilege.set(event_target_value(&e))>{["SELECT","INSERT","UPDATE","DELETE","USAGE","CONNECT","CREATE","MEMBER","TRUNCATE","REFERENCES","TRIGGER","MAINTAIN","TEMPORARY","ALL","ALTER","DROP","SHOW","OPTIMIZE","dictGet","Read","Write","List","Tagging","Admin"].into_iter().map(|p|view!{<option value=p selected=move||privilege.get()==p>{p}</option>}).collect_view()}</select>
     </label>
     <label>{tr(&b.lang,"Action")}<select on:change=move|e|action.set(event_target_value(&e))>
-    <option value="grant">{tr(&b.lang,"Grant")}</option>
-    <option value="revoke">{tr(&b.lang,"Revoke")}</option>
+    <option value="grant" selected=move||action.get()=="grant">{tr(&b.lang,"Grant")}</option>
+    <option value="revoke" selected=move||action.get()=="revoke">{tr(&b.lang,"Revoke")}</option>
     </select>
     </label>
     <button type="submit">{move||if busy.get(){working.clone()}else{submit.clone()}}</button>
@@ -744,10 +681,13 @@ pub fn Root(bootstrap: Bootstrap) -> impl IntoView {
             use wasm_bindgen_futures::JsFuture;
             let result: Result<Data, wasm_bindgen::JsValue> = async {
                 let window = web_sys::window().ok_or(wasm_bindgen::JsValue::NULL)?;
-                let response: web_sys::Response =
-                    JsFuture::from(window.fetch_with_str("/api/catalog"))
-                        .await?
-                        .dyn_into()?;
+                let response: web_sys::Response = JsFuture::from(window.fetch_with_str(&format!(
+                    "/api/catalog?days={}{}",
+                    encode(&bootstrap.days),
+                    if bootstrap.refresh { "&refresh=1" } else { "" }
+                )))
+                .await?
+                .dyn_into()?;
                 if !response.ok()
                     || !response
                         .headers()
