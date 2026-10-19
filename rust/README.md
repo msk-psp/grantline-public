@@ -750,13 +750,13 @@ CONNECT/schema USAGE, RLS and other access prerequisites need separate validatio
 Undo with newly reviewed inverse intent. Objects created while a default was
 active retain their assigned ACLs after the default is revoked. Inverse defaults
 restore neither those object ACLs nor data or raw default-row OIDs. Official
-PostgreSQL 17.11 tests verify actual future SELECT/INSERT, other creator/schema/DB
+PostgreSQL 18.6 tests verify actual future SELECT/INSERT, other creator/schema/DB
 isolation, quoted SQL, inverse semantics, stale catalog/identity refusal and full
 later-error/timeout/unexpected-side-effect rollback. Production, PostgreSQL 16,
 COMMIT network loss remain unverified; private CA/TLS/hostname checks run in
 `check_rust_writer_parity.py --kind pg`. See PostgreSQL's
-[ALTER DEFAULT PRIVILEGES](https://www.postgresql.org/docs/17/sql-alterdefaultprivileges.html)
-and [pg_default_acl](https://www.postgresql.org/docs/17/catalog-pg-default-acl.html).
+[ALTER DEFAULT PRIVILEGES](https://www.postgresql.org/docs/18/sql-alterdefaultprivileges.html)
+and [pg_default_acl](https://www.postgresql.org/docs/18/catalog-pg-default-acl.html).
 
 ### Apply canonical role memberships (R3g3)
 
@@ -993,10 +993,13 @@ only the HTTP protocol suite runs.
 
 The PostgreSQL suite checks missing/invalid DSNs, stalled authentication deadlines,
 offline/import isolation, secret redaction and a digest-pinned official PostgreSQL
-17.11 server. It verifies PUBLIC/owner ACLs, raw quoted names and grantors, nested
+18.6 server. Every PostgreSQL Docker suite asserts major version 18. It verifies PUBLIC/owner ACLs, raw quoted names and grantors, nested
 roles, per-DB failures/exclusions, frozen ACLs, global/column/default boundaries,
 graphs, snapshots, TLS downgrade refusal and read-only DDL failure. Its disposable
 container is removed afterwards; no production/staging server is contacted.
+The reader/probe suite also runs against a digest-pinned pg_duckdb PostgreSQL 18
+distribution. `--image` selects an additional isolated PostgreSQL 18 image; it
+does not bypass the major-version assertion.
 
 The S3 network suite checks three loopback HTTP readers, SigV4 against the Python
 oracle, Filer/IAM pagination, malformed/failed/truncated responses, source and

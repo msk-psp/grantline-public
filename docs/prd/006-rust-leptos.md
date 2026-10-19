@@ -835,7 +835,7 @@ cutover remain separately authorized deployment acceptance checks.
 
 ## R8 — Precise PostgreSQL column observation {#R8}
 
-Status: implementation and isolated verification in progress. Column ACLs use
+Status: implemented; isolated verification complete, PR checks in progress. Column ACLs use
 `column:database.schema.table.column`, preserving subject, privilege, grantor and
 grant options without turning a column grant into a table grant. A column ACL
 must not obscure sibling table ACLs in the schema. Table privileges cover their
@@ -845,7 +845,10 @@ writes remain refused. Excluded/unread databases also obscure column scopes.
 
 Acceptance: isolated official PostgreSQL exercises inheritance, PUBLIC, quoted
 names, allowed and denied columns, table siblings, snapshot round trips and
-reader/write isolation. No production ACL change is part of this stage.
+reader/write isolation. The active CI baseline is official PostgreSQL 18.6 with
+a runtime major-version assertion, plus the pinned pg_duckdb PostgreSQL 18
+reader/probe distribution check. Older 17.11 results above are historical.
+No production ACL change is part of this stage.
 
 ## R9 — Retire the Python service {#R9}
 

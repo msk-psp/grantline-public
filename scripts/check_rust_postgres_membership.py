@@ -8,7 +8,7 @@ import time
 import uuid
 from pathlib import Path
 
-from check_rust_postgres import IMAGE, MARKER, ROOT
+from check_rust_postgres import IMAGE, MARKER, ROOT, assert_postgres_major
 from check_rust_postgres_writer import config_at, intent, run
 
 
@@ -43,6 +43,7 @@ def docker_test(binary, context):
             time.sleep(0.2)
         else:
             raise RuntimeError('Disposable PostgreSQL failed to start')
+        assert_postgres_major(sql)
         sql('CREATE ROLE gl_writer LOGIN NOINHERIT; CREATE ROLE gl_member LOGIN NOINHERIT; CREATE ROLE gl_first LOGIN; CREATE ROLE gl_child; CREATE ROLE gl_leaf LOGIN; CREATE ROLE "gl"";member" LOGIN; CREATE ROLE "gl"";group"; CREATE ROLE gl_group; CREATE ROLE gl_old; CREATE ROLE gl_a; CREATE ROLE gl_b; CREATE ROLE z_wait; CREATE ROLE gl_parent; CREATE ROLE gl_holder; CREATE ROLE gl_login LOGIN; CREATE ROLE gl_owned; CREATE ROLE gl_priv SUPERUSER; CREATE DATABASE gl_data;')
         groups = ['gl_group', 'gl_old', 'gl";group', 'gl_a', 'gl_b', 'z_wait', 'gl_parent', 'gl_holder', 'gl_login', 'gl_owned', 'gl_priv', 'missing', 'gl_writer']
         for role in groups:

@@ -12,8 +12,14 @@ import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-IMAGE = 'postgres@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24'
+# Official PostgreSQL 18.6 (bookworm), pinned by multi-platform index digest.
+IMAGE = 'postgres@sha256:afc7e2d441324c0388fa80c3d24f733b4194a4eb7f47dd8ee2b08eb1a24a647c'
 MARKER = 'NEVER-OUTPUT-CREDENTIAL'
+
+
+def assert_postgres_major(sql):
+    version = int(sql('SHOW server_version_num', db='postgres').strip())
+    assert version // 10000 == 18, f'Expected PostgreSQL 18, got server_version_num={version}'
 
 
 def config_at(root):
@@ -128,7 +134,7 @@ def boundary(binary):
         print('PostgreSQL boundaries: 9 invalid/unavailable DSNs, offline isolation, stalled authentication deadline, source conflict, config validation and secret redaction passed')
 
 
-def docker_test(binary, context):
+def docker_test(binary, context, image=IMAGE):
     context = context or subprocess.check_output(['docker', 'context', 'show'], text=True).strip()
     ctx = json.loads(subprocess.check_output(['docker', 'context', 'inspect', context], text=True))[0]
     assert ctx['Endpoints']['docker']['Host'].startswith('unix://'), 'integration test requires a local Docker socket'
@@ -145,7 +151,7 @@ def docker_test(binary, context):
 
     try:
         subprocess.run([*docker, 'run', '-d', '--rm', '--name', name, '-p', '127.0.0.1::5432', '--memory', '1g', '--cpus', '2',
-                        '-e', 'POSTGRES_HOST_AUTH_METHOD=trust', IMAGE], check=True, stdout=subprocess.DEVNULL)
+                        '-e', 'POSTGRES_HOST_AUTH_METHOD=trust', image], check=True, stdout=subprocess.DEVNULL)
         deadline = time.monotonic() + 60
         while True:
             result = sql('SELECT 1', check=False)
@@ -154,6 +160,7 @@ def docker_test(binary, context):
             if time.monotonic() >= deadline:
                 raise RuntimeError('Disposable PostgreSQL failed to start')
             time.sleep(0.2)
+        assert_postgres_major(sql)
         sql('''
 CREATE ROLE gl_observer LOGIN;
 ALTER ROLE gl_observer SET default_transaction_read_only=on;
@@ -339,11 +346,12 @@ def main():
     parser.add_argument('--binary', type=Path, default=ROOT / 'rust/target/debug/grantline-rs')
     parser.add_argument('--docker', action='store_true')
     parser.add_argument('--docker-context')
+    parser.add_argument('--image', default=IMAGE, help='Disposable PostgreSQL 18 image; defaults to the pinned official image')
     args = parser.parse_args()
     binary = str(args.binary.resolve())
     boundary(binary)
     if args.docker:
-        docker_test(binary, args.docker_context)
+        docker_test(binary, args.docker_context, args.image)
 
 
 if __name__ == '__main__':
