@@ -29,7 +29,7 @@ const SCHEMA_SQL: &str = "SELECT n.nspname AS schema, CASE WHEN a.grantee=0 THEN
 const TABLE_SQL: &str = "SELECT n.nspname AS schema, c.relname AS name, CASE WHEN a.grantee=0 THEN 'PUBLIC' ELSE r.rolname END AS subject, a.privilege_type AS privilege, c.relacl IS NULL AS implicit, g.rolname AS grantor, a.is_grantable FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace CROSS JOIN LATERAL aclexplode(coalesce(c.relacl, acldefault('r', c.relowner))) a LEFT JOIN pg_roles r ON r.oid=a.grantee LEFT JOIN pg_roles g ON g.oid=a.grantor WHERE c.relkind IN ('r','p','v','m','f') AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname !~ '^pg_'";
 const DEFAULT_SQL: &str = "SELECT c.rolname AS creator, n.nspname AS schema, CASE WHEN a.grantee=0 THEN 'PUBLIC' ELSE r.rolname END AS subject, a.privilege_type AS privilege, false AS implicit, g.rolname AS grantor, a.is_grantable FROM pg_default_acl d JOIN pg_namespace n ON n.oid=d.defaclnamespace LEFT JOIN pg_roles c ON c.oid=d.defaclrole CROSS JOIN LATERAL aclexplode(d.defaclacl) a LEFT JOIN pg_roles r ON r.oid=a.grantee LEFT JOIN pg_roles g ON g.oid=a.grantor WHERE d.defaclobjtype='r'";
 const GLOBAL_DEFAULT_SQL: &str = "SELECT EXISTS(SELECT 1 FROM pg_default_acl WHERE defaclobjtype='r' AND defaclnamespace=0) AS present";
-const COLUMN_SQL: &str = "SELECT DISTINCT n.nspname AS schema FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE a.attnum>0 AND NOT a.attisdropped AND a.attacl IS NOT NULL AND cardinality(a.attacl)>0 AND c.relkind IN ('r','p','v','m','f') AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname !~ '^pg_'";
+const COLUMN_SQL: &str = "SELECT n.nspname AS schema, c.relname AS name, att.attname AS column, CASE WHEN a.grantee=0 THEN 'PUBLIC' ELSE r.rolname END AS subject, a.privilege_type AS privilege, false AS implicit, g.rolname AS grantor, a.is_grantable FROM pg_attribute att JOIN pg_class c ON c.oid=att.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace CROSS JOIN LATERAL aclexplode(att.attacl) a LEFT JOIN pg_roles r ON r.oid=a.grantee LEFT JOIN pg_roles g ON g.oid=a.grantor WHERE att.attnum>0 AND NOT att.attisdropped AND c.relkind IN ('r','p','v','m','f') AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname !~ '^pg_'";
 // ACL empty arrays can retain dimensions; equality to an empty literal misses them.
 const FROZEN_SQL: &str = "SELECT n.nspname AS schema, c.relname AS name, r.rolname AS owner FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace LEFT JOIN pg_roles r ON r.oid=c.relowner WHERE c.relkind IN ('r','p','v','m','f') AND cardinality(c.relacl)=0 AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname !~ '^pg_'";
 
@@ -49,7 +49,7 @@ fn unread(system: &str, prefixes: Vec<String>, note: &str) -> Unobserved {
     }
 }
 fn db_prefixes(db: &str) -> Vec<String> {
-    ["table", "schema", "default"]
+    ["table", "column", "schema", "default"]
         .map(|k| format!("{k}:{db}."))
         .to_vec()
 }
@@ -201,6 +201,10 @@ struct Present {
 #[derive(Deserialize)]
 struct Column {
     schema: String,
+    name: String,
+    column: String,
+    #[serde(flatten)]
+    acl: Acl,
 }
 
 impl Observed {
@@ -216,6 +220,10 @@ impl Observed {
         let supported = match kind {
             "db" => matches!(acl.privilege.as_str(), "CONNECT" | "CREATE" | "TEMPORARY"),
             "schema" => matches!(acl.privilege.as_str(), "USAGE" | "CREATE"),
+            "column" => matches!(
+                acl.privilege.as_str(),
+                "SELECT" | "INSERT" | "UPDATE" | "REFERENCES"
+            ),
             _ => matches!(
                 acl.privilege.as_str(),
                 "SELECT"
@@ -315,11 +323,13 @@ async fn database_catalog(
     }
     for row in query::<Column>(client, COLUMN_SQL).await? {
         component(&row.schema)?;
-        out.unknown.push(unread(
+        component(&row.name)?;
+        component(&row.column)?;
+        out.acl(
             system,
-            vec![format!("table:{db}.{}.", row.schema)],
-            "Column privileges cannot be represented; table scopes in this schema are unread",
-        ));
+            format!("column:{db}.{}.{}.{}", row.schema, row.name, row.column),
+            row.acl,
+        )?;
     }
     for row in query::<Frozen>(client, FROZEN_SQL).await? {
         component(&row.schema)?;

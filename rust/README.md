@@ -136,12 +136,16 @@ may buffer an individual wire message before the row byte check; this is not a
 memory-isolation boundary against a malicious server.
 
 Unrepresentable dotted/`@`/wildcard resource components obscure the affected DB
-(or the cluster for DB identifiers). Column ACLs obscure table scopes in their
-schema. Global default table ACLs obscure all default scopes in that DB.
+(or the cluster for DB identifiers). Column ACLs are observed as
+`column:database.schema.table.column` for SELECT/INSERT/UPDATE/REFERENCES,
+preserving grantors without hiding table ACLs in the schema. Column-only access
+does not imply a table-wide grant; exact parent table grants cover their columns.
+Column probes use fixed `has_column_privilege` queries and column writers remain
+unsupported. Global default table ACLs obscure all default scopes in that DB.
 Superusers, predefined roles and memberships with disabled INHERIT/SET options,
 including their dependants, remain unknown. Delegation options get findings;
 MEMBER and grant atoms do not model them. These safeguards intentionally exceed
-the Python reader. The target is DB/schema/table/default-table ACLs and role
+the Python reader. The target is DB/schema/table/column/default-table ACLs and role
 memberships; sequence/function/type ACLs, effective RLS, owner powers, target-user
 login/data access and a cluster-wide atomic snapshot are not represented.
 

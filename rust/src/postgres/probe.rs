@@ -14,6 +14,7 @@ struct Target {
     db: Option<String>,
     sql: &'static str,
     object: String,
+    column: Option<String>,
 }
 fn target(g: &Grant) -> Result<Target> {
     name(&g.subject)?;
@@ -60,10 +61,10 @@ fn target(g: &Grant) -> Result<Target> {
                 &["USAGE", "CREATE"],
             )
         }
-        "table" => {
+        "table" | "column" => {
             let parts: Vec<_> = rest.split('.').collect();
-            if parts.len() != 3 {
-                return Err("Invalid table resource".into());
+            if parts.len() != if kind == "column" { 4 } else { 3 } {
+                return Err("Invalid table/column resource".into());
             }
             for part in &parts {
                 component(part)?;
@@ -78,17 +79,25 @@ fn target(g: &Grant) -> Result<Target> {
                     parts[1].replace('"', "\"\""),
                     parts[2].replace('"', "\"\"")
                 ),
-                "SELECT pg_catalog.has_table_privilege($1::name, $2::text, $3::text)",
-                &[
-                    "SELECT",
-                    "INSERT",
-                    "UPDATE",
-                    "DELETE",
-                    "TRUNCATE",
-                    "REFERENCES",
-                    "TRIGGER",
-                    "MAINTAIN",
-                ],
+                if kind == "column" {
+                    "SELECT pg_catalog.has_column_privilege($1::name, $2::text, $3::text, $4::text)"
+                } else {
+                    "SELECT pg_catalog.has_table_privilege($1::name, $2::text, $3::text)"
+                },
+                if kind == "column" {
+                    &["SELECT", "INSERT", "UPDATE", "REFERENCES"]
+                } else {
+                    &[
+                        "SELECT",
+                        "INSERT",
+                        "UPDATE",
+                        "DELETE",
+                        "TRUNCATE",
+                        "REFERENCES",
+                        "TRIGGER",
+                        "MAINTAIN",
+                    ]
+                },
             )
         }
         _ => return Err("No native evaluator for this resource kind".into()),
@@ -96,7 +105,17 @@ fn target(g: &Grant) -> Result<Target> {
     if !allowed.contains(&g.privilege.as_str()) {
         return Err("Unsupported privilege for PostgreSQL resource kind".into());
     }
-    Ok(Target { db, sql, object })
+    let column = if kind == "column" {
+        rest.rsplit_once('.').map(|(_, c)| c.to_owned())
+    } else {
+        None
+    };
+    Ok(Target {
+        db,
+        sql,
+        object,
+        column,
+    })
 }
 fn included(adapter: &Adapter, db: &str) -> Result<bool> {
     let matches = |patterns: &[String]| -> Result<bool> {
@@ -201,6 +220,8 @@ async fn evaluate(adapter: &Adapter, grants: &[Grant]) -> Result<Vec<Probe>> {
             let params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
                 if g.resource.starts_with("role:") {
                     vec![&g.subject, &t.object]
+                } else if let Some(column) = &t.column {
+                    vec![&g.subject, &t.object, column, &g.privilege]
                 } else {
                     vec![&g.subject, &t.object, &g.privilege]
                 };
@@ -296,6 +317,19 @@ mod tests {
         let t = target(&g).unwrap();
         assert_eq!(t.object, "\"odd\"\"schema\".\"t\"\"able\"");
         assert!(!t.sql.contains(&g.subject));
+        let column = target(&Grant::new(
+            "pg",
+            "a'--",
+            "column:demo.odd\"schema.t\"able.c'--",
+            "SELECT",
+        ))
+        .unwrap();
+        assert_eq!(column.object, t.object);
+        assert_eq!(column.column.as_deref(), Some("c'--"));
+        assert_eq!(
+            column.sql,
+            "SELECT pg_catalog.has_column_privilege($1::name, $2::text, $3::text, $4::text)"
+        );
         assert!(target(&Grant::new("pg", &"a".repeat(64), "db:demo", "CONNECT")).is_err());
         assert!(
             target(&Grant::new(
@@ -313,6 +347,8 @@ mod tests {
             ("alice", "default:demo.public@owner", "SELECT"),
             ("alice", "table:demo.public.events", "ALL"),
             ("alice", "role:reader", "SELECT"),
+            ("alice", "column:demo.public.events", "SELECT"),
+            ("alice", "column:demo.public.events.a", "DELETE"),
         ] {
             assert!(target(&Grant::new("pg", subject, resource, privilege)).is_err());
         }

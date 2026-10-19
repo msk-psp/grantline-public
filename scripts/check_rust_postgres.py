@@ -187,8 +187,12 @@ ALTER TABLE public.frozen OWNER TO gl_owner;
 REVOKE ALL ON public.frozen FROM gl_owner;
 ALTER DEFAULT PRIVILEGES FOR ROLE gl_owner IN SCHEMA public GRANT SELECT ON TABLES TO gl_base;
 CREATE SCHEMA columns;
-CREATE TABLE columns.secrets(a int,b int);
+CREATE TABLE columns.secrets(a int,b int,"odd""column" int);
 GRANT SELECT(a) ON columns.secrets TO gl_base;
+GRANT UPDATE("odd""column") ON columns.secrets TO gl_base;
+GRANT REFERENCES(b) ON columns.secrets TO PUBLIC;
+CREATE TABLE columns.visible(a int);
+GRANT SELECT ON columns.visible TO gl_base;
 ''', db='gl_data')
         hostport = json.loads(subprocess.check_output([*docker, 'inspect', name], text=True))[0]['NetworkSettings']['Ports']['5432/tcp'][0]['HostPort']
         dsn = f'host=127.0.0.1 port={hostport} user=gl_observer dbname=postgres sslmode=disable password={MARKER}'
@@ -209,7 +213,13 @@ GRANT SELECT(a) ON columns.secrets TO gl_base;
             assert atoms[('gl_owner', 'table:gl_data.public.untouched', 'SELECT')]['source'] == 'implicit'
             assert atoms[expected[-1]]['source'] == 'explicit'  # relacl materialized by GRANT
             assert not any(g[0] in {'gl_noinherit', 'gl_descendant'} for g in atoms)
-            assert not any(g[1].startswith('table:gl_data.columns.') for g in atoms)
+            assert ('gl_base', 'column:gl_data.columns.secrets.a', 'SELECT') in atoms
+            assert ('gl_base', 'column:gl_data.columns.secrets.odd"column', 'UPDATE') in atoms
+            assert ('PUBLIC', 'column:gl_data.columns.secrets.b', 'REFERENCES') in atoms
+            assert ('gl_base', 'column:gl_data.columns.secrets.b', 'SELECT') not in atoms
+            assert ('gl_base', 'table:gl_data.columns.secrets', 'SELECT') not in atoms
+            assert ('gl_base', 'table:gl_data.columns.visible', 'SELECT') in atoms
+            assert not any(u['note'].startswith('Column privileges cannot') for u in plan['unobserved'])
             assert any('table:gl_blocked.' in u['prefixes'] for u in plan['unobserved'])
             assert any('table:gl_skip.' in u['prefixes'] for u in plan['unobserved'])
             assert not any(c['grant']['resource'].startswith(('table:gl_blocked.', 'table:gl_skip.')) for c in plan['changes'])
@@ -220,6 +230,7 @@ GRANT SELECT(a) ON columns.secrets TO gl_base;
             assert graph['graph']['kind']['gl_subject'] == 'human'
             assert graph['graph']['kind']['gl_base'] == 'role'
             assert graph['routes_from']['gl_subject']['paths'], graph
+            assert any(path[-1] == 'column:gl_data.columns.secrets.a' for path in graph['routes_from']['gl_subject']['paths'])
             saved = run(binary, config, dsn, 'snapshot', '--json')
             assert Path(saved['path']).stat().st_mode & 0o077 == 0
             imported = run(binary, config, 'invalid ' + MARKER, 'plan', '--observed', saved['path'], '--json', live=False)
@@ -238,15 +249,18 @@ GRANT SELECT(a) ON columns.secrets TO gl_base;
                      ('PUBLIC', 'db:gl_data', 'CONNECT'),
                      ('missing-role', 'table:gl_data.public.events', 'SELECT'),
                      ('gl_subject', 'table:gl_skip.public.events', 'SELECT'),
-                     ('gl_subject', 'table:gl_blocked.public.secret', 'SELECT')]
+                     ('gl_subject', 'table:gl_blocked.public.secret', 'SELECT'),
+                     ('gl_subject', 'column:gl_data.columns.secrets.a', 'SELECT'),
+                     ('gl_subject', 'column:gl_data.columns.secrets.b', 'SELECT'),
+                     ('gl_subject', 'column:gl_data.columns.secrets.odd"column', 'UPDATE')]
             baseline = probe_baseline(root, cases)
             command = ('probe', '--observed', str(baseline), '--json')
             report = run(binary, config, dsn, *command)
             probed = probe_rows(report)
             expected = ['allow', 'deny', 'allow', 'allow', 'allow', 'deny', 'deny', 'allow',
-                        'unknown', 'unknown', 'unknown', 'unknown', 'unknown', 'unknown']
+                        'unknown', 'unknown', 'unknown', 'unknown', 'unknown', 'unknown', 'allow', 'deny', 'allow']
             assert [probed[c]['verdict'] for c in cases] == expected, report
-            assert len(report['findings']) == 3 and all(f['title'] == 'granted on paper, denied on the path' for f in report['findings'])
+            assert len(report['findings']) == 4 and all(f['title'] == 'granted on paper, denied on the path' for f in report['findings'])
             assert all('not a login' in p['how'] for p in report['probes'] if p['verdict'] == 'allow')
             # A missing object in the same transaction must not poison later success.
             assert probed[cases[0]]['verdict'] == 'allow' and probed[cases[8]]['verdict'] == 'unknown'
@@ -278,14 +292,15 @@ GRANT SELECT(a) ON columns.secrets TO gl_base;
             original = config.read_text()
             config.write_text(original + 'databases=["postgres"]\n')
             excluded = run(binary, config, dsn, 'plan', '--json')
-            assert not any(g['resource'].startswith(('table:gl_data.', 'schema:gl_data.', 'default:gl_data.')) for g in excluded['observed'])
+            assert not any(g['resource'].startswith(('table:gl_data.', 'column:gl_data.', 'schema:gl_data.', 'default:gl_data.')) for g in excluded['observed'])
+            assert any('column:gl_data.' in u['prefixes'] for u in excluded['unobserved'])
             assert any('table:gl_data.' in u['prefixes'] for u in excluded['unobserved'])
             config.write_text(original)
             # Fail after table rows have been read: no partial per-DB grants may survive.
             sql('REVOKE SELECT ON pg_catalog.pg_default_acl FROM PUBLIC', db='gl_data')
             partial = run(binary, config, dsn, 'plan', '--json')
             assert any('table:gl_data.' in u['prefixes'] for u in partial['unobserved'])
-            assert not any(g['resource'].startswith(('table:gl_data.', 'schema:gl_data.', 'default:gl_data.')) for g in partial['observed'])
+            assert not any(g['resource'].startswith(('table:gl_data.', 'column:gl_data.', 'schema:gl_data.', 'default:gl_data.')) for g in partial['observed'])
             assert any(g['resource'] == 'db:gl_data' for g in partial['observed'])
             sql('GRANT SELECT ON pg_catalog.pg_default_acl TO PUBLIC', db='gl_data')
             sql('ALTER DEFAULT PRIVILEGES FOR ROLE gl_owner GRANT SELECT ON TABLES TO gl_base', db='gl_data')
@@ -314,7 +329,7 @@ GRANT SELECT(a) ON columns.secrets TO gl_base;
             blind(capped)
             assert any('row/byte limit' in u['note'] for u in capped['unobserved'])
             print('PostgreSQL server version:', sql('SHOW server_version').strip())
-            print('PostgreSQL Docker: catalog scopes/defaults, PUBLIC/owner ACLs, grantors, quoted names, nested roles, unknown inheritance/columns/exclusions/unreachable DBs, graph/snapshot, partial rollback, TLS downgrade refusal, row cap and independent data/write refusal passed')
+            print('PostgreSQL Docker: catalog scopes/defaults/column ACLs, PUBLIC/owner ACLs, grantors, quoted names, nested roles, unknown inheritance/exclusions/unreachable DBs, graph/snapshot, partial rollback, TLS downgrade refusal, row cap and independent data/write refusal passed')
     finally:
         subprocess.run([*docker, 'stop', name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30, check=False)
 
