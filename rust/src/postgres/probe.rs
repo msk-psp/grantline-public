@@ -80,7 +80,7 @@ fn target(g: &Grant) -> Result<Target> {
                     parts[2].replace('"', "\"\"")
                 ),
                 if kind == "column" {
-                    "SELECT pg_catalog.has_column_privilege($1::name, $2::text, $3::text, $4::text)"
+                    "SELECT pg_catalog.has_column_privilege($1::name, c.oid, $3::text, $4::text) FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=(pg_catalog.parse_ident($2::text))[1] AND c.relname=(pg_catalog.parse_ident($2::text))[2]"
                 } else {
                     "SELECT pg_catalog.has_table_privilege($1::name, $2::text, $3::text)"
                 },
@@ -328,7 +328,7 @@ mod tests {
         assert_eq!(column.column.as_deref(), Some("c'--"));
         assert_eq!(
             column.sql,
-            "SELECT pg_catalog.has_column_privilege($1::name, $2::text, $3::text, $4::text)"
+            "SELECT pg_catalog.has_column_privilege($1::name, c.oid, $3::text, $4::text) FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=(pg_catalog.parse_ident($2::text))[1] AND c.relname=(pg_catalog.parse_ident($2::text))[2]"
         );
         assert!(target(&Grant::new("pg", &"a".repeat(64), "db:demo", "CONNECT")).is_err());
         assert!(
