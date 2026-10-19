@@ -33,7 +33,7 @@ State is disposable, private to the process and erased when it exits.
 | Stage | Implementation | Acceptance before promotion | Status |
 |---|---|---|---|
 | R2 | Typed config/intent, snapshots, findings, graph and offline plan CLI | Fixture decisions, diagnostics, PG/CH SQL previews, snapshot round trips and graph paths match Python; S3 commands/coalescing remain R3 | Merged in PR #16 |
-| R3 | PostgreSQL, ClickHouse and S3 native adapters, probes and writers | Existing regression cases ported; separately authorized live read/probe and reversible write validation per adapter | R3a–R3e3 merged; R3f merged; R3g1 merged; R3g2 merged; R3g3 membership writer merged in PR #28; R3g4 merged in PR #29; R3h1/R3h2 ClickHouse table/DB writers implemented, main integration pending; other writers pending |
+| R3 | PostgreSQL, ClickHouse and S3 native adapters, probes and writers | Existing regression cases ported; separately authorized live read/probe and reversible write validation per adapter | R3a–R3e3 merged; R3f merged; R3g1 merged; R3g2 merged; R3g3 membership writer merged in PR #28; R3g4 merged in PR #29; R3h1/R3h2 merged in #31; R3h3 merged in #32; conditional remote JSON writer implemented; protocol-specific tree/IAM writes remain explicitly unsupported |
 | R4 | Production sessions/OIDC, durable approval store, Slack signatures/DMs, code writer and GitHub PRs | Requester binding, all approvers, callback replay, immutable plan and repo scope verified end to end; approval/PR/applied access reported separately | Pending |
 | R5 | All console pages, Leptos hydration and interactive permission map | Repeated hover highlight/dimming, matrix scrolling, accessible dark mode, logs and four locales verified in browser | Pending |
 | R6 | Release image, migration/rollback and operating guide | Reproducible native/WASM builds, upgrade of persisted state, image smoke tests and explicitly authorized rollout | Pending |
@@ -80,7 +80,7 @@ production/staging verification requires separate authorization.
 
 ## R3 — Native adapter migration {#R3}
 
-Status: R3a merged in PR #17; R3b merged in PR #18; R3c merged in PR #19; R3d merged in PR #20; R3e1 merged in PR #22; R3e2 merged in PR #23; R3e3 merged in PR #24; R3f merged in PR #25; R3g1 merged in PR #26; R3g2 merged in PR #27; R3g3 membership writer merged in PR #28; R3g4 merged in PR #29; R3h1/R3h2 integrated into main in PR #31; R3h3 implemented with isolated local verification, pending PR/CI/main integration.
+Status: R3a merged in PR #17; R3b merged in PR #18; R3c merged in PR #19; R3d merged in PR #20; R3e1 merged in PR #22; R3e2 merged in PR #23; R3e3 merged in PR #24; R3f merged in PR #25; R3g1 merged in PR #26; R3g2 merged in PR #27; R3g3 membership writer merged in PR #28; R3g4 merged in PR #29; R3h1/R3h2 integrated into main in PR #31; R3h3 merged in PR #32; conditional remote JSON writer implemented.
 The first review unit implements S3 file/dir
 planes, effective policy observation, group/inline routes and identity-scoped
 document previews. Plan commands remain previews; R3f adds a separate explicit
@@ -698,3 +698,49 @@ References: [role GRANT](https://clickhouse.com/docs/sql-reference/statements/gr
 [REVOKE](https://clickhouse.com/docs/sql-reference/statements/revoke),
 [role metadata](https://github.com/ClickHouse/ClickHouse/blob/v26.6.2.160-stable/src/Storages/System/StorageSystemRoleGrants.cpp),
 [default-role policy](https://github.com/ClickHouse/ClickHouse/blob/v26.6.2.160-stable/src/Storages/System/StorageSystemUsers.cpp).
+
+## Final implementation stack — R3i through R6
+
+User authorized completion as stacked PRs on 2026-10-16. Implement the remaining
+production software paths and isolated verification; deployment and operational
+credential/permission changes remain separate. Do not auto-merge stacked branches.
+
+### R3i — Conditional remote JSON IAM writer
+
+Explicit enforced-plane admin_url_env/admin_auth_env and conditional_write=true.
+GET requires a strong ETag; bind endpoint, config/intent, credential identity,
+revision and original/candidate bytes. Use existing strict local IAM transformer.
+One If-Match PUT, 412 conflict, exact post-read; other dispatched errors unknown.
+Private original-byte backup before dispatch and conditional restore only against
+the applied-byte digest, never blind compensation. No service reload/effective
+access claim. IAM Query and shared Filer group trees remain read-only because
+those protocols do not provide this single-document conditional-write contract.
+Server must implement If-Match correctly; the flag is an operator contract, not
+proof of server correctness. Existing local SeaweedFS write/access tests plus
+remote HTTP conflict/recovery/failure injection establish the bounded contract.
+
+### R4 implementation units
+
+R4a: explicit loopback-only trusted proxy mode and direct OIDC authorization-code
+flow with state, nonce, PKCE, verified issuer/audience/signature, private expiring
+sessions and CSRF. No demo authentication accepted by production routes.
+R4b: private durable versioned approval store, all independent approvers, immutable
+source/patch digest, exact requester identity binding, replay/expiry guards and
+audit events. Signed Slack callbacks and authenticated per-approver DMs; native
+GitHub scoped branch/commit/PR publication with no IAM application. Fail closed
+and record uncertain external outcomes; no automatic re-publication after errors.
+
+### R5 implementation unit
+
+Leptos console routes for map, accounts/resources, services, matrix, changes,
+history and approvals, with typed Rust API data. Native/WASM UI build, functional
+hover/dimming without layout oscillation, logs with levels/entities, scroll-safe
+matrix and dark selects. English/Korean/Japanese/Chinese; preserve service and
+environment proper names. Keep Python as oracle, never runtime proxy/subprocess.
+
+### R6 implementation unit
+
+Non-root native image with WASM/assets, locked reproducible builds, CI smoke
+checks and release gating. Versioned durable state import/backup, migration dry
+run and reversible upgrade procedure. Document explicit limits and Python/Rust
+cutover; no release publication or operational rollout in this task.

@@ -77,12 +77,12 @@ impl<'de> Deserialize<'de> for Strict {
         d.deserialize_any(Visitor)
     }
 }
-fn parse(bytes: &[u8]) -> Result<Value> {
+pub(super) fn parse(bytes: &[u8]) -> Result<Value> {
     serde_json::from_slice::<Strict>(bytes)
         .map(|v| v.0)
         .map_err(|_| "Invalid, duplicate-key, too deep or non-integral IAM/backup JSON".into())
 }
-fn read(path: &Path, limit: u64) -> Result<(Vec<u8>, Metadata)> {
+pub(super) fn read(path: &Path, limit: u64) -> Result<(Vec<u8>, Metadata)> {
     // Check before opening: a FIFO must not make a supposedly bounded read hang.
     let before = fs::symlink_metadata(path).map_err(|_| "Cannot inspect local IAM file")?;
     if !before.is_file() || before.nlink() != 1 || before.len() > limit {
@@ -161,7 +161,7 @@ fn source(loaded: &config::Loaded, system: &str) -> Result<PathBuf> {
     let base = fs::canonicalize(&loaded.base).map_err(|_| "Cannot resolve config directory")?;
     plain_path(&config::relative(&base, path)?)
 }
-fn supported(raw: &Value) -> Result<()> {
+pub(super) fn supported(raw: &Value) -> Result<()> {
     let object = raw.as_object().ok_or("IAM source must be an object")?;
     if object
         .keys()
@@ -238,11 +238,12 @@ fn load_inputs(path: &Path) -> Result<(config::Loaded, BTreeMap<PathBuf, Vec<u8>
     }
     Ok((loaded, inputs))
 }
-fn prepare(config_path: &Path, system: &str) -> Result<Prepared> {
-    let (loaded, inputs) = load_inputs(config_path)?;
-    let path = source(&loaded, system)?;
-    let (before, meta) = read(&path, LIMIT)?;
-    let raw = parse(&before)?;
+pub(super) fn candidate(
+    loaded: &config::Loaded,
+    system: &str,
+    before: &[u8],
+) -> Result<(Vec<u8>, Vec<Preview>)> {
+    let raw = parse(before)?;
     supported(&raw)?;
     let doc = document(raw.clone(), system)?;
     let mut obs = Observed {
@@ -319,7 +320,7 @@ fn prepare(config_path: &Path, system: &str) -> Result<Prepared> {
         );
     }
     let after = if previews.is_empty() {
-        before.clone()
+        before.to_vec()
     } else {
         let mut bytes =
             serde_json::to_vec_pretty(&changed).map_err(|_| "Cannot encode IAM file")?;
@@ -329,6 +330,13 @@ fn prepare(config_path: &Path, system: &str) -> Result<Prepared> {
     if after.len() as u64 > LIMIT {
         return Err("Resulting IAM file exceeds the writer limit".into());
     }
+    Ok((after, previews))
+}
+fn prepare(config_path: &Path, system: &str) -> Result<Prepared> {
+    let (loaded, inputs) = load_inputs(config_path)?;
+    let path = source(&loaded, system)?;
+    let (before, meta) = read(&path, LIMIT)?;
+    let (after, previews) = candidate(&loaded, system, &before)?;
     if inputs
         .keys()
         .any(|p| fs::canonicalize(p).ok().as_ref() == Some(&path))

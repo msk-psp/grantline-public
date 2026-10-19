@@ -980,3 +980,17 @@ immutable official SeaweedFS 4.48 image verifies actual IAM signatures, user/gro
 inline and managed policies, Filer storage and server-enforced IAM write refusal.
 Only task-owned containers/fixtures are created and removed. The Python reference
 omits some policy attachment types; those cases have independent server assertions.
+
+## Conditional remote JSON IAM writes
+
+For an enforced JSON plane configure `admin_url_env`, optional `admin_auth_env`,
+and `conditional_write = true`. The endpoint must implement strong ETags and
+If-Match PUT atomically. `apply --live --system s3` previews; writing also needs
+`--write --expect PLAN_ID`. No reader credential fallback occurs. A mode-0600
+`.grantline-remote-*.backup.json` containing original credentials is saved beside
+the config before dispatch; keep config and state outside version control.
+`restore --live --system s3 --backup PATH` previews the inverse; add `--write`
+only after review. Restore refuses changed applied bytes and uses current ETag.
+412 means revision conflict. Other dispatch/post-check failures require inspection;
+there is no automatic retry/compensation or service reload. Shared IAM trees and
+IAM Query remain read-only. Run `python3 scripts/check_rust_remote_writer.py`.
