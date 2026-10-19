@@ -28,6 +28,7 @@ struct Http {
     key: String,
     started: Instant,
     timeout: Duration,
+    tls: ureq::tls::TlsConfig,
 }
 #[derive(Deserialize)]
 struct Envelope<T> {
@@ -45,9 +46,14 @@ impl Http {
             .as_deref()
             .filter(|s| !s.is_empty())
             .ok_or("ClickHouse url_env read credential is not configured")?;
-        Self::from_env(name, adapter.read_timeout_seconds, Instant::now())
+        Self::from_env(
+            name,
+            adapter.read_timeout_seconds,
+            Instant::now(),
+            adapter.ca_bundle_env.as_deref(),
+        )
     }
-    fn from_env(name: &str, timeout: u64, started: Instant) -> Result<Self> {
+    fn from_env(name: &str, timeout: u64, started: Instant, ca: Option<&str>) -> Result<Self> {
         let raw = std::env::var(name).map_err(|_| "ClickHouse read credential is unavailable")?;
         let mut url = Url::parse(&raw).map_err(|_| "Invalid ClickHouse reader URL")?;
         if !matches!(url.scheme(), "http" | "https")
@@ -77,6 +83,7 @@ impl Http {
             return Err("read_timeout_seconds must be between 1 and 120".into());
         }
         Ok(Self {
+            tls: crate::tls::http(ca)?,
             url,
             user: if user.is_empty() {
                 "default".into()
@@ -111,6 +118,7 @@ impl Http {
             ("wait_end_of_query", "1"),
         ]);
         let agent: ureq::Agent = ureq::Agent::config_builder()
+            .tls_config(self.tls.clone())
             .timeout_global(Some(remaining))
             .timeout_connect(Some(remaining.min(Duration::from_secs(5))))
             .max_redirects(0)

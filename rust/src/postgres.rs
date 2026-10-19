@@ -89,8 +89,8 @@ fn config(raw: &str, seconds: u64) -> Result<Config> {
         .options(format!("-c default_transaction_read_only=on -c statement_timeout={} -c lock_timeout=1000 -c idle_in_transaction_session_timeout={} -c search_path=pg_catalog", seconds*1000,seconds*1000));
     Ok(cfg)
 }
-async fn open(cfg: &Config) -> Result<Client> {
-    let tls = tokio_postgres_rustls::MakeRustlsConnect::with_webpki_roots();
+async fn open(cfg: &Config, ca: Option<&str>) -> Result<Client> {
+    let tls = crate::tls::postgres(ca)?;
     let (client, connection) = cfg
         .connect(tls)
         .await
@@ -100,8 +100,8 @@ async fn open(cfg: &Config) -> Result<Client> {
     });
     Ok(client)
 }
-async fn connect(cfg: &Config) -> Result<Client> {
-    let client = open(cfg).await?;
+async fn connect(cfg: &Config, ca: Option<&str>) -> Result<Client> {
+    let client = open(cfg, ca).await?;
     client
         .batch_execute("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY")
         .await
@@ -259,10 +259,16 @@ pub fn frozen_finding(system: &str, table: &str, owner: &str) -> Finding {
         vec![table.into(), owner.into()],
     )
 }
-async fn database(cfg: &Config, system: &str, db: &str, kinds: &Kinds) -> Result<Observed> {
+async fn database(
+    cfg: &Config,
+    system: &str,
+    db: &str,
+    kinds: &Kinds,
+    ca: Option<&str>,
+) -> Result<Observed> {
     let mut cfg = cfg.clone();
     cfg.dbname(db);
-    let client = connect(&cfg).await?;
+    let client = connect(&cfg, ca).await?;
     database_catalog(&client, system, db, kinds).await
 }
 async fn database_catalog(
@@ -329,7 +335,7 @@ async fn database_catalog(
     Ok(out)
 }
 async fn observe_async(cfg: Config, adapter: &Adapter, system: &str) -> Result<Observed> {
-    let client = connect(&cfg).await?;
+    let client = connect(&cfg, adapter.ca_bundle_env.as_deref()).await?;
     #[derive(Deserialize)]
     struct Version {
         version: i32,
@@ -430,7 +436,15 @@ async fn observe_async(cfg: Config, adapter: &Adapter, system: &str) -> Result<O
             ));
             continue;
         }
-        match database(&cfg, system, &db.name, &out.kinds).await {
+        match database(
+            &cfg,
+            system,
+            &db.name,
+            &out.kinds,
+            adapter.ca_bundle_env.as_deref(),
+        )
+        .await
+        {
             Ok(mut part) => {
                 out.grants.append(&mut part.grants);
                 out.unknown.append(&mut part.unknown);

@@ -1,4 +1,5 @@
 //! One exact direct ACL statement; dispatch failures are uncertain, never retried.
+mod privileges;
 use super::*;
 use crate::{config as input, planner};
 use serde::Serialize;
@@ -21,6 +22,7 @@ struct State {
     tables: Vec<Value>,
     databases: Vec<Value>,
     user_policies: Vec<Value>,
+    privilege_tree: Vec<Value>,
 }
 fn sorted(mut rows: Vec<Value>) -> Vec<Value> {
     rows.sort_by_cached_key(Value::to_string);
@@ -71,8 +73,14 @@ fn allowed(adapter: &Adapter, resource: &str) -> bool {
 }
 fn target_sql(g: &Grant) -> Result<String> {
     let (db, t) = scope(&g.resource)?;
-    if !matches!(g.privilege.as_str(), "SELECT" | "INSERT") {
-        return Err("ClickHouse writer supports exact SELECT or INSERT only".into());
+    let p = g.privilege.as_str();
+    // report() separately requires server-defined leaf privileges and explicit authorization.
+    if p.is_empty()
+        || p.len() > 128
+        || p == "ALL"
+        || !p.bytes().all(|b| b.is_ascii_alphanumeric() || b == b' ')
+    {
+        return Err("ClickHouse writer requires an exact server-defined leaf privilege".into());
     }
     Ok(format!(
         "{}.{}",
@@ -135,7 +143,8 @@ fn state(http: &Http, adapter: &Adapter) -> Result<State> {
         if !selected.iter().any(|t| {
             t["database"] == db
                 && t["name"] == name
-                && matches!(t["engine"].as_str(), Some("Memory" | "MergeTree"))
+                && (!adapter.clickhouse_write_privileges.is_empty()
+                    || matches!(t["engine"].as_str(), Some("Memory" | "MergeTree")))
         }) {
             return Err(
                 "Every allowed table must exist with a UUID and Memory/MergeTree engine".into(),
@@ -216,11 +225,23 @@ fn state(http: &Http, adapter: &Adapter) -> Result<State> {
             return Err("Incomplete user policy catalog".into());
         }
     }
+    let privilege_tree = if adapter.clickhouse_write_privileges.is_empty() {
+        vec![]
+    } else {
+        sorted(http.query::<Value>("SELECT toString(privilege) AS privilege,aliases,toString(level) AS level,toString(parent_group) AS parent_group FROM system.privileges LIMIT 10001")?)
+    };
+    let raw_grants = sorted(http.query(RAW_GRANTS)?);
+    let grants = if privilege_tree.is_empty() {
+        raw_grants
+    } else {
+        privileges::rows(&privilege_tree, raw_grants)?
+    };
     Ok(State {
+        privilege_tree,
         session,
         principals,
         members,
-        grants: sorted(http.query(RAW_GRANTS)?),
+        grants,
         tables: selected,
         databases,
         user_policies,
@@ -277,7 +298,8 @@ fn recipient<'a>(
             || r["grant_option"] != 0
             || !r["column"].is_null()
             || r["access_object"] != ""
-            || !matches!(r["access_type"].as_str(), Some("SELECT" | "INSERT"))
+            || (adapter.clickhouse_write_privileges.is_empty()
+                && !matches!(r["access_type"].as_str(), Some("SELECT" | "INSERT")))
             || r["database"].as_str().is_none_or(|s| literal(s).is_err())
             || match r["table"].as_str() {
                 Some(t) => literal(t).is_err(),
@@ -420,7 +442,7 @@ fn report(
     issuer: &str,
 ) -> Result<planner::Report> {
     let adapter = &loaded.config.adapters[system];
-    let intent = input::Intent {
+    let mut intent = input::Intent {
         grants: loaded
             .intent
             .grants
@@ -438,6 +460,35 @@ fn report(
             .collect(),
         naming_synonyms: vec![],
     };
+    let permitted = |g: &Grant| -> Result<()> {
+        if g.privilege == "MEMBER" {
+            return Ok(());
+        }
+        if s.privilege_tree.is_empty() {
+            return if matches!(g.privilege.as_str(), "SELECT" | "INSERT") {
+                Ok(())
+            } else {
+                Err("Additional ClickHouse privileges require clickhouse_write_privileges authorization".into())
+            };
+        }
+        let wanted = privileges::expand(&s.privilege_tree, &g.privilege, &g.resource)?;
+        let mut allowed = BTreeSet::from(["SELECT".to_owned(), "INSERT".to_owned()]);
+        for p in &adapter.clickhouse_write_privileges {
+            if let Ok(ps) = privileges::expand(&s.privilege_tree, p, &g.resource) {
+                allowed.extend(ps)
+            }
+        }
+        if wanted.iter().any(|p| !allowed.contains(p)) {
+            return Err("Additional ClickHouse privileges require clickhouse_write_privileges authorization".into());
+        }
+        Ok(())
+    };
+    for g in &intent.grants {
+        permitted(g)?;
+    }
+    if !s.privilege_tree.is_empty() {
+        intent.grants = privileges::grants(&s.privilege_tree, &intent.grants)?;
+    }
     if intent.grants.len() > 1000 {
         return Err("ClickHouse writer intent exceeds 1000 grants".into());
     }
@@ -489,13 +540,24 @@ fn report(
         &loaded.kinds,
         vec![],
     );
-    if !plan.commands_complete || plan.changes.len() > 1 {
+    let one_scope = plan.changes.first().is_none_or(|first| {
+        plan.changes.iter().all(|c| {
+            c.action == first.action
+                && c.grant.subject == first.grant.subject
+                && c.grant.resource == first.grant.resource
+                && !c.grant.resource.starts_with("role:")
+        })
+    });
+    if (s.privilege_tree.is_empty() && (!plan.commands_complete || plan.changes.len() > 1))
+        || (!s.privilege_tree.is_empty() && (!one_scope || plan.changes.len() > 1000))
+    {
         return Err(
             "ClickHouse writer requires at most one change; no multi-statement rollback exists"
                 .into(),
         );
     }
     for c in &mut plan.changes {
+        permitted(&c.grant)?;
         let (verb, to) = match c.action.as_str() {
             "grant" => ("GRANT", "TO"),
             "revoke" => ("REVOKE", "FROM"),
@@ -522,18 +584,33 @@ fn report(
             .ok_or("Writer principal disappeared")?;
         let mut authority = c.grant.clone();
         authority.subject = issuer.into();
-        if !s.grants.contains(&atom(&authority, actor, 1)?) {
+        let exact = s.grants.contains(&atom(&authority, actor, 1)?);
+        let broad = !s.privilege_tree.is_empty()
+            && s.grants.iter().any(|r| {
+                r["user_name"] == issuer
+                    && r["grant_option"] == 1
+                    && r["is_partial_revoke"] == 0
+                    && r["column"].is_null()
+                    && r["access_object"] == ""
+                    && r["access_type"] == c.grant.privilege
+                    && (r["database"].is_null()
+                        || (r["database"] == scope(&c.grant.resource).unwrap().0
+                            && r["table"].is_null()))
+            });
+        if !exact && !broad {
             return Err(
                 "Writer must directly hold exact-scope GRANT OPTION for the changed privilege"
                     .into(),
             );
         }
+        c.command_error = None;
         c.cmd = Some(format!(
             "{verb} {} ON {target} {to} {};",
             c.grant.privilege,
             quoted(&c.grant.subject)
         ));
     }
+    plan.commands_complete = true;
     Ok(plan)
 }
 fn checked(http: &Http, loaded: &input::Loaded, system: &str) -> Result<(State, planner::Report)> {
@@ -549,7 +626,10 @@ fn checked(http: &Http, loaded: &input::Loaded, system: &str) -> Result<(State, 
         literal(role)?;
     }
     let before = state(http, adapter)?;
-    let observed = observe_http(http, system)?;
+    let mut observed = observe_http(http, system)?;
+    if !before.privilege_tree.is_empty() {
+        observed.grants = privileges::grants(&before.privilege_tree, &observed.grants)?;
+    }
     let after = state(http, adapter)?;
     if before != after {
         return Err("ClickHouse catalog changed during observation; preview again".into());
@@ -639,7 +719,12 @@ pub fn apply(path: &Path, system: &str, write: bool, expected: Option<&str>) -> 
     if url.username().is_empty() {
         return Err("ClickHouse admin URL requires an explicit authenticated user".into());
     }
-    let http = Http::from_env(key, adapter.read_timeout_seconds, Instant::now())?;
+    let http = Http::from_env(
+        key,
+        adapter.read_timeout_seconds,
+        Instant::now(),
+        adapter.ca_bundle_env.as_deref(),
+    )?;
     let (state, plan) = checked(&http, &loaded, system)?;
     let value = serde_json::to_vec(&json!({"format":"clickhouse-single-acl-v3","path":path,"system":system,"endpoint":http.url.as_str(),"state":state,"changes":plan.changes})).map_err(|_| "Cannot bind ClickHouse plan")?;
     let mut hash = Sha256::new();
@@ -665,32 +750,58 @@ pub fn apply(path: &Path, system: &str, write: bool, expected: Option<&str>) -> 
                 "ClickHouse source/catalog changed before dispatch; no statement sent".into(),
             );
         }
-        let c = &plan.changes[0];
-        let is_member = c.grant.resource.starts_with("role:");
-        let row = if is_member {
-            membership(&state, &c.grant, adapter, &http.user)?
+        let first = &plan.changes[0];
+        let statement = if plan.changes.len() == 1 {
+            first.cmd.clone().ok_or("Missing fixed SQL")?
         } else {
-            let p = recipient(
-                &state,
-                &c.grant.subject,
-                &ancestors(&state, &http.user),
-                adapter,
-            )?;
-            atom(&c.grant, p, 0)?
+            let privileges = plan
+                .changes
+                .iter()
+                .map(|c| c.grant.privilege.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let (verb, to) = if first.action == "grant" {
+                ("GRANT", "TO")
+            } else {
+                ("REVOKE", "FROM")
+            };
+            format!(
+                "{verb} {privileges} ON {} {to} {};",
+                target_sql(&first.grant)?,
+                quoted(&first.grant.subject)
+            )
         };
-        let mut wanted = state;
-        let rows = if is_member {
-            &mut wanted.members
-        } else {
-            &mut wanted.grants
-        };
-        if c.action == "grant" {
-            rows.push(row);
-        } else {
-            rows.retain(|r| r != &row);
+        let mut expected_rows = Vec::new();
+        for c in &plan.changes {
+            let row = if c.grant.resource.starts_with("role:") {
+                membership(&state, &c.grant, adapter, &http.user)?
+            } else {
+                let p = recipient(
+                    &state,
+                    &c.grant.subject,
+                    &ancestors(&state, &http.user),
+                    adapter,
+                )?;
+                atom(&c.grant, p, 0)?
+            };
+            expected_rows.push((c.action.clone(), c.grant.resource.starts_with("role:"), row));
         }
-        rows.sort_by_cached_key(Value::to_string);
-        execute(&http, c.cmd.as_deref().ok_or("Missing fixed SQL")?)?;
+        let mut wanted = state;
+        for (action, is_member, row) in expected_rows {
+            let rows = if is_member {
+                &mut wanted.members
+            } else {
+                &mut wanted.grants
+            };
+            if action == "grant" {
+                rows.push(row)
+            } else {
+                rows.retain(|r| r != &row)
+            }
+            rows.sort_by_cached_key(Value::to_string);
+            rows.dedup();
+        }
+        execute(&http, &statement)?;
         let unknown = "ClickHouse write outcome unknown: post-check failed; inspect ACLs before retry or inverse; no automatic rollback";
         let (after, remaining) = checked(&http, &loaded, system).map_err(|_| unknown)?;
         if wanted != after || !remaining.changes.is_empty() {

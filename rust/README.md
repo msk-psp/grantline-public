@@ -32,6 +32,16 @@ missing from its header remains unread. Unsupported command generation is
 reported per candidate. Explicit `apply` writes have separate boundaries below;
 `plan` never applies its previews.
 
+## Current workflow and performance additions
+
+See [the current operating guide](../docs/rust-operations.md#observation-console-and-expanded-privilege-compatibility)
+for bounded parallel reads, shared cache/refresh, private CA and env_file loading,
+expanded PostgreSQL/ClickHouse privileges, direct Filer identity writes, explicit
+S3 Write probes, drift notifications and native detail/history navigation.
+The R3 units below retain their default-profile safety and recovery contracts;
+opt-in extensions are described in that guide. Authentication-bound approvals
+publish policy PRs and still require a separate reviewed IAM apply.
+
 ### Read a native ClickHouse catalog
 
 Use the existing configuration shape, with the reader URL supplied in the named
@@ -59,7 +69,7 @@ The reader needs global `SHOW ACCESS`, `SHOW DATABASES` and catalog SELECT on
 the owner of the service. Use a server-enforced `readonly=2` profile so bounded
 per-query settings can be applied. The client requests `readonly=2` and sends
 only catalog reads, never GRANT/REVOKE or arbitrary SQL. `admin_url_env`, probe
-credentials and `env_file` are not resolved. `--observed` conflicts with `--live`.
+credentials are not resolved by the reader. Optional private `env_file` loading happens once at CLI startup. `--observed` conflicts with `--live`.
 This is catalog observation, not a target user's login/data-access probe.
 
 The whole instance remains unknown if visibility cannot be established or any
@@ -68,7 +78,7 @@ total observation deadline is 30 seconds by default (`1..120` configurable).
 Queries cap execution, scan and result size; they never accept partial results.
 Responses and transport errors are withheld from diagnostics to prevent echoing
 credentials. HTTPS uses verified rustls certificates with bundled Mozilla roots;
-private CA configuration and positive HTTPS integration are not yet covered.
+a configured `ca_bundle_env` supplies verified private CA roots. Isolated HTTPS tests cover CA and hostname refusal.
 
 Column grants, partial revokes, parameterized/ambiguous scopes and their role
 dependants remain unknown. GRANT/ADMIN delegation is reported separately because
@@ -84,8 +94,7 @@ PostgreSQL **16+** uses only the explicitly named `dsn_env` reader. Put a libpq
 key/value DSN or PostgreSQL URI in that environment variable, outside the repo.
 Specify one TCP host, user and maintenance database; Unix sockets, multi-host,
 `hostaddr`, service files and caller-supplied `options` are unsupported. `PG*`
-environment credentials, `admin_dsn_env`, probe credentials and `env_file` are
-never consulted. Database names are passed through the driver's config API.
+environment credentials, `admin_dsn_env` and probe credentials are never fallback sources. A private `env_file` may supply the explicitly named DSN at startup. Database names are passed through the driver's config API.
 
 ```toml
 [adapters.database]
@@ -100,8 +109,9 @@ Use the same `plan/graph/snapshot --live` commands as above. TLS is required by
 default (including `sslmode=prefer`) and verifies the host certificate with
 bundled Mozilla roots. `sslmode=disable` explicitly permits plaintext, for
 example on the disposable loopback test server. Libpq `verify-full` spelling,
-private CA/client certificates and positive TLS integration are not supported
-in this unit; there is no certificate-verification bypass.
+client certificates and libpq-specific options remain unsupported. Private CA
+via `ca_bundle_env` is supported and tested with positive TLS/hostname checks;
+there is no certificate-verification bypass.
 
 The reader should have catalog SELECT and CONNECT to the maintenance/target
 DBs, without data or write grants. Provision it through the service owner.
@@ -253,7 +263,7 @@ PostgreSQL probe contract. No data, grants, roles or service config are changed.
 Run `python3 scripts/check_rust_clickhouse.py --docker` for HTTP failure guards,
 identity/credential isolation, partial-result deadlines, real inherited/scoped
 ACLs, partial/column unknowns, password login, default-role distinctions and
-independent server-side write refusal. Positive TLS integration, custom CA,
+independent server-side write refusal. ClickHouse-specific positive TLS integration,
 production/staging connections remain unverified; the narrow R3h1 writer is described below.
 
 ### Verify S3 List/Read samples (R3e3)
@@ -315,9 +325,9 @@ Each adapter has one `read_timeout_seconds` deadline (1–120 seconds), at most
 1,000 atoms, 128 subjects, 512 requests, 1 MiB per response and 16 MiB total.
 Deadline/aggregate/request exhaustion discards earlier partial results. HTTPS
 uses verified bundled roots; redirects and environment proxies are disabled.
-Custom `ca_bundle_env` is explicitly unsupported. Errors do not expose raw
-responses, credentials or sample keys. Positive TLS/private CA and AWS deployment
-integration remain unverified; the actual server test uses isolated SeaweedFS.
+`ca_bundle_env` supplies verified custom roots. Errors do not expose raw
+responses, credentials or sampled read keys. Shared HTTP TLS/hostname checks are
+isolated; AWS deployment integration remains unverified; the actual server test uses isolated SeaweedFS.
 
 Run `python3 scripts/check_rust_s3_probes.py --docker` for independent SigV4
 HTTP checks, error/scope/budget guards, credential isolation and official
@@ -354,10 +364,9 @@ URLs use HTTP(S) without userinfo, query or fragment; reverse proxy prefixes
 are retained. IAM endpoint paths use unescaped ASCII path characters. Credentials
 stay in headers, never URL parameters/output/snapshots. `admin_*`, probe and
 ambient AWS credentials are not consulted. Redirects and environment HTTP proxies
-are disabled. HTTPS verifies certificates against bundled Mozilla roots; custom
-`ca_bundle_env` is explicitly unsupported rather than ignored. Plain HTTP requires
-an explicitly configured HTTP URL. Positive TLS/private CA integration remains
-unverified.
+are disabled. HTTPS verifies certificates against bundled Mozilla roots or an explicit
+`ca_bundle_env` PEM bundle. Plain HTTP requires an explicitly configured HTTP URL.
+Isolated private CA/hostname tests are in `check_rust_runtime.py`.
 
 Filer listing pagination follows `ShouldDisplayLoadMore` and `LastFileName`,
 checks directory/entry paths, ordering and duplicates, and requires listed files
@@ -481,9 +490,11 @@ must exist in local_directory, with unambiguous names/UUIDs, and cannot be the
 writer or a role in its ancestry. Broad/delegated/column/partial/parameterized or
 unsupported direct recipient ACLs refuse the plan, except exact opt-in DB scopes
 described below. Table-only config does not authorize DB scopes; R3h2 below adds an independent
-DB opt-in. No global/role writes, ALL,
-ON CLUSTER, REPLACE OPTION, views, Distributed/Replicated tables or replicated
-access storage. Legacy prefix wildcard grants can refuse the whole observation.
+DB opt-in. This default profile refuses global writes, extended privileges, ON CLUSTER,
+REPLACE OPTION, non-Memory/MergeTree table engines and replicated access storage.
+The explicit extended privilege profile in the operating guide supports ALL,
+server-defined groups/leaves and UUID-backed table/view engines; role writes use
+the separate membership profile. Legacy prefix wildcard grants can refuse the whole observation.
 
 Plan-ID v2 (fresh preview required for older IDs) binds input bytes, non-secret endpoint, authenticated user/server UUID,
 full principal IDs/storage and raw direct grants/role edges, database IDs and all
@@ -506,7 +517,7 @@ active is not undone by revoking that permission.
 
 Run `python3 scripts/check_rust_clickhouse_writer.py --docker` for HTTP failure
 injection and official ClickHouse 26.6.2.160 grant/revoke/inverse and actual
-SELECT/INSERT/denial checks. Other versions, positive TLS/private CA, production,
+SELECT/INSERT/denial checks. Other versions, ClickHouse-specific positive TLS, production,
 concurrent administration and crash/restart around dispatch are unverified.
 See [GRANT](https://clickhouse.com/docs/sql-reference/statements/grant),
 [REVOKE](https://clickhouse.com/docs/sql-reference/statements/revoke) and
@@ -615,9 +626,10 @@ byte/time caps and readonly=2; writes remain a separate single POST.
 
 The SQL writer supports **existing ordinary tables and schemas in one database,
 and ACLs on that same database**. Supported schema privileges are USAGE/CREATE;
-database privileges are CONNECT/CREATE/TEMPORARY. Use canonical `TEMPORARY` in
-intent; the `TEMP` alias is refused to avoid a nonconvergent plan.
-It uses the existing native planner. Role changes require the separate R3g3
+database privileges are CONNECT/CREATE/TEMPORARY. ALL expands to canonical
+privileges and the TEMP alias becomes TEMPORARY.
+One transaction still targets one database; `--database NAME` supports configured
+include/exclude patterns. It uses the existing native planner. Role changes require the separate R3g3
 opt-in described below and cannot mix with object changes. Default privileges
 require the separate R3g4 allowlist and a default-only change plan. Declare any already-held permissions you intend to retain
 for managed subjects. Only catalogs in the selected database (and shared role/database ACLs) are observed here;
@@ -632,7 +644,9 @@ databases = ["demo"]                   # one literal name; no exclusions/globs
 ```
 
 Supply the write DSN via the named environment variable outside Git. It must
-name that exact database, a user and a single TCP host. The existing reader TLS
+name a user and a single TCP host. By default it names that exact database;
+`apply --database NAME` explicitly selects a matching configured database and
+overrides only the database field. The existing reader TLS
 rules apply: `sslmode=disable` is an explicit plaintext choice for a trusted local
 fixture; other modes require verified TLS without downgrade. Ambient `PG*`, probe
 mappings and `dsn_env` never supply writer credentials. The write role needs
@@ -651,9 +665,10 @@ server start, database/schema/table/role object identities, catalog ACL state an
 quoted SQL. Passwords are not included in the identifier or receipt. A server
 restart, a changed object/ACL/role, another login or changed input requires a new
 preview. The R3g4 plan-ID format is v4; older IDs need a fresh preview after upgrading. Dry-run and no-op calls create no files and commit no ACL changes.
-Only exact supported object privileges are accepted. ALL, PUBLIC/owner/privileged targets,
-column privileges, non-owner grantors, grant options, views, partitions and
-inheritance are unsupported. These conservative restrictions can refuse the
+ALL and TEMP are normalized to exact privileges before planning. PUBLIC needs
+`postgres_write_public=true`; nonordinary relations need an exact
+`postgres_write_relations` entry. Owner/privileged targets, column privileges,
+non-owner grantors and grant options remain unsupported. These conservative restrictions can refuse the
 whole plan even when only one candidate would be unsafe.
 
 Writing first takes a nonblocking transaction advisory lock with reserved keys
@@ -704,8 +719,9 @@ such as `privs = ["SELECT", "INSERT"]`. Run `apply --system pg-defaults --live
 Plans may change defaults only; preserve existing managed object ACLs in intent.
 Unchanged defaults outside the write allowlist remain read-only. Use a separate
 scope/credential per creator. No role/schema creation,
-PUBLIC/predefined/privileged/creator/schema-owner/database-owner recipients, ALL,
-grant options or non-creator grantors are supported. Existing allowlisted declared
+predefined/privileged/creator/schema-owner/database-owner recipients, grant
+options or non-creator grantors are supported. ALL expands to the server table
+privilege set; PUBLIC requires `postgres_write_public=true`. Existing allowlisted declared
 defaults are validated even if their binary grant is already present.
 
 The SQL always names FOR ROLE and IN SCHEMA, uses quoted identifiers, and revokes
@@ -733,7 +749,8 @@ restore neither those object ACLs nor data or raw default-row OIDs. Official
 PostgreSQL 17.11 tests verify actual future SELECT/INSERT, other creator/schema/DB
 isolation, quoted SQL, inverse semantics, stale catalog/identity refusal and full
 later-error/timeout/unexpected-side-effect rollback. Production, PostgreSQL 16,
-positive TLS and COMMIT network loss remain unverified. See PostgreSQL's
+COMMIT network loss remain unverified; private CA/TLS/hostname checks run in
+`check_rust_writer_parity.py --kind pg`. See PostgreSQL's
 [ALTER DEFAULT PRIVILEGES](https://www.postgresql.org/docs/17/sql-alterdefaultprivileges.html)
 and [pg_default_acl](https://www.postgresql.org/docs/17/catalog-pg-default-acl.html).
 
@@ -797,7 +814,8 @@ COMMIT network-loss behavior remain unverified. See PostgreSQL's
 This Unix-only writer supports an existing monolithic `file` in the selected
 adapter's enforced plane. It reads only that source; other services/planes,
 remote readers, environment credentials and imported snapshots are not used.
-Remote IAM and directory/group policy trees remain unsupported for writes.
+The separate remote JSON and Filer owning-identity profiles are described in
+the operating guide. Shared group/policy document writes remain unsupported.
 The filesystem's write permission is the credential, as in the Python file
 adapter; no network/admin credential is inferred from read access.
 

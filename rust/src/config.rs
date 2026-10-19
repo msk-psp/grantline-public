@@ -10,7 +10,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Config {
     pub intent: String,
     #[serde(default = "snapshot_dir")]
@@ -23,13 +23,70 @@ pub struct Config {
     pub graph: GraphConfig,
     #[serde(default)]
     pub web: crate::console::Config,
+    #[serde(default)]
+    pub notify: crate::notify::Config,
     #[cfg(unix)]
     pub approvals: Option<crate::workflow::Config>,
+}
+/// Parse once at process startup; never mutate environment from a request worker.
+pub fn env_file(config_path: &Path) -> Result<std::collections::BTreeMap<String, String>> {
+    #[derive(Deserialize)]
+    struct Header {
+        env_file: Option<String>,
+    }
+    let bytes = writer_file(config_path)?;
+    let header: Header =
+        toml::from_str(std::str::from_utf8(&bytes).map_err(|_| "Config is not UTF-8")?)
+            .map_err(|_| "Invalid config TOML")?;
+    let Some(name) = header.env_file else {
+        return Ok(Default::default());
+    };
+    let path = relative(config_path.parent().unwrap_or(Path::new(".")), &name)?;
+    let meta = fs::metadata(&path).map_err(|_| "Cannot inspect env_file")?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if meta.permissions().mode() & 0o077 != 0 {
+            return Err("env_file must be private (chmod 600)".into());
+        }
+    }
+    if !meta.is_file() {
+        return Err("env_file must be a regular file".into());
+    }
+    let bytes = writer_file(&path)?;
+    let text = std::str::from_utf8(&bytes).map_err(|_| "env_file must be UTF-8")?;
+    let mut result = std::collections::BTreeMap::new();
+    for line in text
+        .lines()
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && !s.starts_with('#'))
+    {
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        if key.is_empty() || std::env::var_os(key).is_some() {
+            continue;
+        }
+        if !key
+            .bytes()
+            .enumerate()
+            .all(|(i, b)| b.is_ascii_alphabetic() || b == b'_' || (i > 0 && b.is_ascii_digit()))
+        {
+            return Err("Invalid env_file variable name".into());
+        }
+        let value = value.trim().trim_matches(['\'', '"']);
+        if value.chars().any(|c| c == '\0') {
+            return Err("Invalid env_file value".into());
+        }
+        result.insert(key.to_owned(), value.to_owned());
+    }
+    Ok(result)
 }
 fn snapshot_dir() -> String {
     "snapshots".into()
 }
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Adapter {
     #[serde(rename = "type", default)]
     pub typ: Option<String>,
@@ -68,9 +125,15 @@ pub struct Adapter {
     #[serde(default)]
     pub default_write_scopes: BTreeSet<String>,
     #[serde(default)]
+    pub postgres_write_public: bool,
+    #[serde(default)]
+    pub postgres_write_relations: BTreeSet<String>,
+    #[serde(default)]
     pub clickhouse_write_tables: BTreeSet<String>,
     #[serde(default)]
     pub clickhouse_write_databases: BTreeSet<String>,
+    #[serde(default)]
+    pub clickhouse_write_privileges: BTreeSet<String>,
     #[serde(default)]
     pub probe_dsn_envs: std::collections::BTreeMap<String, String>,
     #[serde(default = "all_databases")]
@@ -145,13 +208,14 @@ pub fn default_synonyms() -> Vec<Vec<String>> {
     .map(|g| g.into_iter().map(String::from).collect())
     .collect()
 }
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Intent {
     pub grants: BTreeSet<Grant>,
     pub managed: BTreeSet<String>,
     pub managed_systems: BTreeSet<String>,
     pub naming_synonyms: Vec<Vec<String>>,
 }
+#[derive(Clone)]
 pub struct Loaded {
     pub config: Config,
     pub intent: Intent,

@@ -214,7 +214,7 @@ def docker_test(binary, context):
                     ('gl_user', 'db:other', ['CREATE']), ('gl_user', 'default:gl_data.public@gl_owner', ['SELECT']),
                     ('gl_user', 'table:other.public.a_target', ['SELECT']), ('missing', 'table:gl_data.public.a_target', ['SELECT']),
                     ('PUBLIC', 'table:gl_data.public.a_target', ['SELECT']), ('gl_owner', 'table:gl_data.public.a_target', ['UPDATE']),
-                    ('postgres', 'table:gl_data.public.a_target', ['SELECT']), ('gl_user', 'table:gl_data.public.a_target', ['ALL'])]:
+                    ('postgres', 'table:gl_data.public.a_target', ['SELECT'])]:
                 intent(root, [(subject, resource, privileges)], managed=(subject,))
                 snapshot = acl()
                 run(binary, config, dsn, ok=False)
@@ -349,10 +349,9 @@ def docker_test(binary, context):
             assert all_acl() == baseline
             for subject, resource, privileges in [
                     ('gl_scoped', 'schema:gl_data.missing', ['USAGE']),
-                    ('gl_scoped', 'schema:gl_data.app', ['ALL']),
                     ('gl_scoped', 'schema:gl_data.app', ['CONNECT']),
-                    ('gl_scoped', 'db:gl_data', ['USAGE']), ('gl_scoped', 'db:gl_data', ['TEMP']),
-                    ('gl_scoped', 'db:gl_data', ['ALL']), ('gl_scoped', 'db:other', ['CREATE']),
+                    ('gl_scoped', 'db:gl_data', ['USAGE']),
+                    ('gl_scoped', 'db:other', ['CREATE']),
                     ('gl_scoped', 'schema:other.app', ['USAGE']),
                     ('PUBLIC', 'db:gl_data', ['CREATE']), ('PUBLIC', 'schema:gl_data.app', ['CREATE']),
                     ('postgres', 'schema:gl_data.app', ['CREATE']), ('postgres', 'db:gl_data', ['CREATE']),

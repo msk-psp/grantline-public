@@ -35,11 +35,22 @@ jobs:
           cargo +1.99.0 install --locked wasm-bindgen-cli --version 0.2.129
           scripts/build_rust_ui.sh
           node scripts/check_rust_ui.mjs
+          python3 scripts/check_rust_console_details.py
       - name: Compare native permission decisions with Python
         run: |
           python3 scripts/check_rust_parity.py
           python3 scripts/check_rust_core.py
           python3 scripts/check_rust_s3.py
+      - name: Verify parallel cache, private configuration, TLS and drift notification
+        run: python3 scripts/check_rust_runtime.py
+      - name: Verify Filer identity writes and explicit S3 Write probes
+        run: |
+          python3 scripts/check_rust_filer_writer.py
+          python3 scripts/check_rust_write_probe.py
+      - name: Verify expanded PostgreSQL and ClickHouse privilege parity
+        run: |
+          python3 scripts/check_rust_writer_parity.py --kind pg
+          python3 scripts/check_rust_writer_parity.py --kind ch
       - name: Verify native ClickHouse reader against isolated HTTP and official server
         run: python3 scripts/check_rust_clickhouse.py --docker
       - name: Verify native PostgreSQL reader against isolated official server

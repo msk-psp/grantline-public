@@ -70,8 +70,43 @@ keep Python as a development-only oracle until all stages pass.
 
 ## Next action
 
-Review and merge the stack from bottom to top: remote writer (#33), OIDC (#34),
-durable workflow (#35), Leptos console (#36), then native release/migration.
+### R7 — Python workflow parity and observation performance {#R7}
+
+Status: implemented and locally/isolated validated (2026-10-19); stacked PR
+integration and remote CI remain separate. Compatibility covers the represented
+permission workflows under the native authenticated/reviewed-write contract,
+not acceptance of legacy bearer links or implicit approval-time IAM execution.
+
+- [x] Bounded parallel service reads, deterministic merges and one shared, refreshable
+  observation cache. Concurrent readers share a complete generation; failures stay
+  unknown, and explicit snapshots/writer previews never use cached authorization.
+- [x] Verified private CA configuration for native HTTP/S3 and PostgreSQL clients;
+  private `env_file` compatibility without changing process environment after
+  worker threads start. Existing environment values retain precedence.
+- [x] Native drift `notify` CLI, subject/resource detail and inheritance paths,
+  historical comparisons, recorded recent-change routes and map detail navigation,
+  retaining four locales. Invalid or missing history is never interpreted as
+  a grant removal.
+- [x] PostgreSQL and ClickHouse command coverage and S3 Filer identity writes
+  equivalent to Python's represented resources, with explicit scope, reviewed
+  plan binding, original-state preservation and uncertain outcomes retained.
+  Unrepresentable/negative/ambiguous ACLs remain unknown; compatibility never
+  means silently accepting them or removing a stale-plan check.
+- [x] Differential, isolated TLS/network/write and browser tests plus the same
+  latency benchmark used to identify sequential observation. No production
+  endpoints, production IAM changes, real Slack messages or GitHub policy publication were used
+  for this implementation's verification.
+
+Execution evidence and the exact remaining scope are recorded in the workspace
+task `grantline-rust-parity-complete`; each acceptance item is marked complete
+only after its tests run.
+
+Next: merge the main-integration PR first, then retarget/merge the parity PR.
+Operational cutover, real provider authentication and effective target access
+remain separate authorized acceptance; merging these source changes is not deployment.
+
+PR #38 collects the already-merged #34–#37 feature-branch stack into main;
+merge it before the R7 parity follow-up.
 R1–R6 software paths are implemented within their explicit adapter contracts.
 After stack CI and review, authorize a separate isolated operational pilot using
 real configured OIDC/Slack/GitHub identities and read-only service comparisons.

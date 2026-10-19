@@ -1,4 +1,6 @@
 //! S3 IAM interpretation, previews and explicit local-file writes. Remote reads are opt-in.
+#[cfg(unix)]
+pub mod filer_writer;
 pub mod probe;
 mod remote;
 #[cfg(unix)]
@@ -20,7 +22,7 @@ use std::{
     path::Path,
 };
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Plane {
     pub file: Option<String>,
     pub dir: Option<String>,
@@ -34,6 +36,9 @@ pub struct Plane {
     #[serde(default)]
     pub conditional_write: bool,
     pub filer_auth_env: Option<String>,
+    pub admin_filer_url_env: Option<String>,
+    pub admin_filer_auth_env: Option<String>,
+    pub admin_filer_jwt_env: Option<String>,
     pub iam_key_env: Option<String>,
     pub iam_secret_env: Option<String>,
     pub iam_session_token_env: Option<String>,
@@ -47,7 +52,7 @@ struct Identity {
     #[serde(default)]
     policy: Option<Value>,
 }
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Observed {
     pub grants: BTreeSet<Grant>,
     pub findings: Vec<Finding>,

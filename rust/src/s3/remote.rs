@@ -25,9 +25,10 @@ struct Http {
     timeout: Duration,
     calls: usize,
     bytes: usize,
+    tls: ureq::tls::TlsConfig,
 }
 impl Http {
-    fn new(raw: &str, bearer: Option<String>, seconds: u64) -> Result<Self> {
+    fn new(raw: &str, bearer: Option<String>, seconds: u64, ca: Option<&str>) -> Result<Self> {
         let base = Url::parse(raw).map_err(|_| "Invalid S3 reader URL")?;
         if !matches!(base.scheme(), "http" | "https")
             || base.host_str().is_none()
@@ -45,6 +46,7 @@ impl Http {
             return Err("read_timeout_seconds must be between 1 and 120".into());
         }
         Ok(Self {
+            tls: crate::tls::http(ca)?,
             base,
             bearer,
             started: Instant::now(),
@@ -70,6 +72,7 @@ impl Http {
             .filter(|d| !d.is_zero())
             .ok_or("S3 observation deadline exceeded")?;
         let agent: ureq::Agent = ureq::Agent::config_builder()
+            .tls_config(self.tls.clone())
             .timeout_global(Some(remaining))
             .timeout_connect(Some(remaining.min(Duration::from_secs(5))))
             .max_redirects(0)
@@ -669,9 +672,6 @@ fn decode_policy(text: &str) -> Result<Value> {
     Ok(value)
 }
 pub(super) fn read(p: &Plane, system: &str, seconds: u64) -> Result<Document> {
-    if p.ca_bundle_env.is_some() {
-        return Err("Custom CA bundles are unsupported in native S3 readers".into());
-    }
     let count = [&p.iam_url_env, &p.filer_url_env, &p.url_env]
         .iter()
         .filter(|x| x.is_some())
@@ -681,7 +681,7 @@ pub(super) fn read(p: &Plane, system: &str, seconds: u64) -> Result<Document> {
     }
     if let Some(key) = p.iam_url_env.as_deref() {
         let raw = env(Some(key))?;
-        let mut http = Http::new(&raw, None, seconds)?;
+        let mut http = Http::new(&raw, None, seconds, p.ca_bundle_env.as_deref())?;
         if !http
             .base
             .path()
@@ -730,7 +730,7 @@ pub(super) fn read(p: &Plane, system: &str, seconds: u64) -> Result<Document> {
     }
     .map(|s| env(Some(s)))
     .transpose()?;
-    let mut http = Http::new(&raw, auth, seconds)?;
+    let mut http = Http::new(&raw, auth, seconds, p.ca_bundle_env.as_deref())?;
     if filer {
         self::filer(&mut http, system)
     } else {
@@ -771,7 +771,7 @@ mod tests {
             "http://localhost/?secret=x",
             "http://localhost/#x",
         ] {
-            assert!(Http::new(url, None, 30).is_err());
+            assert!(Http::new(url, None, 30, None).is_err());
         }
         for name in ["../escape.json", "%2e%2e.json", "a/b.json", ".", ""] {
             assert!(file_name(name).is_err());

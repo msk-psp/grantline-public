@@ -57,6 +57,7 @@ struct Unread {
     #[serde(default)]
     subjects: std::collections::BTreeSet<String>,
 }
+#[derive(Clone)]
 pub struct Observation {
     pub snapshot: Snapshot,
     pub findings: Vec<Finding>,
@@ -119,7 +120,60 @@ pub fn observe_with_live(
             s3,
         });
     }
-    for (system, adapter) in &loaded.config.adapters {
+    let adapters: Vec<_> = loaded.config.adapters.iter().collect();
+    for batch in adapters.chunks(8) {
+        let results = std::thread::scope(|scope| {
+            let workers: Vec<_> = batch
+                .iter()
+                .map(|(system, adapter)| {
+                    (
+                        system,
+                        scope.spawn(move || observe_one(loaded, system, adapter, live)),
+                    )
+                })
+                .collect();
+            workers
+                .into_iter()
+                .map(|(system, worker)| (system, worker.join()))
+                .collect::<Vec<_>>()
+        });
+        // Merge in configuration order, independently of completion order.
+        for (system, result) in results {
+            match result {
+                Ok(Ok(mut obs)) => {
+                    snapshot.grants.append(&mut obs.snapshot.grants);
+                    snapshot.unobserved.append(&mut obs.snapshot.unobserved);
+                    findings.append(&mut obs.findings);
+                    kinds.append(&mut obs.kinds);
+                    routes.append(&mut obs.routes);
+                    s3.append(&mut obs.s3);
+                }
+                _ => snapshot
+                    .unobserved
+                    .push(unread(system, "Observation failed; access remains unknown")),
+            }
+        }
+    }
+    Ok(Observation {
+        snapshot,
+        findings,
+        kinds,
+        routes,
+        s3,
+    })
+}
+fn observe_one(
+    loaded: &Loaded,
+    system: &String,
+    adapter: &crate::config::Adapter,
+    live: bool,
+) -> Result<Observation> {
+    let mut snapshot = Snapshot::new([system.clone()].into_iter().collect());
+    let mut findings = Vec::new();
+    let mut kinds = BTreeMap::new();
+    let mut routes = Vec::new();
+    let mut s3 = BTreeMap::new();
+    for (system, adapter) in std::iter::once((system, adapter)) {
         if adapter.typ(system) == "postgres" && live {
             let obs = crate::postgres::observe(adapter, system);
             snapshot.grants.extend(obs.grants);

@@ -14,7 +14,7 @@ use std::{
 };
 use url::Url;
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct Credential {
     pub key_env: Option<String>,
     pub secret_env: Option<String>,
@@ -38,10 +38,8 @@ fn valid_key(key: &str) -> bool {
         && !key.split('/').any(|s| matches!(s, "." | ".."))
 }
 fn target(g: &Grant) -> Result<(String, String)> {
-    if !matches!(g.privilege.as_str(), "List" | "Read") {
-        return Err(
-            "Only read-only List and Read probes are implemented; no write attempted".into(),
-        );
+    if !matches!(g.privilege.as_str(), "List" | "Read" | "Write") {
+        return Err("Only List, Read and explicitly enabled Write probes are implemented".into());
     }
     let scope = g
         .resource
@@ -202,6 +200,7 @@ struct Budget {
     timeout: Duration,
     calls: usize,
     bytes: usize,
+    tls: ureq::tls::TlsConfig,
 }
 impl Budget {
     fn request(&mut self, method: &str, url: &Url, signer: &Signer<'_>) -> Result<Response> {
@@ -215,6 +214,7 @@ impl Budget {
             .filter(|d| !d.is_zero())
             .ok_or("S3 probe deadline exceeded")?;
         let agent: ureq::Agent = ureq::Agent::config_builder()
+            .tls_config(self.tls.clone())
             .timeout_global(Some(remaining))
             .timeout_connect(Some(remaining.min(Duration::from_secs(5))))
             .max_redirects(0)
@@ -222,15 +222,39 @@ impl Budget {
             .http_status_as_error(false)
             .build()
             .into();
+        let body: &[u8] = if method == "PUT" {
+            b"grantline probe\n"
+        } else {
+            b""
+        };
+        let extra = if method == "PUT" {
+            BTreeMap::from([("if-none-match".into(), "*".into())])
+        } else {
+            BTreeMap::new()
+        };
         let headers = signer.sign(
             method,
             url,
-            b"",
+            body,
             &chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string(),
-            BTreeMap::new(),
+            extra,
         );
-        // Separate fixed methods so config/response data can never choose a write verb.
-        let mut response = if method == "HEAD" {
+        // The only write body is fixed and the object key is generated locally, never from a response.
+        let mut response = if method == "PUT" {
+            let mut req = agent.put(url.as_str());
+            for (k, v) in &headers {
+                req = req.header(k, v);
+            }
+            req.send(body)
+                .map_err(|_| "S3 probe transport/TLS failure or timeout")?
+        } else if method == "DELETE" {
+            let mut req = agent.delete(url.as_str());
+            for (k, v) in &headers {
+                req = req.header(k, v);
+            }
+            req.call()
+                .map_err(|_| "S3 probe cleanup transport/TLS failure or timeout")?
+        } else if method == "HEAD" {
             let mut req = agent.head(url.as_str());
             for (k, v) in &headers {
                 req = req.header(k, v);
@@ -325,6 +349,9 @@ fn list(
     }
 }
 pub fn run(adapter: &Adapter, grants: &[Grant]) -> Vec<Probe> {
+    run_with_write(adapter, grants, false)
+}
+pub fn run_with_write(adapter: &Adapter, grants: &[Grant], write: bool) -> Vec<Probe> {
     let all_unknown = |why: &str| {
         grants
             .iter()
@@ -343,9 +370,6 @@ pub fn run(adapter: &Adapter, grants: &[Grant]) -> Vec<Probe> {
         return all_unknown("Invalid S3 probe count, subject count or deadline");
     }
     let setup: Result<Url> = (|| {
-        if adapter.ca_bundle_env.is_some() {
-            return Err("Custom S3 probe CA bundles are not implemented".into());
-        }
         if adapter.probe_region.is_empty()
             || adapter.probe_region.len() > 64
             || !adapter
@@ -361,7 +385,12 @@ pub fn run(adapter: &Adapter, grants: &[Grant]) -> Vec<Probe> {
         Ok(base) => base,
         Err(why) => return all_unknown(&why),
     };
+    let tls = match crate::tls::http(adapter.ca_bundle_env.as_deref()) {
+        Ok(tls) => tls,
+        Err(_) => return all_unknown("S3 probe CA bundle unavailable or invalid"),
+    };
     let mut budget = Budget {
+        tls,
         started: Instant::now(),
         timeout: Duration::from_secs(adapter.read_timeout_seconds),
         calls: 0,
@@ -372,6 +401,13 @@ pub fn run(adapter: &Adapter, grants: &[Grant]) -> Vec<Probe> {
     for g in grants {
         let result: Result<Probe> = (|| {
             let (bucket, prefix) = target(g)?;
+            if g.privilege == "Write" && !write {
+                return Ok(Probe::new(
+                    g,
+                    Verdict::Unknown,
+                    "S3 Write probe requires --live --write; no object created",
+                ));
+            }
             let named = adapter
                 .probe_credentials
                 .get(&g.subject)
@@ -396,6 +432,54 @@ pub fn run(adapter: &Adapter, grants: &[Grant]) -> Vec<Probe> {
                 region: &adapter.probe_region,
                 service: "s3",
             };
+            if g.privilege == "Write" {
+                let key = format!("{prefix}_grantline-probe/{}", uuid::Uuid::new_v4());
+                let url = object_url(&base, &bucket, Some(&key))?;
+                let put = budget.request("PUT", &url, &signer);
+                match put {
+                    Ok(r) if (200..=204).contains(&r.status) => {
+                        // Cleanup gets a separate bounded deadline so a slow PUT cannot consume it.
+                        let mut cleanup = Budget {
+                            tls: budget.tls.clone(),
+                            started: Instant::now(),
+                            timeout: budget.timeout,
+                            calls: 0,
+                            bytes: 0,
+                        };
+                        let deleted = cleanup
+                            .request("DELETE", &url, &signer)
+                            .is_ok_and(|r| (200..=204).contains(&r.status));
+                        return Ok(Probe::new(
+                            g,
+                            Verdict::Allow,
+                            &format!(
+                                "subject-signed PUT succeeded; {}: s3://{bucket}/{key}; upload permission does not imply delete permission",
+                                if deleted {
+                                    "probe object deleted"
+                                } else {
+                                    "cleanup failed; probe object LEFT BEHIND"
+                                }
+                            ),
+                        ));
+                    }
+                    Ok(r) => {
+                        return Ok(Probe::new(
+                            g,
+                            verdict_error(&r),
+                            "conditional unique-object PUT failed; no cleanup attempted for a refused request",
+                        ));
+                    }
+                    Err(_) => {
+                        return Ok(Probe::new(
+                            g,
+                            Verdict::Unknown,
+                            &format!(
+                                "PUT outcome unknown; inspect possible probe object s3://{bucket}/{key} before cleanup"
+                            ),
+                        ));
+                    }
+                }
+            }
             let sample = if g.privilege == "Read" {
                 adapter.probe_objects.get(&g.resource)
             } else {
@@ -442,6 +526,16 @@ pub fn run(adapter: &Adapter, grants: &[Grant]) -> Vec<Probe> {
         })();
         out.push(result.unwrap_or_else(|why| Probe::new(g, Verdict::Unknown, &why)));
         if budget.expired() {
+            if write {
+                out.extend(grants[out.len()..].iter().map(|g| {
+                    Probe::new(
+                        g,
+                        Verdict::Unknown,
+                        "S3 probe budget exhausted; no further requests attempted",
+                    )
+                }));
+                return out;
+            }
             return all_unknown(
                 "S3 probe deadline/request/byte budget exceeded; partial results discarded",
             );
