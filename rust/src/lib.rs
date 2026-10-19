@@ -1,8 +1,10 @@
 pub mod approval;
+pub mod auth;
 pub mod cli;
 pub mod clickhouse;
 pub mod commands;
 pub mod config;
+pub mod console;
 pub mod engine;
 pub mod graph;
 pub mod model;

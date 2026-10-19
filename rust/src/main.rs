@@ -104,6 +104,15 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Run the native console. Local preview is read-only; live services require --live.
+    Serve {
+        #[arg(long, default_value = "127.0.0.1")]
+        host: std::net::IpAddr,
+        #[arg(long, default_value_t = 8424)]
+        port: u16,
+        #[arg(long)]
+        live: bool,
+    },
     /// Run the fictional approval playground. No external services are contacted.
     Demo {
         #[arg(long, default_value_t = 8423)]
@@ -203,6 +212,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             limit,
             json,
         )?,
+        Command::Serve { host, port, live } => {
+            grantline_rs::console::serve(args.config, host, port, live).await?
+        }
         Command::Demo { port } => {
             let listener =
                 tokio::net::TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port)).await?;

@@ -21,6 +21,8 @@ pub struct Config {
     pub bridges: Vec<Bridge>,
     #[serde(default)]
     pub graph: GraphConfig,
+    #[serde(default)]
+    pub web: crate::console::Config,
 }
 fn snapshot_dir() -> String {
     "snapshots".into()
