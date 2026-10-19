@@ -531,6 +531,16 @@ fn merge_tree(
         Some(v) => v.as_object().ok_or("Invalid group inline policy index")?,
         None => &empty,
     };
+    let mut inline_owners: BTreeMap<&str, usize> = BTreeMap::new();
+    for policies in inline.values().filter(|p| !p.is_null()) {
+        for name in policies
+            .as_object()
+            .ok_or("Invalid inline policy collection")?
+            .keys()
+        {
+            *inline_owners.entry(name).or_default() += 1;
+        }
+    }
     let mut doc = Document::default();
     let mut memberships: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut attached = BTreeMap::new();
@@ -602,9 +612,20 @@ fn merge_tree(
             {
                 attached_any = true;
                 ss.extend(statements(p)?.clone());
-                doc.routes
-                    .push([name.clone(), format!("policy:{pname}"), "inline".into()]);
-                policy_routes(&mut doc, pname, p, system)?;
+                // Inline names belong to an identity; qualify collisions without changing unique route IDs.
+                let route_name = if inline_owners.get(pname.as_str()).copied().unwrap_or(0) > 1
+                    || policies.contains_key(pname)
+                {
+                    format!("inline:{}", json!([name, pname]))
+                } else {
+                    pname.clone()
+                };
+                doc.routes.push([
+                    name.clone(),
+                    format!("policy:{route_name}"),
+                    "inline".into(),
+                ]);
+                policy_routes(&mut doc, &route_name, p, system)?;
             }
         }
         for group in memberships.get(&name).into_iter().flatten() {
@@ -1045,5 +1066,61 @@ impl Observed {
             });
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod policy_route_tests {
+    use super::*;
+
+    #[test]
+    fn repeated_inline_names_keep_each_owners_policy_separate() {
+        let allow = |bucket: &str| {
+            json!({"Statement":[{
+                "Effect":"Allow","Action":"s3:GetObject",
+                "Resource":format!("arn:aws:s3:::{bucket}/*")
+            }]})
+        };
+        let doc = merge_tree(
+            BTreeMap::from([
+                ("reader-a".into(), json!({"name":"reader-a"})),
+                ("reader-b".into(), json!({"name":"reader-b"})),
+                (
+                    "reader-c".into(),
+                    json!({"name":"reader-c","policy_names":["shared"]}),
+                ),
+            ]),
+            BTreeMap::new(),
+            BTreeMap::from([("shared".into(), allow("demo-c"))]),
+            json!({"inlinePolicies":{
+                "reader-a":{"shared":allow("demo-a")},
+                "reader-b":{"shared":allow("demo-b")}
+            }}),
+            "s3",
+        )
+        .unwrap();
+        assert_eq!(doc.policy_docs.len(), 3);
+        for (subject, bucket) in [
+            ("reader-a", "demo-a"),
+            ("reader-b", "demo-b"),
+            ("reader-c", "demo-c"),
+        ] {
+            let (grants, _, unknown, _) = evaluate(&doc.identities[subject], "s3").unwrap();
+            assert!(unknown.is_empty());
+            assert_eq!(grants.len(), 1);
+            assert_eq!(grants.first().unwrap().resource, format!("bucket:{bucket}"));
+            let route = doc.routes.iter().find(|r| r[0] == subject).unwrap();
+            let policy = route[1].strip_prefix("policy:").unwrap();
+            let (routed, _, _, _) = evaluate(
+                &Identity {
+                    name: policy.into(),
+                    actions: vec![],
+                    policy: Some(doc.policy_docs[policy].clone()),
+                },
+                "s3",
+            )
+            .unwrap();
+            assert_eq!(routed.first().unwrap().resource, format!("bucket:{bucket}"));
+        }
     }
 }
