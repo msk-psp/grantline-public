@@ -122,10 +122,12 @@ pub fn covers(held: &Grant, wanted: &Grant, kinds: &Kinds) -> bool {
 pub fn level(privs: &BTreeSet<String>) -> &'static str {
     if privs.is_empty() {
         "none"
-    } else if privs
-        .iter()
-        .any(|p| matches!(p.as_str(), "ALL" | "OWNER" | "ADMIN" | "Admin" | "GRANT"))
-    {
+    } else if privs.iter().any(|p| {
+        matches!(
+            p.as_str(),
+            "ALL" | "OWNER" | "ADMIN" | "Admin" | "GRANT" | "BypassGovernanceRetention"
+        )
+    }) {
         "admin"
     } else if privs.iter().any(|p| {
         matches!(
@@ -140,13 +142,14 @@ pub fn level(privs: &BTreeSet<String>) -> &'static str {
                 | "DROP"
                 | "Write"
                 | "WRITE"
+                | "DeleteObjectVersion"
         )
     }) {
         "write"
     } else if privs.iter().all(|p| {
         matches!(
             p.as_str(),
-            "ListAllMyBuckets" | "ListBucket" | "GetBucketLocation"
+            "ListAllMyBuckets" | "ListBucket" | "ListBucketVersions" | "GetBucketLocation"
         )
     }) {
         "list"

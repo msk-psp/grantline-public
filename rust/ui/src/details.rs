@@ -34,16 +34,7 @@ fn paths(graph: &Graph, start: &str, reverse: bool) -> (Vec<Vec<String>>, bool) 
     (out, false)
 }
 fn graph(b: &Bootstrap) -> Graph {
-    let mut g = b.data.graph.clone();
-    g.edges.retain(|e| {
-        (b.service.is_empty() || e.system == b.service || e.system == "*")
-            && (b.environment.is_empty()
-                || e.system == "*"
-                || g.envs
-                    .get(&e.system)
-                    .is_some_and(|v| v.contains(&b.environment)))
-    });
-    g
+    b.data.graph.scoped(&b.service, &b.environment)
 }
 fn in_scope(b: &Bootstrap, g: &Grant) -> bool {
     in_recent(b, g)
@@ -64,6 +55,37 @@ fn route_list(b: &Bootstrap, routes: Vec<Vec<String>>, limited: bool) -> AnyView
         view!{{(i>0).then(||view!{<span aria-hidden="true">" → "</span>})}<a class="entity" href=href>{n}</a>}
     }).collect_view()}</p>}).collect_view()}</div>
     {limited.then(||view!{<p class="notice">{tr(&b.lang,"Rows are limited; narrow the filter to see more.")}</p>})}</section>}.into_any()
+}
+pub(super) fn accounts(b: &Bootstrap) -> AnyView {
+    let g = graph(b);
+    let query = b.query.to_lowercase();
+    let nodes: BTreeSet<_> = g
+        .principals
+        .iter()
+        .chain(&g.hops)
+        .filter(|n| {
+            query.is_empty()
+                || n.to_lowercase().contains(&query)
+                || g.names
+                    .get(*n)
+                    .is_some_and(|name| name.to_lowercase().contains(&query))
+        })
+        .cloned()
+        .collect();
+    let limited = nodes.len() > 500;
+    view!{<div class="table-scroll"><table><thead><tr>
+    <th>{tr(&b.lang,"Subject")}</th><th>{tr(&b.lang,"Service")}</th><th>{tr(&b.lang,"Observed grants")}</th><th>{tr(&b.lang,"Status")}</th>
+    </tr></thead><tbody>{nodes.into_iter().take(500).map(|name| {
+        let systems = g.homes.get(&name).cloned().unwrap_or_default();
+        let unknown = b.data.snapshot.unobserved.iter().any(|u| systems.contains(&u.system)
+            && (u.subjects.is_empty() || u.subjects.contains(&name)));
+        let count = b.data.plan.observed.iter().filter(|row| row.subject == name && in_scope(b,row)).count();
+        let label = g.names.get(&name).map(|label| format!("{name} ({label})")).unwrap_or_else(|| name.clone());
+        view!{<tr><td><a class="entity" href=format!("/account?subject={}&system={}&environment={}&lang={}",encode(&name),encode(&b.service),encode(&b.environment),encode(&b.lang))>{label}</a></td>
+        <td>{systems.into_iter().collect::<Vec<_>>().join(", ")}</td><td>{count}</td>
+        <td><span class=if unknown{"badge warning"}else{"badge"}>{tr(&b.lang,if unknown{"Unknown"}else{"Observed"})}</span></td></tr>}
+    }).collect_view()}</tbody></table></div>
+    {limited.then(||view!{<p class="notice">{tr(&b.lang,"Rows are limited; narrow the filter to see more.")}</p>})}}.into_any()
 }
 pub(super) fn subject(b: &Bootstrap) -> AnyView {
     let name = if b.subject.is_empty() {
@@ -186,6 +208,40 @@ pub(super) fn history_comparison(b: &Bootstrap) -> AnyView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn account_inventory_shows_unknown_and_empty_accounts_without_fabricating_grants() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let mut b = Bootstrap {
+                lang: "en".into(),
+                ..Default::default()
+            };
+            b.data.graph.principals = vec!["empty".into(), "unread".into()];
+            for name in ["empty", "unread"] {
+                b.data
+                    .graph
+                    .homes
+                    .insert(name.into(), BTreeSet::from(["s3".into()]));
+            }
+            b.data.snapshot.unobserved.push(Unread {
+                system: "s3".into(),
+                subjects: BTreeSet::from(["unread".into()]),
+                ..Default::default()
+            });
+            b.data
+                .graph
+                .names
+                .insert("unread".into(), "Example person".into());
+            let html = accounts(&b).to_html();
+            assert!(html.contains("empty") && html.contains("unread (Example person)"));
+            assert!(html.contains("Unknown") && html.contains("Observed"));
+            b.query = "example person".into();
+            let html = accounts(&b).to_html();
+            assert!(!html.contains("subject=empty"));
+            assert!(html.contains("subject=unread"));
+            assert!(b.data.plan.observed.is_empty());
+        });
+    }
     #[test]
     fn distinct_inherited_routes_terminate_cycles_without_including_unrelated_siblings() {
         let g = Graph {

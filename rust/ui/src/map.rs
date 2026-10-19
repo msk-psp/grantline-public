@@ -92,6 +92,7 @@ fn layout(
         .edges
         .iter()
         .flat_map(|e| [e.src.clone(), e.dst.clone()])
+        .chain(keep.iter().cloned())
         .collect();
     let mut visible = connected.clone();
     if !query.is_empty() {
@@ -107,7 +108,7 @@ fn layout(
             visible.extend(highlighted(graph, n));
         }
     }
-    let mut homes: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut homes = graph.homes.clone();
     let mut resources: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut fan: BTreeMap<(String, String), Edge> = BTreeMap::new();
     let mut edges = Vec::new();
@@ -307,16 +308,25 @@ fn tone(edge: &Edge) -> &'static str {
         "member"
     } else if edge.kind == "route" && edge.privs.is_empty() {
         "route"
-    } else if edge
-        .privs
-        .iter()
-        .any(|p| matches!(p.as_str(), "ALL" | "OWNER" | "ADMIN" | "Admin" | "GRANT"))
-    {
+    } else if edge.privs.iter().any(|p| {
+        matches!(
+            p.as_str(),
+            "ALL" | "OWNER" | "ADMIN" | "Admin" | "GRANT" | "BypassGovernanceRetention"
+        )
+    }) {
         "admin"
     } else if edge.privs.iter().any(|p| {
         matches!(
             p.as_str(),
-            "Write" | "INSERT" | "UPDATE" | "DELETE" | "CREATE" | "DROP" | "ALTER" | "TRUNCATE"
+            "Write"
+                | "INSERT"
+                | "UPDATE"
+                | "DELETE"
+                | "CREATE"
+                | "DROP"
+                | "ALTER"
+                | "TRUNCATE"
+                | "DeleteObjectVersion"
         )
     }) {
         "write"
@@ -355,16 +365,7 @@ pub(super) fn PermissionMap(
     query: String,
     lang: String,
 ) -> impl IntoView {
-    let mut graph = graph;
-    graph.edges.retain(|e| {
-        (service.is_empty() || e.system == service || e.system == "*")
-            && (environment.is_empty()
-                || e.system == "*"
-                || graph
-                    .envs
-                    .get(&e.system)
-                    .is_some_and(|env| env.contains(&environment)))
-    });
+    let graph = graph.scoped(&service, &environment);
     let graph = StoredValue::new(graph);
     let kinds = StoredValue::new(service_kinds);
     let hover = RwSignal::new(None::<String>);
@@ -527,6 +528,28 @@ pub(super) fn PermissionMap(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn isolated_inventory_stays_searchable_with_service_and_environment_filters() {
+        let mut g = fixture();
+        g.principals.push("loner".into());
+        g.kind.insert("loner".into(), "human".into());
+        g.names.insert("loner".into(), "New person".into());
+        g.homes
+            .insert("loner".into(), BTreeSet::from(["s3".into()]));
+        g.envs.insert("s3".into(), vec!["prod".into()]);
+        let kinds = BTreeMap::from([("s3".into(), "s3".into())]);
+        let scoped = g.scoped("s3", "prod");
+        let map = layout(&scoped, &kinds, "new person", None);
+        assert_eq!(map.nodes.len(), 1);
+        assert_eq!(map.nodes[0].id, "loner");
+        assert!(map.edges.is_empty());
+        assert!(
+            !g.scoped("postgres", "")
+                .principals
+                .contains(&"loner".into())
+        );
+        assert!(!g.scoped("", "staging").principals.contains(&"loner".into()));
+    }
     fn fixture() -> Graph {
         let mut g = Graph {
             principals: vec!["alice".into(), "service:app".into()],
@@ -610,6 +633,9 @@ mod tests {
             ("Write", "write"),
             ("ALL", "admin"),
             ("MEMBER", "member"),
+            ("DeleteObjectVersion", "write"),
+            ("BypassGovernanceRetention", "admin"),
+            ("GetObjectVersion", "read"),
         ] {
             assert_eq!(
                 tone(&Edge {

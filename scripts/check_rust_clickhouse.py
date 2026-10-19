@@ -111,6 +111,14 @@ def protocol(binary):
                 rows = [dict(grants=line) for line in lines]
             elif query.startswith('CHECK GRANT'):
                 rows = [dict(result=0 if mode == 'restricted' else 1)]
+            elif 'FROM system.users' in query and 'FROM system.roles' in query:
+                assert 'LIMIT 10001' in query
+                rows = [dict(name=name, kind=kind) for name, kind in [
+                    ('demo', 'account'), ('reader', 'role'), ('base', 'role'),
+                    ('empty-user', 'account'), ('empty-role', 'role'),
+                ]]
+                if mode == 'principal-kind':
+                    rows[-1]['kind'] = 'unknown-kind'
             elif 'system.role_grants' in query:
                 assert 'LIMIT 10001' in query
                 rows = [role(), role(None, 'base', 'reader')]
@@ -185,6 +193,10 @@ def protocol(binary):
             graph = run(binary, config, endpoint, 'graph', '--subject', 'demo', '--json')
             assert graph['graph']['kind']['base'] == 'role'
             assert any('base' in path for path in graph['routes_from']['demo']['paths'])
+            assert graph['graph']['kind']['empty-user'] == 'human'
+            assert graph['graph']['kind']['empty-role'] == 'role'
+            assert graph['graph']['homes']['empty-user'] == ['ch-test']
+            assert not any(e['src'] == 'empty-user' or e['dst'] == 'empty-user' for e in graph['graph']['edges'])
             recorded = run(binary, config, endpoint, 'snapshot', '--json')
             assert recorded['grants'] == 7
             calls = len(state['calls'])
@@ -198,7 +210,7 @@ def protocol(binary):
                 assert {s for u in plan['unobserved'] for s in u['subjects']} == {'base', 'reader', 'demo'}, mode
                 assert not any(g['subject'] in {'base', 'reader', 'demo'} for g in plan['observed'])
                 assert plan['unverified'] and not any(c['grant']['subject'] == 'demo' for c in plan['changes'])
-            cases = ['restricted', 'failed-after-roles', 'missing-field', 'invalid-flag', 'prefix', 'row-limit',
+            cases = ['restricted', 'principal-kind', 'failed-after-roles', 'missing-field', 'invalid-flag', 'prefix', 'row-limit',
                      'redirect', 'http403', 'bad-json', 'bad-count', 'exception-header', 'embedded-exception', 'hidden-limit', 'byte-limit', 'timeout']
             for mode in cases:
                 state.update(mode=mode, calls=[])

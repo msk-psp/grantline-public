@@ -17,6 +17,7 @@ use url::Url;
 
 const MAX_ROWS: usize = 10_000;
 const MAX_BYTES: u64 = 16 * 1024 * 1024;
+const PRINCIPAL_SQL: &str = "SELECT name, 'account' AS kind FROM system.users UNION ALL SELECT name, 'role' AS kind FROM system.roles LIMIT 10001";
 const ROLE_SQL: &str = "SELECT user_name, role_name, granted_role_name, with_admin_option FROM system.role_grants LIMIT 10001";
 const GRANT_SQL: &str = "SELECT user_name, role_name, access_type, access_object, database, table, column, is_partial_revoke, grant_option FROM system.grants LIMIT 10001";
 const DATABASE_SQL: &str = "SELECT name FROM system.databases LIMIT 10001";
@@ -170,6 +171,11 @@ impl Http {
         }
         Ok(result.data)
     }
+}
+#[derive(Deserialize)]
+struct PrincipalRow {
+    name: String,
+    kind: String,
 }
 #[derive(Deserialize)]
 struct RoleRow {
@@ -327,6 +333,12 @@ fn observe_http(http: &Http, system: &str) -> Result<Observation> {
         .map(|r| r.name)
         .collect();
     let mut out = Observation::default();
+    for entity in http.query::<PrincipalRow>(PRINCIPAL_SQL)? {
+        if !["account", "role"].contains(&entity.kind.as_str()) {
+            return Err("Invalid ClickHouse principal kind".into());
+        }
+        register(&entity.name, &entity.kind, &mut out.kinds)?;
+    }
     let mut blind = BTreeSet::new();
     let mut dependants: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for r in roles {
