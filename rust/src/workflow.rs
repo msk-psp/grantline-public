@@ -254,12 +254,26 @@ impl Workflow {
                 }
                 let r = self.load(id)?;
                 if self.can_read(&r, actor) {
-                    out.push(r.view());
+                    let mut summary = r.view();
+                    summary.as_object_mut().unwrap().remove("before");
+                    summary.as_object_mut().unwrap().remove("after");
+                    out.push(summary);
+                    if out.len() >= 100 {
+                        break;
+                    }
                 }
             }
         }
         out.sort_by(|a, b| b["created_at"].as_i64().cmp(&a["created_at"].as_i64()));
         Ok(out)
+    }
+    pub fn get(&self, id: &str, actor: &str) -> Result<Value> {
+        let _guard = self.mutex.lock().map_err(|_| "Approval lock unavailable")?;
+        let record = self.load(id)?;
+        if !self.can_read(&record, actor) {
+            return Err("Request unavailable to this identity".into());
+        }
+        Ok(record.view())
     }
     pub fn create(&self, actor: &Actor, g: Grant, action: String) -> Result<Value> {
         if !actor.authenticated {
