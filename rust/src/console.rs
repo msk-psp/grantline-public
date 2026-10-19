@@ -412,7 +412,7 @@ async fn sign_in(
     );
     let phrase = tr(&lang, "Untangle access. Follow the grants.");
     let href = format!(
-        "/auth/login?rd={}",
+        "/auth/login?next={}",
         percent_encoding::utf8_percent_encode(
             &auth::local_path(if q.rd.is_empty() { "/" } else { &q.rd }),
             percent_encoding::NON_ALPHANUMERIC
@@ -627,6 +627,69 @@ pub fn app(s: Shared) -> Router {
     #[cfg(unix)]
     let router = router.merge(workflow_routes());
     router.layer(middleware::from_fn(security)).with_state(s)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn proxy_login_preserves_the_session_handoff_and_deep_link() {
+        let state = Arc::new(App {
+            auth: auth::Auth::new(
+                auth::Config {
+                    mode: "proxy".into(),
+                    ..Default::default()
+                },
+                "https://console.example/",
+                true,
+            )
+            .unwrap(),
+            path: PathBuf::new(),
+            live: false,
+            assets: PathBuf::new(),
+            cache: Default::default(),
+            #[cfg(unix)]
+            workflow: None,
+        });
+        let destination = "/matrix?system=s3&lang=ko";
+        let encoded =
+            percent_encoding::utf8_percent_encode(destination, percent_encoding::NON_ALPHANUMERIC);
+        let response = app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/login?next={encoded}"))
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let html = std::str::from_utf8(&body).unwrap();
+        // oauth2-proxy consumes `rd` before forwarding an unauthenticated request.
+        let handoff = format!("/auth/login?next={encoded}");
+        assert!(html.contains(&handoff));
+        let response = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(handoff)
+                    .header("X-Forwarded-Email", "fixture")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(response.headers()[header::LOCATION], destination);
+        assert!(
+            response.headers()[header::SET_COOKIE]
+                .to_str()
+                .unwrap()
+                .starts_with("grantline_session=")
+        );
+    }
 }
 pub async fn serve(
     path: PathBuf,
