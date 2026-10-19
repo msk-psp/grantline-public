@@ -520,15 +520,15 @@ async fn assets(
             "text/javascript; charset=utf-8",
         ),
         "grantline-icon.svg" => (
-            include_bytes!("../../grantline/static/grantline-icon.svg").to_vec(),
+            include_bytes!("../ui/assets/grantline-icon.svg").to_vec(),
             "image/svg+xml",
         ),
         "postgresql.png" => (
-            include_bytes!("../../grantline/static/postgresql.png").to_vec(),
+            include_bytes!("../ui/assets/postgresql.png").to_vec(),
             "image/png",
         ),
         "seaweedfs.png" => (
-            include_bytes!("../../grantline/static/seaweedfs.png").to_vec(),
+            include_bytes!("../ui/assets/seaweedfs.png").to_vec(),
             "image/png",
         ),
         _ => return StatusCode::NOT_FOUND.into_response(),

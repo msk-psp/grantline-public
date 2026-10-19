@@ -1,7 +1,9 @@
 # Rust + Leptos operations and migration
 
 The Rust binary and browser WASM run without Python or Node in production.
-Python remains a development parity oracle and an explicit rollback option.
+A minimal Python oracle under `tests/reference` is used only by differential
+tests. It is not installed or included in the application image. Old release
+artifacts and persisted-state backups remain the explicit rollback path.
 The release workflow gates GHCR publication on privacy, reference regressions,
 native adapter tests, WASM/SSR tests and a read-only native container smoke test.
 It publishes amd64/arm64 only after a GitHub Release is published. Merging the
@@ -262,12 +264,9 @@ closed. Cached observations keep their original observation timestamp. Record
 history explicitly with authenticated snapshots or a scheduled `snapshot`/`notify`
 invocation; a read-only plan never creates it implicitly.
 
-The synthetic benchmark is reproducible with
-`python3 scripts/benchmark_rust_observation.py --runs 12` after a release build.
-On the development machine, process-start-to-plan medians were 8.0 ms Rust / 100.7
-ms Python for the 212-grant fixture, and 112.7 ms Rust / 261.6 ms Python for three
-independent HTTP readers with 100 ms delay each. Both reached three simultaneous
-reads; the prior sequential Rust run was 330.1 ms. Twenty-four warm catalog API
-requests had 0 additional remote reads and a 0.8 ms median. These are local fixture/
-HTTP measurements, including process startup for CLI runs, not production DB or
-browser-rendering benchmarks.
+The migration's historical synthetic benchmark measured process-start-to-plan
+medians of 8.0 ms Rust / 100.7 ms Python for a 212-grant fixture, and 112.7 ms
+Rust / 261.6 ms Python for three independent HTTP readers with 100 ms delay each.
+The Python benchmark launcher was retired with the service; these numbers are a
+historical measurement, not a current performance guarantee. Native cache and
+concurrency regressions are checked by `scripts/check_rust_runtime.py`.

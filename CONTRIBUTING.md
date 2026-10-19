@@ -1,148 +1,74 @@
 # Contributing
 
-## Run the native console
+Use Rust **1.99.0**, the matching wasm-bindgen CLI, Node for browser contract
+checks and Python **3.11+** for verification scripts. Python is not an application
+runtime and no editable package install is needed.
 
-Use Rust 1.99.0 and the matching wasm-bindgen CLI. See [native setup and
-operations](docs/rust-operations.md#build-and-preview) for the browser bundle.
+## Build and check
 
 ```bash
 cargo +1.99.0 build --locked --manifest-path rust/Cargo.toml
-rust/target/debug/grantline-rs -c examples/demo/grantline.toml serve
+cargo +1.99.0 fmt --manifest-path rust/Cargo.toml --all --check
+cargo +1.99.0 clippy --manifest-path rust/Cargo.toml --locked --workspace --all-targets -- -D warnings
+cargo +1.99.0 test --manifest-path rust/Cargo.toml --locked --workspace
+python3 tests/test_privacy_gate.py
+python3 tests/test_native_distribution.py
+python3 scripts/check_rust_parity.py
+python3 scripts/check_rust_core.py
+python3 scripts/check_rust_s3.py
 ```
 
-Native checks: `cargo fmt --all --check`, workspace Clippy with `-D warnings`
-and workspace tests from `rust/`; then `scripts/build_rust_ui.sh` and the
-`scripts/check_rust_*.mjs` contract suites from the repository root. Isolated
-adapter scripts use Docker; never substitute production endpoints for fixtures.
-`Dockerfile.rust` is the release build. Native `rust/pkg` and `rust/target` are
-generated and ignored. Keep Python as a differential oracle and rollback path.
+Build the WASM bundle and run the browser/provider suites described in the
+[Rust guide](rust/README.md#check-the-boundary). Provider scripts create disposable
+Docker services; use fictional fixtures and never substitute production endpoints.
+The [operations guide](docs/rust-operations.md) covers sessions, approvals, recovery
+and deployment. `Dockerfile` is the native release build; `Dockerfile.rust` is a
+compatibility symlink for existing build consumers. Generated `rust/pkg` and
+`rust/target` are ignored.
 
-## Run the Python reference
+## Test reference
 
-```bash
-uv venv && uv pip install -e ".[postgres,dev]"
-grantline -c grantline.toml plan        # bundled fixture, no credentials needed
-grantline -c grantline.toml serve       # http://127.0.0.1:8420
-```
+Only the dependency closure of the offline differential suites remains under
+[tests/reference](tests/reference/README.md). The scripts explicitly opt into that
+import path. It has no web/CLI/approval application, does not resolve service
+credentials, and is excluded from the image. Preserve the independent comparison
+while extending native permission semantics.
 
-## Before you push
+## Source map
 
-Enable the repository's opt-in hooks once (no global Git settings change):
+| Concern | Source |
+|---|---|
+| Grant identity, coverage and convergence | `rust/src/model.rs`, `rust/src/planner.rs` |
+| Service catalogs, probes and writers | `rust/src/postgres/`, `rust/src/clickhouse/`, `rust/src/s3/` and their parent modules |
+| Observation, snapshots and routes | `rust/src/engine.rs`, `rust/src/snapshot.rs`, `rust/src/graph.rs` |
+| Native server, sessions and approval flow | `rust/src/console.rs`, `rust/src/auth.rs`, `rust/src/workflow.rs` |
+| Leptos pages, map and four locales | `rust/ui/src/` |
+| Shared icons and logo licenses | `rust/ui/assets/` |
+| Requirements and recorded boundaries | `docs/prd/` |
+
+## Before pushing
 
 ```bash
 git config --local core.hooksPath .githooks
+python3 scripts/privacy_gate.py --tracked
 ```
 
-The pre-commit hook scans staged text and effective author/committer emails,
-not unsaved working-tree edits. The pre-push hook checks new commits, including
-their message bodies, author/committer emails and
-files added then removed within the range. CI repeats the range check as the
-`privacy` job. Require that check in the protected branch rules; local hooks
-can be bypassed and are not an access control.
+Hooks inspect staged/newly published text and commit identities; CI repeats the
+range audit. Use a GitHub noreply author address. Keep real configuration, service
+credentials, operational identities and patient data outside the repository.
+Privacy pattern checks do not replace review of binary assets or PR descriptions.
 
-Use fictional accounts and `example.com` addresses in fixtures. Use a GitHub
-`users.noreply.github.com` email for new commits; this does not rewrite existing
-history. GitHub web-flow’s exact `noreply@github.com` committer address is
-also accepted; other `github.com` emails are not exempt. Never paste approval tokens or real Slack IDs in examples. Diagnostics
-show rule names and locations only, not matched values.
+Tests should reproduce a concrete mistake, and unread scopes must remain unknown.
+The console is read-only by default. Native writes require explicit credentials,
+a reviewed plan hash and the documented adapter scope. Add a PRD before major
+workflow changes; narrow bug fixes belong with their regression check.
 
-In GitHub **Settings → Emails**, enable **Keep my email addresses private** and
-**Block command line pushes that expose my email**. This also protects the identity
-GitHub uses for future web-created merge commits. CI runs after upload: a failing
-check cannot retract data already published. It is a review barrier, not a promise
-that publication was prevented. The opt-in hooks run before commit/push instead.
+## Local approval playground
 
 ```bash
-ruff check grantline tests
-python tests/run.py
-node tests/test_map_hover.mjs
-python3 scripts/privacy_gate.py --staged
+cargo +1.99.0 run --locked --manifest-path rust/Cargo.toml -- playground --port 8423
 ```
 
-CI runs these checks on Python 3.11–3.13 plus the fixture `plan`. A change is
-not done until the checks pass locally.
-
-## Where things live
-
-| Concern | File |
-|---|---|
-| what a grant *is* | `grantline/model.py` |
-| reading a system | `grantline/adapters/<system>.py` — `observe()`, `probe()`, `grant_cmd()` |
-| declared vs observed | `grantline/diff.py`, `grantline/subsume.py` |
-| routes (hops, bridges, kinds) | `grantline/graph.py`; data for the map in `web.graph_data()` |
-| pages | `grantline/pages.py`, `grantline/web.py`; assets in `grantline/static/` |
-| decisions and their reasons | `docs/prd/` |
-| experimental native core, offline CLI and Leptos playground | `rust/` — [guide](rust/README.md), [migration stages](docs/prd/006-rust-leptos.md) |
-
-For Rust changes run the native checks and all three differential suites in the
-[Rust guide](rust/README.md#check-the-boundary). `plan` is read-only;
-`snapshot` explicitly records observations. Native `apply`/`restore` support one
-local S3 IAM file with explicit `--write` and stale-state guards; filesystem
-permissions are the write credential for that file. Native PostgreSQL/ClickHouse/S3 reads require
-`--live` and separately configured readers. PostgreSQL and ClickHouse `probe --live`
-support read-only ACL checks and optional mapped subject logins; see the Rust guide
-for the different guarantees of each adapter. S3 probes use explicit subject keys
-for scoped List/HEAD samples. PostgreSQL `apply --live` previews single-database
-ordinary-table/schema/database ACL changes with explicit `admin_dsn_env`; writing additionally
-requires `--write --expect PLAN_ID`. Writers serialize through a database-local
-transaction advisory lock; concurrent external catalog administration remains
-outside the guarantee. Role-only plans additionally require a literal
-`membership_write_roles` allowlist and the `postgres` coordinator; they affect
-the whole cluster, use canonical options and an exact grantor. PostgreSQL
-schema-specific default table privileges additionally require literal
-`default_write_scopes`, the authenticated creator and a default-only change plan.
-ClickHouse `apply --live` supports one direct SELECT/INSERT ACL change on a
-UUID-backed local Memory/MergeTree table, with `clickhouse_write_tables`, explicit
-`admin_url_env` and `--write --expect PLAN_ID`. It has no multi-statement rollback;
-dispatch or post-check failure requires inspection before retry. R3h2 adds exact
-DB scopes through independent `clickhouse_write_databases = ["db:demo"]`; these
-cover all current/future relation names and engines in the DB. Overlapping held/declared
-DB/table rights for the same subject and privilege are refused. Global/other-object
-PostgreSQL defaults and remote S3 writers remain pending. ClickHouse MEMBER changes
-require literal `membership_write_roles`, direct ADMIN OPTION, canonical account
-DEFAULT ROLE ALL and no delegation; membership carries the role's current/future
-privileges to recipient accounts/roles and their dependants. One statement still
-has no multi-statement rollback or effective-access guarantee.
-Run `python3 scripts/check_rust_clickhouse.py --docker` and
-`python3 scripts/check_rust_postgres.py --docker` plus
-`python3 scripts/check_rust_s3_network.py --docker` and
-`python3 scripts/check_rust_s3_probes.py --docker` and
-`python3 scripts/check_rust_s3_writer.py --docker` and
-`python3 scripts/check_rust_postgres_writer.py --docker` and
-`python3 scripts/check_rust_postgres_membership.py --docker` and
-`python3 scripts/check_rust_postgres_defaults.py --docker` and
-`python3 scripts/check_rust_clickhouse_writer.py --docker` and
-`python3 scripts/check_rust_clickhouse_database.py --docker` and
-`python3 scripts/check_rust_clickhouse_membership.py --docker` for isolated boundary and
-real-server checks. Local S3 IAM files/trees support observation
-and grouped previews; directory-backed shared policies cannot be rewritten from
-a per-user change.
-
-## Conventions
-
-- **Tests pin a mistake, not a feature.** Most files in `tests/` exist because something
-  was wrong on a real cluster; the docstring says what. Keep that habit: when a live run
-  finds a bug, the fix lands with the test that would have caught it.
-- **A finding beats silence.** If something cannot be modelled, say so in a `Finding`;
-  never let an unread scope render as "no access".
-- **No credentials in the repo**, ever — config lives outside it (`~/.config/grantline/`)
-  and secrets travel only through environment variables the config names.
-- **Design changes get a PRD** in `docs/prd/` before the code. Bug fixes and small
-  changes don't.
-- Commit messages: `type(scope): what changed and why it matters` — the *why* is the
-  part a reader can't get from the diff.
-- The console is read-only by default. A write path needs the config to name a write
-  credential *and* the environment to carry it; keep that split.
-
-## Try approvals locally
-
-```bash
-python3 examples/approval-demo/run.py
-```
-
-Open **http://127.0.0.1:8422/demo** to switch between fictional requester and
-reviewer roles, inspect a simulated Slack inbox, and approve or deny a sample
-request. The real approval backend runs against disposable local fixtures; PRs
-are simulated and no external credentials or accounts are required. See the
-[approval playground guide](examples/approval-demo/README.md) for the steps and
-what this does and does not verify. Restart the command for a fresh test state.
+Open `http://127.0.0.1:8423/demo`. Requester/reviewer roles, the inbox and PR are
+fictional, process-local and reset on restart. See the
+[playground contract](rust/README.md#run-the-native-approval-playground).

@@ -1,7 +1,7 @@
 version: 2
 updates:
-  - package-ecosystem: pip
-    directory: /
+  - package-ecosystem: cargo
+    directory: /rust
     schedule:
       interval: weekly
   - package-ecosystem: github-actions

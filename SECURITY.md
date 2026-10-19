@@ -1,53 +1,45 @@
 # Security
 
-Report vulnerabilities privately through GitHub's **Report a vulnerability** button
-on this repository's Security tab. Do not put credentials or approval URLs in issues.
-The current default branch is the supported version.
+Report vulnerabilities privately through GitHub's **Report a vulnerability**
+button on this repository's Security tab. Keep credentials and approval URLs
+out of public issues. The current default branch is the supported source version.
 
 ## Trust boundaries
 
-- Grantline is an operator tool. The HTTP server binds to loopback by default. `serve --host 0.0.0.0`
-  listens on all container/network interfaces; this does not enable authentication. Before sharing
-  it, put an authenticated reverse proxy in front of it, restrict
-  network access, and set `[web] trusted_hosts = ["console.example.com"]` in the external
-  configuration. This allowlist and same-origin POST checks do not authenticate users.
-- Optional `[web.auth] mode = "proxy"` requires one validated proxy identity header
-  for console data and writes. Grantline does not validate OIDC sessions itself.
-  Strip untrusted client identity headers at the proxy and keep the backend reachable
-  only by that proxy. A header from a directly reachable backend can be forged.
-  Without this configuration the local console remains unauthenticated. See
-  [console sign-in setup](docs/usage.md#console-sign-in).
-- Reading and writing use separate configured credentials. Keep write credentials out
-  of observation-only deployments. The CLI, config, process environment, and local files
-  belong to trusted operators; approval rules govern the web console, not operator CLI
-  access to service credentials.
-- With `[approvals]`, direct web writes are refused. Tokens authorize one approver of
-  one request, must be privately delivered, and are never returned to requesters. Slack
-  pilot redirection is ignored for approvals. Without Slack, an operator can run
-  `grantline request --links ID` and deliver each URL only to its intended recipient.
-  These URLs remain sensitive while the request is pending: delete or deny abandoned
-  requests and protect browser history. Tokens do not expire automatically.
-- Approval files have mode `0600`, their directory `0700`. Keep configuration, approval
-  stores, audit logs, and observation snapshots outside your checkout. Audit records
-  contain identities and commands; one attempt and one result are appended per write.
-  If a process dies after the attempt, reconcile the service before retrying. A remote
-  change and a local result log cannot form an atomic transaction.
-- The web body limit is 64 KiB and socket timeout 10 seconds. Use reverse-proxy request
-  limits for shared deployments; this small server is not an internet-facing service.
-- SQL writes accept the explicit privileges offered by each adapter, quote identifiers,
-  and refuse unsupported privileges. They are not an arbitrary SQL interface.
-- IAM observation is not a complete AWS policy evaluator. Bucket discovery
-  (`ListAllMyBuckets`) is a service capability, not object access. Allow statements
-  using only `StringLike` on `s3:prefix`, literal bucket ARNs and `ListBucket` or
-  `GetBucketLocation` are shown as request-context capabilities. Prefix strings and
-  wildcard patterns are preserved; they do not become bucket-wide grants. These
-  capabilities are observation-only: no automatic IAM writes or probes are offered.
-  Conditional listings combined with any Deny remain unknown. Other conditional and negative
-  statements, unsupported actions/resource wildcards, and non-exact/overlapping denies are
-  reported as unknown. The S3 system is then unobserved for convergence planning;
-  omitted grants must not be interpreted as denied access. Use the service's own policy
-  evaluator/probes for final authorization decisions. Missing policy documents are
-  reported separately. Policy writes do not remove access inherited from wider grants.
+- The native console binds to loopback by default. Shared deployments require
+  configured native OIDC or a trusted authenticated proxy; explicit public preview
+  is only a read-only fictional demo. Native OIDC verifies signatures, issuer,
+  audience, PKCE, state and nonce. Proxy deployments must strip untrusted identity
+  headers and keep the backend isolated from clients.
+- Native sessions and CSRF checks bind browser actions to authenticated identities.
+  The retired Python service's bearer approval links are not a native login flow.
+  Approval binds the original request, approvers and immutable plan. Slack callbacks
+  require configured signatures and replay checks. A review or GitHub PR never
+  implicitly applies native IAM changes.
+- Readers and writers use separately configured credentials. Keep `admin_*`
+  credentials out of observation-only deployments. The operator CLI, process
+  environment and local filesystem remain trusted; web approval rules cannot
+  restrict a human who already holds service administrator credentials.
+- Supported writes require reviewed plan hashes and explicit `--write --expect`.
+  Preserve recovery artifacts and inspect uncertain outcomes before retrying.
+  No cross-service transaction or atomic service/local-log commit is claimed.
+- Private state, approvals and snapshots belong outside the checkout with the
+  documented `0700` directories and `0600` files. Preserve backups and follow
+  [migration and rollback](docs/rust-operations.md#offline-state-migration-and-rollback).
+- SQL generators and native writers validate supported privileges and resource
+  scopes. Column ACL observation does not enable column writes. Unrepresentable
+  ACLs remain unknown and must not produce inferred convergence actions.
+- S3 interpretation is not a complete AWS policy evaluator. Discovery and
+  prefix-conditioned listing capabilities remain distinct from object access.
+  Version reads, retention inspection and governance operations retain exact
+  privilege names. Unsupported conditions, missing policies and ambiguous denies
+  remain unknown. Use service-native evaluation for final access decisions.
+- The Python modules under `tests/reference` are test-only, have no application
+  entry point and refuse network credential resolution. Docker excludes tests
+  and ships the Rust binary, WASM and shared assets without Python or Node.
+
+See [native authentication and recovery](docs/rust-operations.md) for the full
+supported deployment and writer contracts.
 
 ## Read credentials
 

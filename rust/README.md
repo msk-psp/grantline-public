@@ -904,8 +904,7 @@ this is not production authentication. The simulated inbox contains local
 approval links; never use real credentials or shared hosting with this app.
 
 State is memory-only (at most 100 requests) and resets on restart. The port can
-be changed with `--port 8424`. The existing Python console and playground use
-their own ports and are unaffected.
+be changed with `--port 8424`. The former Python console and playground are retired.
 
 ## What is implemented
 
@@ -950,7 +949,8 @@ CLI file application, service reload and effective access are separate states.
 
 ## Check the boundary
 
-From the repository root (Python is used only as a development oracle):
+From the repository root (Python 3.11+ is used only for verification tools and
+the isolated oracle under `tests/reference`):
 
 ```sh
 cargo fmt --manifest-path rust/Cargo.toml --check
