@@ -13,19 +13,19 @@
 
 ## 在本地试用
 
-需要 Python 3.11 或更高版本及 [uv](https://docs.astral.sh/uv/)。
+需要 Rust **1.99.0**。后端使用 Rust，界面使用 Leptos SSR 和 WASM。
 演示无需额外服务器或凭据。
 
 ```bash
 git clone https://github.com/msk-psp/grantline-public.git
 cd grantline-public
-uv venv
-uv pip install -e .
-source .venv/bin/activate
-grantline -c examples/demo/grantline.toml serve
+rustup target add --toolchain 1.99.0 wasm32-unknown-unknown
+cargo +1.99.0 install --locked wasm-bindgen-cli --version 0.2.129
+RUSTUP_TOOLCHAIN=1.99.0 scripts/build_rust_ui.sh
+cargo +1.99.0 run --locked --manifest-path rust/Cargo.toml -- -c examples/demo/grantline.toml serve
 ```
 
-打开 **http://127.0.0.1:8420/**。首页显示访问路径图；**服务**按服务列出资源，
+打开 **http://127.0.0.1:8424/**。首页显示访问路径图；**服务**按服务列出资源，
 **权限矩阵**用于比较权限，**变更**用于预览明确的授权和撤销命令。
 选择账号后可查看其访问权限和路径。
 
@@ -34,6 +34,10 @@ grantline -c examples/demo/grantline.toml serve
 账号名称、资源路径和服务的原生命令保持原样。
 
 ## 使用 Docker
+
+此版本的发布工作流构建以 UID 10001 运行的 native Rust/WASM 镜像，不包含
+Python 或 Node 运行时。现有标签保留原有运行时；合并代码不会自动发布新镜像。
+本地构建：`docker build -f Dockerfile.rust -t grantline-native:local .`。
 
 发布 GitHub Release 时，会在 GHCR 上发布 `linux/amd64` 和 `linux/arm64` 镜像。
 稳定版本同时更新 `latest`；预发布版本仅使用独立的版本标签。
@@ -45,35 +49,39 @@ docker run --rm -p 127.0.0.1:8420:8420 ghcr.io/msk-psp/grantline-public:latest
 打开 **http://127.0.0.1:8420/** 即可体验内置演示，无需凭据。
 连接实际系统时，请挂载外部配置并持久保存运行记录。参阅
 [容器配置](usage.md#containers)，部署时固定发布标签或 digest。
-镜像已包含 PostgreSQL 驱动。
+native 镜像直接支持 PostgreSQL。
 
 ## 常用命令
 
 ```bash
-grantline -c examples/demo/grantline.toml plan      # 检查权限差异和原生命令
-grantline -c examples/demo/grantline.toml apply     # 仅预演，不进行修改
-grantline -c examples/demo/grantline.toml history  # 比较已记录的观测结果
+rust/target/debug/grantline-rs -c examples/demo/grantline.toml plan      # 检查权限差异和原生命令
+rust/target/debug/grantline-rs -c examples/demo/grantline.toml plan --json     # 仅预演，不进行修改
+rust/target/debug/grantline-rs -c examples/demo/grantline.toml history  # 比较已记录的观测结果
 ```
 
-`apply --write` 会修改配置的系统，包括演示数据文件。
-启用前请检查预览和管理范围。
+受支持的 native writer 需要按服务审阅预览和显式的 `--write --expect HASH`。
+审批和创建 PR 不会直接应用 IAM 权限。
 
 ## 连接实际系统
 
 将实际配置保存在仓库外，例如 `~/.config/grantline/prod.toml`。
 配置中指定用于保存凭据的环境变量名称；观测凭据与写入凭据分开使用。
-PostgreSQL 还需要通过 `uv pip install 'grantline[postgres]'` 安装额外依赖。
+native PostgreSQL 不需要 Python 驱动。
 
 以下详细文档以英语提供。
 
+- [Native 运维、迁移和恢复](rust-operations.md)：OIDC、Slack/GitHub、私有状态和回滚。
 - [配置与运维](usage.md)：适配器、凭据、桥接、权限声明、访问检查、观测记录和审批。
-- [安全](../SECURITY.md)：共享控制台与启用写入。内置服务器不进行用户认证，共享部署需要认证代理。
+- [安全](../SECURITY.md)：共享控制台与启用写入。native 共享部署需要配置 OIDC 或可信认证代理。
 - [贡献指南](../CONTRIBUTING.md)：开发环境与检查方法。
 - [产品范围](prd/003-scope.md)：需求与实现状态。
 
 无法读取的范围表示 **未知**，不会被当作“没有访问权限”。
 每次写入都会先预览原生操作，并记录执行尝试和结果。
 基于声明的撤销仅限于受管理的账号，以及声明所描述的系统。
+
+Python 参考实现仍可通过 `uv pip install -e .` 和原有 `Dockerfile` 使用。
+不要让 Python 与 native 进程共用同一个审批存储目录。
 
 ## 许可证
 

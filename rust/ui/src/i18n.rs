@@ -1,6 +1,14 @@
 pub const LANGUAGES: [&str; 4] = ["en", "ko", "ja", "zh-CN"];
 const MESSAGES: &[(&str, [&str; 3])] = &[
     (
+        "Archived; request a new review",
+        [
+            "이전 기록 · 새 검토 필요",
+            "アーカイブ・再申請が必要",
+            "归档记录，需重新申请",
+        ],
+    ),
+    (
         "Visibility changes",
         ["관측 범위 변화", "可視性の変化", "可见性变化"],
     ),

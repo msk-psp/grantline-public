@@ -1,11 +1,14 @@
 # Grantline — Rust + Leptos migration
 
-Experimental **R1 + R2 + R3a/R3b/R3c/R3d/R3e1/R3e2/R3e3/R3f/R3g1/R3g2/R3g3/R3g4/R3h1/R3h2 foundation**, alongside the supported Python console.
-This binary runs natively with no Python process. Commands are offline by default;
-native PostgreSQL/ClickHouse catalogs and remote S3 IAM require explicit `--live`
-and configured reader endpoints/credentials.
-The target is a complete Rust backend and Leptos UI, delivered in
-[six stages](../docs/prd/006-rust-leptos.md).
+Native Rust backend and Leptos SSR/WASM console, with no Python runtime.
+R1–R6 implementation is delivered as the [migration stack](../docs/prd/006-rust-leptos.md).
+Network reads require `--live`; IAM writes require their own reviewed plan and
+explicit write flags. Read-only local preview is the default.
+
+For console build, OIDC, Slack/GitHub setup, native release images and private
+state migration/rollback, start with [operations](../docs/rust-operations.md).
+The sections below retain detailed adapter contracts and acceptance boundaries;
+implementation and isolated tests do not establish production readiness.
 
 ## Run the offline CLI
 

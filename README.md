@@ -14,19 +14,19 @@ Enforcement stays in each service.
 
 ## Try it locally
 
-Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/). The demo needs no servers
-or credentials.
+Requires Rust **1.99.0**. The fictional demo needs no services or credentials.
+The backend is native Rust; the console uses Leptos SSR and browser WASM.
 
 ```bash
 git clone https://github.com/msk-psp/grantline-public.git
 cd grantline-public
-uv venv
-uv pip install -e .
-source .venv/bin/activate
-grantline -c examples/demo/grantline.toml serve
+rustup target add --toolchain 1.99.0 wasm32-unknown-unknown
+cargo +1.99.0 install --locked wasm-bindgen-cli --version 0.2.129
+RUSTUP_TOOLCHAIN=1.99.0 scripts/build_rust_ui.sh
+cargo +1.99.0 run --locked --manifest-path rust/Cargo.toml -- -c examples/demo/grantline.toml serve
 ```
 
-Open **http://127.0.0.1:8420/**. The map is the first page; **Services** lists
+Open **http://127.0.0.1:8424/**. The map is the first page; **Services** lists
 resources by service, **Matrix** compares permissions, and **Changes** previews
 explicit grants and revokes. Selecting a subject shows their access and routes.
 
@@ -37,7 +37,7 @@ commands retain their original spelling.
 
 ## Run with Docker
 
-Published GitHub Releases provide `linux/amd64` and `linux/arm64` images on GHCR.
+The release workflow tests and publishes native Rust/WASM images with `linux/amd64` and `linux/arm64` on GHCR.
 Stable releases also update `latest`; pre-releases keep their own version tag.
 
 ```bash
@@ -47,36 +47,42 @@ docker run --rm -p 127.0.0.1:8420:8420 ghcr.io/msk-psp/grantline-public:latest
 Open **http://127.0.0.1:8420/** for the built-in demo. No credentials are needed.
 For real systems, mount your own configuration and persist runtime state; see
 [container configuration](docs/usage.md#containers). Pin a release tag or digest
-for deployments. The image includes the PostgreSQL driver.
+for deployments. The image runs as UID 10001 without Python or Node. Older release tags retain
+their original runtime; merging this change does not publish a new image.
+Build this version locally with `docker build -f Dockerfile.rust -t grantline-native:local .`.
 
 ## Common commands
 
 ```bash
-grantline -c examples/demo/grantline.toml plan      # inspect drift and native commands
-grantline -c examples/demo/grantline.toml apply     # dry-run; changes nothing
-grantline -c examples/demo/grantline.toml history  # compare recorded observations
+rust/target/debug/grantline-rs -c examples/demo/grantline.toml plan      # inspect drift and native commands
+rust/target/debug/grantline-rs -c examples/demo/grantline.toml plan --json # structured preview
+rust/target/debug/grantline-rs -c examples/demo/grantline.toml history  # compare recorded observations
 ```
 
-`apply --write` changes the configured system, including demo fixture files.
-Review the preview and management scope before enabling it.
+Supported native writers require an explicit system, a reviewed plan hash and
+`--write --expect HASH`. Review adapter scope before enabling them.
 
 ## Connect your systems
 
 Keep real configuration outside the repository, for example
 `~/.config/grantline/prod.toml`. Configuration names environment variables for
-credentials; observation and write credentials are separate. PostgreSQL also
-needs `uv pip install 'grantline[postgres]'`.
+credentials; observation and write credentials are separate. Native PostgreSQL does not require a Python driver.
 
+- [Native operations and migration](docs/rust-operations.md): OIDC, Slack/GitHub,
+  private state, upgrade and rollback.
 - [Configuration and operations](docs/usage.md): adapters, credentials, bridges,
   intent, probes, snapshots and approvals.
-- [Security](SECURITY.md): sharing the console and enabling writes. The built-in
-  server does not authenticate users; shared deployments need an authenticated proxy.
+- [Security](SECURITY.md): sharing the console and enabling writes. Native shared deployments require configured OIDC or a trusted authenticated proxy.
 - [Contributing](CONTRIBUTING.md): development setup and checks.
 - [Product scope](docs/prd/003-scope.md): requirements and implementation status.
 
-An unread scope is **unknown**, never “no access”. Every write previews the native
-operation and records an audit attempt and result. Declaration-based revokes are
+An unread scope is **unknown**, never “no access”. IAM writes require a separately reviewed native CLI plan. Approval and PR
+creation do not apply access. Declaration-based revokes are
 bounded by managed subjects and the systems the intent claims to describe.
+
+The Python reference remains available through `uv pip install -e .` and the
+original `Dockerfile`; its commands and configuration are documented in
+[usage](docs/usage.md). Do not share its approval state directory with native.
 
 ## License
 
