@@ -1,6 +1,23 @@
 # Contributing
 
-## Run it
+## Run the native console
+
+Use Rust 1.99.0 and the matching wasm-bindgen CLI. See [native setup and
+operations](docs/rust-operations.md#build-and-preview) for the browser bundle.
+
+```bash
+cargo +1.99.0 build --locked --manifest-path rust/Cargo.toml
+rust/target/debug/grantline-rs -c examples/demo/grantline.toml serve
+```
+
+Native checks: `cargo fmt --all --check`, workspace Clippy with `-D warnings`
+and workspace tests from `rust/`; then `scripts/build_rust_ui.sh` and the
+`scripts/check_rust_*.mjs` contract suites from the repository root. Isolated
+adapter scripts use Docker; never substitute production endpoints for fixtures.
+`Dockerfile.rust` is the release build. Native `rust/pkg` and `rust/target` are
+generated and ignored. Keep Python as a differential oracle and rollback path.
+
+## Run the Python reference
 
 ```bash
 uv venv && uv pip install -e ".[postgres,dev]"

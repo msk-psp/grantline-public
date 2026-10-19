@@ -7,6 +7,7 @@ license = "Apache-2.0"
 description = "Grantline Rust migration: native permission core and Leptos approval playground"
 
 [dependencies]
+grantline-ui = { path = "ui", features = ["ssr"] }
 axum = { version = "0.8", features = ["form", "json"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 clap = { version = "4", features = ["derive"] }
@@ -30,7 +31,14 @@ tokio-postgres = "0.7"
 tokio-postgres-rustls = { version = "0.14", features = ["ring", "webpki-roots"] }
 hmac = "0.12"
 roxmltree = "0.21"
+openidconnect = { version = "4.0.1", default-features = false, features = ["reqwest", "rustls-tls"] }
+base64 = "0.22"
 
 [dev-dependencies]
 http-body-util = "0.1"
 tower = { version = "0.5", features = ["util"] }
+
+[workspace]
+members = ["ui"]
+default-members = ["."]
+resolver = "2"

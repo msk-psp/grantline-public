@@ -104,6 +104,31 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Run the native console. Local preview is read-only; live services require --live.
+    Serve {
+        #[arg(long, default_value = "127.0.0.1")]
+        host: std::net::IpAddr,
+        #[arg(long, default_value_t = 8424)]
+        port: u16,
+        #[arg(long)]
+        live: bool,
+        /// Explicitly expose a read-only fixture preview on a non-loopback listener.
+        #[arg(long)]
+        public_preview: bool,
+    },
+    /// Copy offline approval history into a new private versioned store (dry-run by default).
+    #[cfg(unix)]
+    Migrate {
+        #[arg(long)]
+        source: PathBuf,
+        #[arg(long)]
+        destination: PathBuf,
+        #[arg(long)]
+        write: bool,
+        /// Confirm all writers using the source store have been stopped.
+        #[arg(long, requires = "write")]
+        offline: bool,
+    },
     /// Run the fictional approval playground. No external services are contacted.
     Demo {
         #[arg(long, default_value_t = 8423)]
@@ -203,6 +228,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             limit,
             json,
         )?,
+        Command::Serve {
+            host,
+            port,
+            live,
+            public_preview,
+        } => grantline_rs::console::serve(args.config, host, port, live, public_preview).await?,
+        #[cfg(unix)]
+        Command::Migrate {
+            source,
+            destination,
+            write,
+            offline,
+        } => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&grantline_rs::migration::migrate(
+                    &source,
+                    &destination,
+                    write,
+                    offline
+                )?)?
+            );
+        }
         Command::Demo { port } => {
             let listener =
                 tokio::net::TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port)).await?;
