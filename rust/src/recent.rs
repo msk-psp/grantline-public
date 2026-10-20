@@ -187,6 +187,7 @@ mod tests {
             prefixes: vec!["".into()],
             subjects: Default::default(),
             note: "offline".into(),
+            ..Default::default()
         });
         assert_eq!(
             filter(&mut graph(&unread), &unread, vec![base.clone()], 7).unwrap()["removed"],

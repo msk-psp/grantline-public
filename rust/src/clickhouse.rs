@@ -4,7 +4,7 @@ pub mod writer;
 use crate::{
     Result,
     config::Adapter,
-    model::{Grant, Kinds, Unobserved},
+    model::{Grant, Kinds, ObservationGap, Unobserved},
     planner::Finding,
 };
 use serde::{Deserialize, de::DeserializeOwned};
@@ -314,6 +314,22 @@ fn check_show_scope(line: &str) -> Result<()> {
     }
     Ok(())
 }
+fn mark_unknown(
+    blind: &mut BTreeMap<(String, String), String>,
+    bytes: &mut usize,
+    key: (String, String),
+    reason: &str,
+) -> Result<bool> {
+    if blind.contains_key(&key) {
+        return Ok(false);
+    }
+    if blind.len() >= MAX_ROWS || (*bytes as u64 + reason.len() as u64) > MAX_BYTES {
+        return Err("ClickHouse unknown propagation exceeds row/byte limit".into());
+    }
+    *bytes += reason.len();
+    blind.insert(key, reason.into());
+    Ok(true)
+}
 fn observe_inner(adapter: &Adapter, system: &str) -> Result<Observation> {
     let http = Http::from_config(adapter)?;
     observe_http(&http, system)
@@ -339,7 +355,8 @@ fn observe_http(http: &Http, system: &str) -> Result<Observation> {
         }
         register(&entity.name, &entity.kind, &mut out.kinds)?;
     }
-    let mut blind = BTreeSet::new();
+    let mut blind: BTreeMap<(String, String), String> = BTreeMap::new();
+    let mut blind_bytes = 0;
     let mut dependants: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for r in roles {
         let subject = principal(r.user_name, r.role_name, &mut out.kinds)?;
@@ -368,14 +385,64 @@ fn observe_http(http: &Http, system: &str) -> Result<Observation> {
         if r.access_type.is_empty() {
             return Err("Invalid empty catalog privilege".into());
         }
-        if partial
-            || r.column.is_some_and(|s| !s.is_empty())
-            || !r.access_object.is_empty()
-            || db.contains(['.', '*', '?', '['])
+        let column = r.column.unwrap_or_default();
+        let scope = if !r.access_object.is_empty() {
+            format!("parameter:{}", r.access_object)
+        } else if !column.is_empty() {
+            format!("column:{db}.{table}.{column}")
+        } else if db.is_empty() {
+            "global:*".to_owned()
+        } else if table.is_empty() {
+            format!("db:{db}")
+        } else {
+            format!("table:{db}.{table}")
+        };
+        let ambiguous = db.contains(['.', '*', '?', '['])
             || table.contains(['*', '?', '['])
-            || (db.is_empty() && !table.is_empty())
+            || (db.is_empty() && !table.is_empty());
+        let named_collection = r.access_type == "NAMED COLLECTION"
+            && db.is_empty()
+            && table.is_empty()
+            && column.is_empty()
+            && !r.access_object.is_empty()
+            && !r.access_object.contains(['*', '?', '['])
+            && !r.access_object.chars().any(char::is_control);
+        let unsupported = if partial {
+            Some(format!(
+                "Partial revoke of {} on {scope} (source: {subject}); this privilege remains unknown",
+                r.access_type
+            ))
+        } else if ambiguous {
+            Some(format!(
+                "Ambiguous scope for {} on {scope} (source: {subject})",
+                r.access_type
+            ))
+        } else if !r.access_object.is_empty() && !named_collection {
+            Some(format!(
+                "Unsupported parameterized {} on {} (source: {subject})",
+                r.access_type, r.access_object
+            ))
+        } else if !column.is_empty()
+            && (db.is_empty()
+                || table.is_empty()
+                || table.contains('.')
+                || column.contains(['.', '*', '?', '['])
+                || column.chars().any(char::is_control))
         {
-            blind.insert(subject);
+            Some(format!(
+                "Ambiguous column scope for {} on {scope} (source: {subject})",
+                r.access_type
+            ))
+        } else {
+            None
+        };
+        if let Some(reason) = unsupported {
+            mark_unknown(
+                &mut blind,
+                &mut blind_bytes,
+                (subject, r.access_type),
+                &reason,
+            )?;
             continue;
         }
         if grant_option {
@@ -387,12 +454,12 @@ fn observe_http(http: &Http, system: &str) -> Result<Observation> {
                 vec![subject.clone()],
             ));
         }
-        let resource = if db.is_empty() {
-            "global:*".into()
-        } else if table.is_empty() {
-            format!("db:{db}")
+        let resource = if named_collection {
+            format!("named_collection:{}", r.access_object)
+        } else if !column.is_empty() {
+            format!("column:{db}.{table}.{column}")
         } else {
-            format!("table:{db}.{table}")
+            scope
         };
         out.grants
             .insert(Grant::new(system, &subject, &resource, &r.access_type).normalized(&kinds));
@@ -415,18 +482,32 @@ fn observe_http(http: &Http, system: &str) -> Result<Observation> {
             check_show_scope(row.values().next().ok_or("Missing SHOW GRANTS row")?)?;
         }
     }
-    let mut pending: VecDeque<_> = blind.iter().cloned().collect();
-    while let Some(subject) = pending.pop_front() {
+    let mut pending: VecDeque<_> = blind.keys().cloned().collect();
+    while let Some((subject, privilege)) = pending.pop_front() {
+        let reason = blind[&(subject.clone(), privilege.clone())].clone();
         for parent in dependants.get(&subject).into_iter().flatten() {
-            if blind.insert(parent.clone()) {
-                pending.push_back(parent.clone());
+            if mark_unknown(
+                &mut blind,
+                &mut blind_bytes,
+                (parent.clone(), privilege.clone()),
+                &reason,
+            )? {
+                pending.push_back((parent.clone(), privilege.clone()));
             }
         }
     }
-    for subject in blind {
-        out.unknown.push(Unobserved{system:system.into(),prefixes:vec![String::new()],subjects:BTreeSet::from([subject.clone()]),note:"Column grants, partial revokes, parameterized/ambiguous scopes or inherited unknown access cannot be represented".into()});
-        out.grants.retain(|g| g.subject != subject);
+    for ((subject, privilege), note) in blind {
+        out.unknown.push(Unobserved {
+            system: system.into(),
+            prefixes: vec![String::new()],
+            subjects: BTreeSet::from([subject]),
+            privileges: BTreeSet::from([privilege]),
+            note,
+            category: ObservationGap::Unsupported,
+        });
     }
+    out.grants
+        .retain(|g| !out.unknown.iter().any(|u| u.covers(g)));
     out.findings
         .extend(stale_findings(system, &out.grants, &databases));
     Ok(out)
@@ -446,6 +527,7 @@ pub fn observe(adapter: &Adapter, system: &str) -> Observation {
                 prefixes: vec![String::new()],
                 subjects: BTreeSet::new(),
                 note,
+                ..Default::default()
             }],
             ..Default::default()
         },
@@ -485,6 +567,24 @@ pub fn stale_findings(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unknown_propagation_deduplicates_and_enforces_the_byte_cap() {
+        let mut blind = BTreeMap::new();
+        let mut bytes = 0;
+        let key = ("reader".into(), "SELECT".into());
+        assert!(mark_unknown(&mut blind, &mut bytes, key.clone(), "partial revoke").unwrap());
+        assert!(!mark_unknown(&mut blind, &mut bytes, key, "another cause").unwrap());
+        bytes = MAX_BYTES as usize;
+        assert!(
+            mark_unknown(
+                &mut blind,
+                &mut bytes,
+                ("alice".into(), "SELECT".into()),
+                "partial revoke"
+            )
+            .is_err()
+        );
+    }
     #[test]
     fn show_scope_keeps_global_wildcards_but_rejects_prefixes_and_bad_quoting() {
         for s in [

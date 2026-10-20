@@ -47,6 +47,10 @@ h3{font-size:15px}
 .notice.warning{border-left-color:var(--warn)}
 .notice.error{border-left-color:var(--error);color:var(--error)}
 .notice p{margin:6px 0}
+.observation-limits summary{font-weight:600}
+.observation-gap{border-top:1px solid var(--line);padding-top:10px;margin-top:10px;overflow-wrap:anywhere}
+.observation-entities{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.observation-gap .entity{white-space:normal;overflow-wrap:anywhere}
 .entity{display:inline-block;vertical-align:baseline;background:var(--chip);border:1px solid var(--line);border-radius:5px;padding:1px 6px;margin:3px;font:12px/1.65 ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere;max-width:100%;color:var(--text)}
 .log{border:1px solid var(--line);border-left:3px solid var(--accent);padding:13px 15px;margin:13px 0;border-radius:7px}
 .log.error{border-left-color:var(--error)}

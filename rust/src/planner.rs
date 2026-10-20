@@ -1,7 +1,7 @@
 use crate::{
     commands,
     config::Intent,
-    model::{self, Grant, Kinds, PlanInput, Unobserved},
+    model::{self, Grant, Kinds, ObservationGap, PlanInput, Unobserved},
 };
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -17,7 +17,10 @@ pub struct Finding {
 impl Finding {
     pub fn new(system: &str, title: &str, detail: String, entities: Vec<String>) -> Self {
         let level = match title {
-            "already covered by a broader grant" | "deny without a matching allow" => "info",
+            "already covered by a broader grant"
+            | "deny without a matching allow"
+            | "excluded observation scope"
+            | "unsupported observation scope" => "info",
             "unobserved scope"
             | "system could not be read"
             | "auth plane unreachable"
@@ -96,9 +99,9 @@ pub fn build(
         .iter()
         .map(|k| (*declared[k]).clone())
         .collect();
-    let blind = |g: &Grant| unknown.iter().any(|u| u.covers(g));
+    let blind = |g: &Grant| unknown.iter().any(|u| u.blocks_change(g));
     for u in unknown {
-        let n = unverified.iter().filter(|g| u.covers(g)).count();
+        let n = unverified.iter().filter(|g| u.blocks_change(g)).count();
         let subjects = if u.subjects.is_empty() {
             String::new()
         } else {
@@ -108,8 +111,14 @@ pub fn build(
             )
         };
         let mut entities: Vec<_> = u.subjects.iter().cloned().collect();
-        entities.extend(u.prefixes.clone());
-        findings.push(Finding::new(&u.system,"unobserved scope",format!("{subjects}{} could not be read ({}). {n} intent grant(s) there are unverified — shown as '?', not planned. 'no access' and 'could not check' are different facts.",u.prefixes.join(", "),u.note),entities));
+        entities.extend(u.prefixes.iter().filter(|p| !p.is_empty()).cloned());
+        entities.extend(u.privileges.iter().cloned());
+        let title = match u.category {
+            ObservationGap::Excluded if n == 0 => "excluded observation scope",
+            ObservationGap::Unsupported if n == 0 => "unsupported observation scope",
+            _ => "unobserved scope",
+        };
+        findings.push(Finding::new(&u.system,title,format!("{subjects}{}: {}. {n} intent grant(s) there are unverified — shown as '?', not planned. 'no access' and 'could not check' are different facts.",u.prefixes.join(", "),u.note),entities));
     }
     let mut visible: BTreeMap<(&str, &str), Vec<&Grant>> = BTreeMap::new();
     for g in observed.iter().filter(|g| !blind(g)) {
@@ -246,5 +255,45 @@ pub fn build(
         unverified,
         groups: groups.into_values().collect(),
         s3_previews: Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod observation_tests {
+    use super::*;
+    #[test]
+    fn expected_gaps_are_informational_until_declared_intent_is_unverified() {
+        let gap = Unobserved {
+            system: "postgres".into(),
+            prefixes: vec!["table:scratch.".into()],
+            category: ObservationGap::Excluded,
+            note: "Configured exclusion".into(),
+            ..Default::default()
+        };
+        let mut intent = Intent {
+            grants: BTreeSet::new(),
+            managed: BTreeSet::new(),
+            managed_systems: BTreeSet::new(),
+            naming_synonyms: vec![],
+        };
+        let report = build(
+            &intent,
+            &BTreeSet::new(),
+            std::slice::from_ref(&gap),
+            &Kinds::new(),
+            vec![],
+        );
+        assert!(!report.observation_complete);
+        assert_eq!(report.findings[0].level, "info");
+        intent.grants.insert(Grant::new(
+            "postgres",
+            "alice",
+            "table:scratch.public.events",
+            "SELECT",
+        ));
+        let report = build(&intent, &BTreeSet::new(), &[gap], &Kinds::new(), vec![]);
+        assert_eq!(report.unverified.len(), 1);
+        assert!(report.changes.is_empty());
+        assert_eq!(report.findings[0].level, "error");
     }
 }

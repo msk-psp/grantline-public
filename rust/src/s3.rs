@@ -410,6 +410,7 @@ fn evaluate(ident: &Identity, system: &str) -> Result<Evaluation> {
             prefixes,
             subjects: BTreeSet::from([ident.name.clone()]),
             note: "unsupported IAM policy".into(),
+            ..Default::default()
         });
         return Ok((grants, findings, unknown, true));
     }
@@ -750,6 +751,7 @@ pub fn observe_with_live(adapter: &Adapter, base: &Path, system: &str, live: boo
                 prefixes: vec![String::new()],
                 subjects: BTreeSet::new(),
                 note: format!("enforced plane '{name}' unreadable: {reason}"),
+                ..Default::default()
             }),
             Err(_) => out.findings.push(Finding::new(
                 system,
@@ -765,6 +767,7 @@ pub fn observe_with_live(adapter: &Adapter, base: &Path, system: &str, live: boo
             prefixes: vec![String::new()],
             subjects: BTreeSet::new(),
             note: "Enforced S3 plane has no configuration".into(),
+            ..Default::default()
         });
     }
     if let Some(doc) = docs.get(&adapter.enforced) {
@@ -791,6 +794,7 @@ pub fn observe_with_live(adapter: &Adapter, base: &Path, system: &str, live: boo
                         prefixes: vec![String::new()],
                         subjects: BTreeSet::from([ident.name.clone()]),
                         note: "Invalid identity policy schema".into(),
+                        ..Default::default()
                     });
                 }
             }
@@ -809,6 +813,7 @@ pub fn observe_with_live(adapter: &Adapter, base: &Path, system: &str, live: boo
                 prefixes: vec![String::new()],
                 subjects: doc.gap_subjects.clone(),
                 note: "policy documents missing".into(),
+                ..Default::default()
             });
         }
         out.grants
