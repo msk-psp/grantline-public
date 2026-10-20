@@ -8,7 +8,7 @@ use std::{io::Read, time::Duration};
 use url::Url;
 
 pub fn sha(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    crate::hex(&Sha256::digest(bytes))
 }
 pub fn env(key: &str) -> Result<String> {
     std::env::var(key)

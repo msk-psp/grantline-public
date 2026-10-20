@@ -30,7 +30,7 @@ fn random() -> String {
     format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
 }
 fn hash(s: &str) -> String {
-    format!("{:x}", Sha256::digest(s.as_bytes()))
+    crate::hex(&Sha256::digest(s.as_bytes()))
 }
 fn mode() -> String {
     "local".into()

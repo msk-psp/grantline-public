@@ -534,7 +534,7 @@ fn binding(
         hash.update((part.len() as u64).to_be_bytes());
         hash.update(part);
     }
-    Ok(format!("{:x}", hash.finalize()))
+    Ok(crate::hex(&hash.finalize()))
 }
 type AclAtom = (String, String, String, String, bool);
 fn metadata(cat: &Catalog) -> Result<Value> {

@@ -5,7 +5,7 @@ use crate::{
     integrations::{self, GitHub, Patch},
     model::Grant,
 };
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::Sha256;
@@ -542,7 +542,7 @@ impl Workflow {
                 .map_err(|_| "Invalid Slack key")?;
         mac.update(format!("v0:{timestamp}:").as_bytes());
         mac.update(body);
-        let actual = format!("v0={:x}", mac.finalize().into_bytes());
+        let actual = format!("v0={}", crate::hex(&mac.finalize().into_bytes()));
         if !bool::from(actual.as_bytes().ct_eq(signature.as_bytes())) {
             return Err("Invalid Slack signature".into());
         }

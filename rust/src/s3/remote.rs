@@ -1,5 +1,5 @@
 use super::*;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use sha2::{Digest, Sha256};
 use std::{
     io::Read,
@@ -254,7 +254,7 @@ fn filer(http: &mut Http, system: &str) -> Result<Document> {
     merge_tree(ids, groups, policies, top, system)
 }
 fn sha(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    crate::hex(&Sha256::digest(bytes))
 }
 fn hmac(key: &[u8], data: &str) -> Vec<u8> {
     let mut mac = Hmac::<Sha256>::new_from_slice(key).expect("HMAC accepts any key length");

@@ -208,7 +208,7 @@ fn apply_inner(
         hash.update((b.len() as u64).to_be_bytes());
         hash.update(b);
     }
-    let plan_id = format!("{:x}", hash.finalize());
+    let plan_id = crate::hex(&hash.finalize());
     if write && restore.is_none() && expected != Some(&plan_id) {
         return Err("Remote IAM reviewed plan is stale; preview again".into());
     }
@@ -270,7 +270,7 @@ fn apply_inner(
 }
 
 fn digest(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    crate::hex(&Sha256::digest(bytes))
 }
 #[derive(Serialize, Deserialize)]
 struct Backup {

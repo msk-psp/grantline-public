@@ -45,7 +45,7 @@ impl Request {
             return Err("A request needs independent approvers.");
         }
         let plan = serde_json::to_string_pretty(&grant).map_err(|_| "Cannot encode plan.")?;
-        let hash = format!("{:x}", Sha256::digest(plan.as_bytes()));
+        let hash = crate::hex(&Sha256::digest(plan.as_bytes()));
         Ok(Self {
             id: Uuid::new_v4().simple().to_string(),
             created_at: chrono::Utc::now().to_rfc3339(),
@@ -96,7 +96,7 @@ impl Request {
         if self.status != Status::Approved {
             return Err("All approvals are required before proposing.");
         }
-        let hash = format!("{:x}", Sha256::digest(current_plan.as_bytes()));
+        let hash = crate::hex(&Sha256::digest(current_plan.as_bytes()));
         if hash != self.plan_hash || current_plan != self.plan {
             return Err("Plan changed; create a new request.");
         }
