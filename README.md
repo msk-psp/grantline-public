@@ -49,7 +49,7 @@ For real systems, mount your own configuration and persist runtime state; see
 [container configuration](docs/usage.md#containers). Pin a release tag or digest
 for deployments. The image runs as UID 10001 without Python or Node. Older release tags retain
 their original runtime; merging this change does not publish a new image.
-Build this version locally with `docker build -f Dockerfile.rust -t grantline-native:local .`.
+Build this version locally with `docker build -t grantline-native:local .`.
 
 ## Common commands
 
@@ -80,9 +80,9 @@ An unread scope is **unknown**, never “no access”. IAM writes require a sepa
 creation do not apply access. Declaration-based revokes are
 bounded by managed subjects and the systems the intent claims to describe.
 
-The Python reference remains available through `uv pip install -e .` and the
-original `Dockerfile`; its commands and configuration are documented in
-[usage](docs/usage.md). Do not share its approval state directory with native.
+The application and default container are Rust/Leptos. A minimal Python oracle
+lives only in [tests/reference](tests/reference/README.md) for differential checks;
+it has no service entry point and is excluded from container builds.
 
 ## License
 

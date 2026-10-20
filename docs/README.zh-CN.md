@@ -37,7 +37,7 @@ cargo +1.99.0 run --locked --manifest-path rust/Cargo.toml -- -c examples/demo/g
 
 此版本的发布工作流构建以 UID 10001 运行的 native Rust/WASM 镜像，不包含
 Python 或 Node 运行时。现有标签保留原有运行时；合并代码不会自动发布新镜像。
-本地构建：`docker build -f Dockerfile.rust -t grantline-native:local .`。
+本地构建：`docker build -t grantline-native:local .`。
 
 发布 GitHub Release 时，会在 GHCR 上发布 `linux/amd64` 和 `linux/arm64` 镜像。
 稳定版本同时更新 `latest`；预发布版本仅使用独立的版本标签。
@@ -80,8 +80,9 @@ native PostgreSQL 不需要 Python 驱动。
 每次写入都会先预览原生操作，并记录执行尝试和结果。
 基于声明的撤销仅限于受管理的账号，以及声明所描述的系统。
 
-Python 参考实现仍可通过 `uv pip install -e .` 和原有 `Dockerfile` 使用。
-不要让 Python 与 native 进程共用同一个审批存储目录。
+应用和默认容器使用 Rust/Leptos。最小 Python 参考代码仅保留在
+[tests/reference](../tests/reference/README.md)中用于差异验证，
+不提供服务入口，也不包含在容器镜像中。
 
 ## 许可证
 

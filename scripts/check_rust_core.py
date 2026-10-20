@@ -11,7 +11,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "tests/reference"))
 from check_rust_parity import Commands, atom, cases  # noqa: E402
 
 from grantline import diff, graph, intent, snapshot  # noqa: E402
