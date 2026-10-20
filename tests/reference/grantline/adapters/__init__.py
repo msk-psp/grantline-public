@@ -177,23 +177,8 @@ def _file_ready(path, what: str) -> tuple[bool, str]:
 
 
 def env(cfg: dict, key: str) -> str:
-    """Resolve '<key>_env' in adapter config to its environment variable value.
-    Credentials never live in config files."""
-    var = cfg.get(key)
-    if not var:
-        raise SystemExit(f"adapter config missing '{key}' (env var name)")
-    val = os.environ.get(var)
-    if not val:
-        # 자격을 설정 파일에 두지 않는 것이 원칙이라면, **어디에 두는지**는 도구가
-        # 말해야 한다. 이 메시지가 없을 때는 `serve.sh` 같은 저장소 밖 래퍼를 아는
-        # 사람만 CLI 를 쓸 수 있었다.
-        raise SystemExit(
-            f"environment variable {var} is not set.\n"
-            f"Credentials never live in the config — the config only names the variable.\n"
-            f"Set it for this command, or put the exports in a launcher next to your config:\n"
-            f"    {var}=… grantline -c <config> <command>\n"
-            f"See `env_file` in the config to have grantline read them from a file instead.")
-    return val
+    """The test oracle cannot resolve service credentials."""
+    raise RuntimeError("Network credentials are disabled in the test-only reference")
 
 
 def build(system: str, cfg: dict) -> Adapter:

@@ -1,11 +1,8 @@
 # Allowlist: local configuration, credentials, Git history and runtime state stay out.
 **
 !Dockerfile
-!pyproject.toml
 !README.md
 !LICENSE
-!grantline/
-!grantline/**
 !examples/
 !examples/demo/
 !examples/demo/**

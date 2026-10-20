@@ -1,17 +1,33 @@
-FROM python:3.13-slim@sha256:bb2988715db2cf7ace7b53f38f3cffbef7c7046a656bee66245eb0ed386e2e81
+# syntax=docker/dockerfile:1
+FROM rust:1.99-slim-bookworm@sha256:a24e292b4af7bdee351a31d3a6379972a5652f0ea22a1b6d6883324ac4f5097c AS build
+WORKDIR /src
+RUN rustup target add wasm32-unknown-unknown \
+    && cargo install --locked wasm-bindgen-cli --version 0.2.129
+COPY rust ./rust
+COPY scripts/build_rust_ui.sh scripts/collect_rust_licenses.sh ./scripts/
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/src/rust/target,sharing=locked \
+    cargo build --locked --manifest-path rust/Cargo.toml --release \
+    && scripts/build_rust_ui.sh \
+    && mkdir /out && cp rust/target/release/grantline-rs /out/grantline-rs \
+    && strip /out/grantline-rs \
+    && scripts/collect_rust_licenses.sh /out/licenses
 
+FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
 LABEL org.opencontainers.image.source="https://github.com/msk-psp/grantline-public" \
-      org.opencontainers.image.description="Untangle access. Follow the grants. PostgreSQL, ClickHouse and S3 permission console." \
+      org.opencontainers.image.description="Untangle access. Follow the grants. Native Rust and Leptos permission console." \
       org.opencontainers.image.licenses="Apache-2.0"
-ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 WORKDIR /app
-COPY pyproject.toml README.md LICENSE ./
-COPY grantline ./grantline
-RUN pip install --no-cache-dir '.[postgres]' \
-    && groupadd --gid 10001 grantline \
-    && useradd --uid 10001 --gid grantline --create-home grantline
-COPY --chown=10001:10001 examples/demo ./demo
+COPY --from=build /out/grantline-rs /usr/local/bin/grantline-rs
+COPY --from=build /src/rust/pkg /app/pkg
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY examples/demo /app/demo
+COPY LICENSE /app/LICENSE
+COPY rust/ui/assets/LOGO-NOTICES.txt /app/LOGO-NOTICES.txt
+COPY --from=build /out/licenses /app/third-party-licenses
+RUN mkdir /data && chown 10001:10001 /data && chmod 0700 /data
+ENV USER=grantline GRANTLINE_UI_DIR=/app/pkg
 USER 10001:10001
 EXPOSE 8420
-ENTRYPOINT ["grantline"]
-CMD ["-c", "/app/demo/grantline.toml", "serve", "--host", "0.0.0.0", "--port", "8420"]
+ENTRYPOINT ["grantline-rs"]
+CMD ["-c", "/app/demo/grantline.toml", "serve", "--host", "0.0.0.0", "--port", "8420", "--public-preview"]

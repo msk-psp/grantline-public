@@ -136,12 +136,16 @@ may buffer an individual wire message before the row byte check; this is not a
 memory-isolation boundary against a malicious server.
 
 Unrepresentable dotted/`@`/wildcard resource components obscure the affected DB
-(or the cluster for DB identifiers). Column ACLs obscure table scopes in their
-schema. Global default table ACLs obscure all default scopes in that DB.
+(or the cluster for DB identifiers). Column ACLs are observed as
+`column:database.schema.table.column` for SELECT/INSERT/UPDATE/REFERENCES,
+preserving grantors without hiding table ACLs in the schema. Column-only access
+does not imply a table-wide grant; exact parent table grants cover their columns.
+Column probes use fixed `has_column_privilege` queries and column writers remain
+unsupported. Global default table ACLs obscure all default scopes in that DB.
 Superusers, predefined roles and memberships with disabled INHERIT/SET options,
 including their dependants, remain unknown. Delegation options get findings;
 MEMBER and grant atoms do not model them. These safeguards intentionally exceed
-the Python reader. The target is DB/schema/table/default-table ACLs and role
+the Python reader. The target is DB/schema/table/column/default-table ACLs and role
 memberships; sequence/function/type ACLs, effective RLS, owner powers, target-user
 login/data access and a cluster-wide atomic snapshot are not represented.
 
@@ -746,13 +750,13 @@ CONNECT/schema USAGE, RLS and other access prerequisites need separate validatio
 Undo with newly reviewed inverse intent. Objects created while a default was
 active retain their assigned ACLs after the default is revoked. Inverse defaults
 restore neither those object ACLs nor data or raw default-row OIDs. Official
-PostgreSQL 17.11 tests verify actual future SELECT/INSERT, other creator/schema/DB
+PostgreSQL 18.6 tests verify actual future SELECT/INSERT, other creator/schema/DB
 isolation, quoted SQL, inverse semantics, stale catalog/identity refusal and full
 later-error/timeout/unexpected-side-effect rollback. Production, PostgreSQL 16,
 COMMIT network loss remain unverified; private CA/TLS/hostname checks run in
 `check_rust_writer_parity.py --kind pg`. See PostgreSQL's
-[ALTER DEFAULT PRIVILEGES](https://www.postgresql.org/docs/17/sql-alterdefaultprivileges.html)
-and [pg_default_acl](https://www.postgresql.org/docs/17/catalog-pg-default-acl.html).
+[ALTER DEFAULT PRIVILEGES](https://www.postgresql.org/docs/18/sql-alterdefaultprivileges.html)
+and [pg_default_acl](https://www.postgresql.org/docs/18/catalog-pg-default-acl.html).
 
 ### Apply canonical role memberships (R3g3)
 
@@ -900,8 +904,7 @@ this is not production authentication. The simulated inbox contains local
 approval links; never use real credentials or shared hosting with this app.
 
 State is memory-only (at most 100 requests) and resets on restart. The port can
-be changed with `--port 8424`. The existing Python console and playground use
-their own ports and are unaffected.
+be changed with `--port 8424`. The former Python console and playground are retired.
 
 ## What is implemented
 
@@ -946,7 +949,8 @@ CLI file application, service reload and effective access are separate states.
 
 ## Check the boundary
 
-From the repository root (Python is used only as a development oracle):
+From the repository root (Python 3.11+ is used only for verification tools and
+the isolated oracle under `tests/reference`):
 
 ```sh
 cargo fmt --manifest-path rust/Cargo.toml --check
@@ -989,10 +993,13 @@ only the HTTP protocol suite runs.
 
 The PostgreSQL suite checks missing/invalid DSNs, stalled authentication deadlines,
 offline/import isolation, secret redaction and a digest-pinned official PostgreSQL
-17.11 server. It verifies PUBLIC/owner ACLs, raw quoted names and grantors, nested
+18.6 server. Every PostgreSQL Docker suite asserts major version 18. It verifies PUBLIC/owner ACLs, raw quoted names and grantors, nested
 roles, per-DB failures/exclusions, frozen ACLs, global/column/default boundaries,
 graphs, snapshots, TLS downgrade refusal and read-only DDL failure. Its disposable
 container is removed afterwards; no production/staging server is contacted.
+The reader/probe suite also runs against a digest-pinned pg_duckdb PostgreSQL 18
+distribution. `--image` selects an additional isolated PostgreSQL 18 image; it
+does not bypass the major-version assertion.
 
 The S3 network suite checks three loopback HTTP readers, SigV4 against the Python
 oracle, Filer/IAM pagination, malformed/failed/truncated responses, source and

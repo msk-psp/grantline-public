@@ -39,7 +39,7 @@ cargo +1.99.0 run --locked --manifest-path rust/Cargo.toml -- -c examples/demo/g
 이 버전의 릴리스 워크플로는 UID 10001로 실행되는 native Rust·WASM 이미지를
 빌드합니다. Python·Node 런타임은 없습니다. 기존 태그의 런타임은 유지하며,
 머지만으로 새 이미지가 발행되지는 않습니다. 현재 소스의 로컬 빌드는
-`docker build -f Dockerfile.rust -t grantline-native:local .`을 사용하세요.
+`docker build -t grantline-native:local .`을 사용하세요.
 
 GitHub Release를 발행하면 GHCR에 `linux/amd64`·`linux/arm64` 이미지를 배포합니다.
 안정 릴리스는 `latest`도 갱신하며, 사전 릴리스는 해당 버전 태그만 사용합니다.
@@ -82,8 +82,9 @@ rust/target/debug/grantline-rs -c examples/demo/grantline.toml history  # 기록
 모든 쓰기는 원본 명령을 먼저 보여주고, 실행 시도와 결과를 감사 기록에 남깁니다.
 선언에 따른 권한 회수는 관리 대상으로 지정한 계정과 선언이 다루는 시스템으로 제한됩니다.
 
-Python 참조 구현은 `uv pip install -e .`과 기존 `Dockerfile`로 유지합니다.
-Python과 native 프로세스가 같은 승인 저장소를 함께 사용하면 안 됩니다.
+서비스와 기본 컨테이너는 Rust/Leptos입니다. 최소 Python 참조 코드는
+[tests/reference](../tests/reference/README.md)에 비교 검증용으로만 남기며,
+서비스 진입점과 컨테이너 이미지에는 포함하지 않습니다.
 
 ## 라이선스
 

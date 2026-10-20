@@ -11,7 +11,7 @@ import time
 import uuid
 from pathlib import Path
 
-from check_rust_postgres import IMAGE, MARKER, ROOT
+from check_rust_postgres import IMAGE, MARKER, ROOT, assert_postgres_major
 
 
 def config_at(root):
@@ -156,6 +156,7 @@ def docker_test(binary, context):
             time.sleep(0.2)
         else:
             raise RuntimeError('Disposable PostgreSQL failed to start')
+        assert_postgres_major(sql)
         sql('CREATE ROLE gl_owner LOGIN; CREATE ROLE gl_user LOGIN; CREATE ROLE gl_group; CREATE ROLE gl_other; CREATE DATABASE gl_data OWNER gl_owner;', db='postgres')
         sql('CREATE TABLE a_target(a int); CREATE TABLE old_target(a int); CREATE TABLE "odd"";table"(a int); GRANT SELECT ON old_target TO gl_user;', user='gl_owner')
         port = json.loads(subprocess.check_output([*docker, 'inspect', name], text=True))[0]['NetworkSettings']['Ports']['5432/tcp'][0]['HostPort']

@@ -252,7 +252,7 @@ fn grants_table(lang: &str, rows: Vec<Grant>) -> AnyView {
 <td>
 <a href=format!("/resource?resource={}&system={}",encode(&g.resource),encode(&g.system))>{g.resource.clone()}</a>
 </td>
-<td>{badge(g.privilege.clone())}<div class="grant-actions">{["grant","revoke"].into_iter().map(|action|view!{<a href=format!("/act?system={}&subject={}&resource={}&priv={}&action={}&lang={}",encode(&g.system),encode(&g.subject),encode(&g.resource),encode(&g.privilege),action,encode(lang))>{tr(lang,if action=="grant"{"Grant"}else{"Revoke"})}</a>}).collect_view()}</div></td>
+<td>{badge(g.privilege.clone())}<div class="grant-actions">{(!g.resource.starts_with("column:")).then(||["grant","revoke"].into_iter().map(|action|view!{<a href=format!("/act?system={}&subject={}&resource={}&priv={}&action={}&lang={}",encode(&g.system),encode(&g.subject),encode(&g.resource),encode(&g.privilege),action,encode(lang))>{tr(lang,if action=="grant"{"Grant"}else{"Revoke"})}</a>}).collect_view())}{g.resource.starts_with("column:").then(||view!{<span class="muted">{tr(lang,"Read only")}</span>})}</div></td>
 <td><span>{g.source}</span>{g.grantor.map(|who|view!{<span class="muted">" · "{tr(lang,"Grantor")}": "<code class="entity">{who}</code></span>})}</td>
 </tr>}).collect_view()}</tbody>
 </table>
