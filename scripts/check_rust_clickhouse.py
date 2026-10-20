@@ -127,9 +127,13 @@ def protocol(binary):
                 rows = [grant('demo'), grant('table-user', table='events'), grant('global-user', database=None),
                         grant('stale', database='dropped'), grant(None, 'base')]
                 if mode == 'column':
-                    rows[-1]['column'] = 'a'
+                    rows[-1].update(table='events', column='a')
                 if mode == 'partial':
                     rows[-1]['is_partial_revoke'] = 1
+                if mode == 'parameterized':
+                    rows[-1]['access_object'] = 'unsupported-source'
+                if mode == 'named-collection':
+                    rows[-1].update(access_type='NAMED COLLECTION', access_object='fixture_store', database=None)
                 if mode == 'missing-field':
                     del rows[0]['column']
                 if mode == 'invalid-flag':
@@ -204,12 +208,25 @@ def protocol(binary):
             assert len(state['calls']) == calls
             assert run(binary, config, endpoint, 'plan', '--observed', recorded['path'], '--json', check=False).returncode != 0
             assert len(state['calls']) == calls
-            for mode in ['column', 'partial']:
+            state['mode'] = 'column'
+            plan = run(binary, config, endpoint, 'plan', '--json')
+            assert not plan['unobserved']
+            assert any(g['subject'] == 'base' and g['resource'] == 'column:analytics.events.a' for g in plan['observed'])
+            state['mode'] = 'named-collection'
+            plan = run(binary, config, endpoint, 'plan', '--json')
+            assert not plan['unobserved']
+            assert any(g['subject'] == 'base' and g['resource'] == 'named_collection:fixture_store' for g in plan['observed'])
+            for mode in ['partial', 'parameterized']:
                 state['mode'] = mode
                 plan = run(binary, config, endpoint, 'plan', '--json')
                 assert {s for u in plan['unobserved'] for s in u['subjects']} == {'base', 'reader', 'demo'}, mode
-                assert not any(g['subject'] in {'base', 'reader', 'demo'} for g in plan['observed'])
+                assert all(u['category'] == 'unsupported' and u['privileges'] == ['SELECT'] for u in plan['unobserved'])
+                assert not any(g['subject'] in {'base', 'reader', 'demo'} and g['priv'] == 'SELECT' for g in plan['observed'])
+                assert any(g['subject'] == 'demo' and g['priv'] == 'MEMBER' for g in plan['observed'])
                 assert plan['unverified'] and not any(c['grant']['subject'] == 'demo' for c in plan['changes'])
+                recorded = run(binary, config, endpoint, 'snapshot', '--json')
+                imported = run(binary, config, endpoint, 'plan', '--observed', recorded['path'], '--json', live=False)
+                assert imported['unobserved'] == plan['unobserved'] and imported['observed'] == plan['observed']
             cases = ['restricted', 'principal-kind', 'failed-after-roles', 'missing-field', 'invalid-flag', 'prefix', 'row-limit',
                      'redirect', 'http403', 'bad-json', 'bad-count', 'exception-header', 'embedded-exception', 'hidden-limit', 'byte-limit', 'timeout']
             for mode in cases:
@@ -322,7 +339,9 @@ GRANT SELECT ON system.databases TO gl_observer;
 CREATE USER gl_restricted IDENTIFIED WITH no_password SETTINGS readonly=2;
 CREATE ROLE gl_base, gl_nested, gl_column_role;
 CREATE USER gl_subject, gl_table, gl_global, gl_stale, gl_column, gl_partial;
+CREATE NAMED COLLECTION gl_store AS url='http://127.0.0.1:1/fixture';
 GRANT SELECT ON gl_data.* TO gl_base;
+GRANT NAMED COLLECTION ON gl_store TO gl_base;
 GRANT gl_base TO gl_nested;
 GRANT gl_nested TO gl_subject;
 GRANT SELECT ON gl_data.events TO gl_table;
@@ -333,6 +352,7 @@ GRANT SELECT(a) ON gl_data.events TO gl_column_role;
 GRANT gl_column_role TO gl_column;
 GRANT SELECT ON *.* TO gl_partial;
 REVOKE SELECT ON gl_data.events FROM gl_partial;
+GRANT INSERT ON gl_data.events TO gl_partial;
 ''')
         hostport = subprocess.check_output([*docker, 'port', name, '8123'], text=True).strip()
         assert hostport.startswith('127.0.0.1:')
@@ -351,9 +371,13 @@ REVOKE SELECT ON gl_data.events FROM gl_partial;
             assert ('gl_global', 'global:*', 'SELECT') in observed
             assert ('gl_stale', 'db:gl_dropped', 'SELECT') in observed
             unknown = {s for u in plan['unobserved'] for s in u['subjects']}
-            assert unknown == {'gl_column_role', 'gl_column', 'gl_partial'}, unknown
-            assert not any(g[0] in unknown for g in observed)
-            assert not any(c['grant']['subject'] in unknown for c in plan['changes'])
+            assert unknown == {'gl_partial'}, unknown
+            assert ('gl_column_role', 'column:gl_data.events.a', 'SELECT') in observed
+            assert ('gl_column', 'role:gl_column_role', 'MEMBER') in observed
+            assert ('gl_base', 'named_collection:gl_store', 'NAMED COLLECTION') in observed
+            assert ('gl_partial', 'table:gl_data.events', 'INSERT') in observed
+            assert not any(g[0] in unknown and g[2] == 'SELECT' for g in observed)
+            assert not any(c['grant']['subject'] in unknown and c['grant']['priv'] in {'SELECT', 'MEMBER', 'ALL'} for c in plan['changes'])
             assert any(f['title'] == 'stale grants on dropped database' and 'gl_stale' in f['entities'] for f in plan['findings'])
             restricted = run(binary, config, endpoint.replace('gl_observer', 'gl_restricted'), 'plan', '--json')
             assert not restricted['observed'] and not restricted['changes'] and restricted['unobserved']

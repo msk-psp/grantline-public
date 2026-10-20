@@ -83,7 +83,7 @@ pub(super) fn accounts(b: &Bootstrap) -> AnyView {
         let label = g.names.get(&name).map(|label| format!("{name} ({label})")).unwrap_or_else(|| name.clone());
         view!{<tr><td><a class="entity" href=format!("/account?subject={}&system={}&environment={}&lang={}",encode(&name),encode(&b.service),encode(&b.environment),encode(&b.lang))>{label}</a></td>
         <td>{systems.into_iter().collect::<Vec<_>>().join(", ")}</td><td>{count}</td>
-        <td><span class=if unknown{"badge warning"}else{"badge"}>{tr(&b.lang,if unknown{"Unknown"}else{"Observed"})}</span></td></tr>}
+        <td><span class=if unknown&&count==0{"badge warning"}else{"badge"}>{tr(&b.lang,if unknown&&count==0{"Unknown"}else if unknown{"Partially observed"}else{"Observed"})}</span></td></tr>}
     }).collect_view()}</tbody></table></div>
     {limited.then(||view!{<p class="notice">{tr(&b.lang,"Rows are limited; narrow the filter to see more.")}</p>})}}.into_any()
 }

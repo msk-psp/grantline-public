@@ -2,6 +2,7 @@
 mod details;
 pub mod i18n;
 mod map;
+mod observation;
 use i18n::tr;
 use leptos::prelude::*;
 use map::PermissionMap;
@@ -99,6 +100,7 @@ pub struct Plan {
     pub findings: Vec<Finding>,
     pub observation_complete: bool,
     pub commands_complete: bool,
+    pub unverified: Vec<Grant>,
 }
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
@@ -106,6 +108,9 @@ pub struct Unread {
     pub system: String,
     pub note: String,
     pub subjects: BTreeSet<String>,
+    pub prefixes: Vec<String>,
+    pub privileges: BTreeSet<String>,
+    pub category: String,
 }
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
@@ -323,9 +328,7 @@ pub fn Console(bootstrap: Bootstrap) -> impl IntoView {
     <h1>{tr(&b.lang,title)}</h1>
     </div>
     <a class="button secondary" href=b.refresh_url.clone()>{tr(&b.lang,"Refresh")}</a>
-    </div>{b.error.as_ref().map(|_|view!{<div role="alert" class="notice error">{tr(&b.lang,"Catalog unavailable; access is unknown.")}</div>})}{(!b.data.snapshot.unobserved.is_empty()).then(||view!{<div role="status" class="notice warning">
-    <strong>{tr(&b.lang,"Access is unknown for unread services.")}</strong>{b.data.snapshot.unobserved.iter().map(|u|view!{<p>
-    <code class="entity">{u.system.clone()}</code>{u.note.clone()}{u.subjects.iter().map(|s|view!{<code class="entity">{s.clone()}</code>}).collect_view()}</p>}).collect_view()}</div>})}{(!b.interactive).then(||view!{<div class="notice">{tr(&b.lang,"Interactive bundle unavailable; build the UI to enable interactions.")}</div>})}{(!matches!(b.page.as_str(),"history"|"approvals"|"act")).then(||view!{<form class="filters" method="get">
+    </div>{b.error.as_ref().map(|_|view!{<div role="alert" class="notice error">{tr(&b.lang,"Catalog unavailable; access is unknown.")}</div>})}{observation::notices(&b)}{(!b.interactive).then(||view!{<div class="notice">{tr(&b.lang,"Interactive bundle unavailable; build the UI to enable interactions.")}</div>})}{(!matches!(b.page.as_str(),"history"|"approvals"|"act")).then(||view!{<form class="filters" method="get">
     <label>
     <span class="sr-only">{tr(&b.lang,"Search")}</span>
     <input name="q" value=b.query.clone() placeholder=tr(&b.lang,"Search")/>
@@ -354,7 +357,9 @@ fn services(b: &Bootstrap) -> AnyView {
         && (query.is_empty() || name.to_lowercase().contains(&query) || b.data.plan.findings.iter().any(|f|f.system.as_str()==name.as_str()&&matches(f)))
     }).map(|name| {
         let logs:Vec<_>=b.data.plan.findings.iter().filter(|f|f.system==*name&&(query.is_empty()||name.to_lowercase().contains(&query)||matches(f))).cloned().collect();
-        let unknown=b.data.snapshot.unobserved.iter().any(|u|u.system==*name);
+        let gaps:Vec<_>=b.data.snapshot.unobserved.iter().filter(|u|u.system==*name).collect();
+        let unknown=gaps.iter().any(|u|!u.is_limitation()&&u.subjects.is_empty()&&u.privileges.is_empty()&&u.prefixes.iter().any(|p|p.is_empty()));
+        let partial=!gaps.is_empty();
         let kind=b.data.service_kinds.get(name).map(String::as_str).unwrap_or("");
         let icon=match kind {
             "postgres"=>view!{<img class="service-icon" src="/static/postgresql.png" alt="PostgreSQL"/>}.into_any(),
@@ -362,14 +367,18 @@ fn services(b: &Bootstrap) -> AnyView {
             _=>view!{<span class="service-icon clickhouse" aria-hidden="true">"▥"</span>}.into_any()
         };
         view!{<section class="card"><div class="service-heading">{icon}<h2>{name.clone()}</h2>
-        <span class=if unknown{"badge warning"}else{"badge"}>{tr(&b.lang,if unknown{"Unknown"}else{"Observed"})}</span></div>
+        <span class=if unknown{"badge warning"}else{"badge"}>{tr(&b.lang,if unknown{"Unknown"}else if partial{"Partially observed"}else{"Observed"})}</span></div>
         <p class="muted">{b.data.snapshot.ts.clone()}</p>{findings(&b.lang,&logs)}</section>}
     }).collect_view();
     view!{{cards.is_empty().then(||view!{<p class="empty">{tr(&b.lang,"No results")}</p>})}<div class="cards">{cards}</div>}.into_any()
 }
 
-fn matrix_table(lang: &str, rows: &[Grant]) -> AnyView {
-    let subjects: BTreeSet<_> = rows.iter().map(|g| g.subject.clone()).collect();
+fn matrix_table(lang: &str, rows: &[Grant], gaps: &[Unread]) -> AnyView {
+    let subjects: BTreeSet<_> = rows
+        .iter()
+        .map(|g| g.subject.clone())
+        .chain(gaps.iter().flat_map(|u| u.subjects.iter().cloned()))
+        .collect();
     let columns: BTreeSet<_> = rows
         .iter()
         .map(|g| (g.system.clone(), g.resource.clone()))
@@ -392,7 +401,7 @@ fn matrix_table(lang: &str, rows: &[Grant]) -> AnyView {
             </th>}
         })
         .collect_view();
-    let body=subjects.into_iter().take(150).map(|s|{let cells=columns.iter().map(|(sys,res)|{let ps:Vec<_>=index.get(&(s.as_str(),sys.as_str(),res.as_str())).into_iter().flatten().map(|p|badge(p.clone())).collect();view!{<td>{if ps.is_empty(){view!{<span class="muted">"—"</span>}.into_any()}else{ps.into_view().into_any()}}</td>}}).collect_view();view!{<tr>
+    let body=subjects.into_iter().take(150).map(|s|{let cells=columns.iter().map(|(sys,res)|{let ps:Vec<_>=index.get(&(s.as_str(),sys.as_str(),res.as_str())).into_iter().flatten().map(|p|badge(p.clone())).collect();let unknown=gaps.iter().any(|u|u.system==*sys&&(u.subjects.is_empty()||u.subjects.contains(&s))&&u.prefixes.iter().any(|p|res.starts_with(p))&&(!res.starts_with("role:")||u.privileges.is_empty()||u.privileges.contains("MEMBER")));view!{<td>{if ps.is_empty()&&!unknown{view!{<span class="muted">"—"</span>}.into_any()}else{view!{{ps}{unknown.then(||view!{<span class="badge warning" title=tr(lang,"Unknown") aria-label=tr(lang,"Unknown")>"?"</span>})}}.into_any()}}</td>}}).collect_view();view!{<tr>
 <th scope="row"><a href=format!("/account?subject={}&lang={}",encode(&s),encode(lang))>{s.clone()}</a></th>{cells}</tr>}}).collect_view();
     view!{<div class="table-scroll matrix-scroll" tabindex="0" role="region" aria-label=tr(lang,"Matrix")>
 <table class="matrix">
@@ -405,6 +414,21 @@ fn matrix_table(lang: &str, rows: &[Grant]) -> AnyView {
 </div>{limited.then(||view!{<p class="notice">{tr(lang,"Rows are limited; narrow the filter to see more.")}</p>})}}.into_any()
 }
 fn matrix_page(b: &Bootstrap) -> AnyView {
+    let gaps: Vec<_> = b
+        .data
+        .snapshot
+        .unobserved
+        .iter()
+        .filter(|u| {
+            (b.service.is_empty() || u.system == b.service)
+                && (b.environment.is_empty()
+                    || b.data
+                        .environments
+                        .get(&b.environment)
+                        .is_some_and(|ss| ss.contains(&u.system)))
+        })
+        .cloned()
+        .collect();
     let observed: Vec<_> = b
         .data
         .plan
@@ -421,9 +445,9 @@ fn matrix_page(b: &Bootstrap) -> AnyView {
         .cloned()
         .collect();
     view! {<section class="card">
-    <h2>{tr(&b.lang,"Observed grants")}</h2>{matrix_table(&b.lang,&observed)}</section>
+    <h2>{tr(&b.lang,"Observed grants")}</h2>{matrix_table(&b.lang,&observed,&gaps)}</section>
     <section class="card">
-    <h2>{tr(&b.lang,"Declared grants")}</h2>{matrix_table(&b.lang,&declared)}</section>}
+    <h2>{tr(&b.lang,"Declared grants")}</h2>{matrix_table(&b.lang,&declared,&gaps)}</section>}
     .into_any()
 }
 fn changes(b: &Bootstrap) -> AnyView {
@@ -673,6 +697,38 @@ pub fn hydrate() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn matrix_shows_unknown_cells_without_hiding_known_memberships() {
+        Owner::new().with(|| {
+            let rows = vec![
+                Grant {
+                    system: "clickhouse".into(),
+                    subject: "alice".into(),
+                    resource: "table:demo.events".into(),
+                    privilege: "SELECT".into(),
+                    ..Default::default()
+                },
+                Grant {
+                    system: "clickhouse".into(),
+                    subject: "bob".into(),
+                    resource: "role:reader".into(),
+                    privilege: "MEMBER".into(),
+                    ..Default::default()
+                },
+            ];
+            let gaps = vec![Unread {
+                system: "clickhouse".into(),
+                subjects: BTreeSet::from(["bob".into()]),
+                prefixes: vec![String::new()],
+                privileges: BTreeSet::from(["SELECT".into()]),
+                category: "unsupported".into(),
+                ..Default::default()
+            }];
+            let html = matrix_table("en", &rows, &gaps).to_html();
+            assert!(html.contains("Unknown") && html.contains("MEMBER"));
+            assert_eq!(html.matches("aria-label=\"Unknown\"").count(), 1);
+        });
+    }
     #[test]
     fn resource_hover_excludes_siblings_and_terminates_cycles() {
         let g = Graph {

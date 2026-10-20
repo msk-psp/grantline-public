@@ -229,6 +229,8 @@ GRANT SELECT ON columns.visible TO gl_base;
             assert not any(u['note'].startswith('Column privileges cannot') for u in plan['unobserved'])
             assert any('table:gl_blocked.' in u['prefixes'] for u in plan['unobserved'])
             assert any('table:gl_skip.' in u['prefixes'] for u in plan['unobserved'])
+            assert all(u['category'] == 'excluded' for u in plan['unobserved'] if 'table:gl_skip.' in u['prefixes'])
+            assert all(u['category'] == 'unread' for u in plan['unobserved'] if 'table:gl_blocked.' in u['prefixes'])
             assert not any(c['grant']['resource'].startswith(('table:gl_blocked.', 'table:gl_skip.')) for c in plan['changes'])
             assert any(f['title'] == 'frozen ACL (owner locked out)' and 'gl_data.public.frozen' in f['entities'] and f['system'] == 'pg-test' for f in plan['findings'])
             assert any(f['title'] == 'grant option is not modelled' for f in plan['findings'])

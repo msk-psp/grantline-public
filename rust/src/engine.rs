@@ -60,6 +60,10 @@ struct Unread {
     note: String,
     #[serde(default)]
     subjects: std::collections::BTreeSet<String>,
+    #[serde(default)]
+    category: crate::model::ObservationGap,
+    #[serde(default)]
+    privileges: BTreeSet<String>,
 }
 #[derive(Clone)]
 pub struct Observation {
@@ -76,6 +80,7 @@ fn unread(system: &str, note: &str) -> Unobserved {
         prefixes: vec![String::new()],
         subjects: Default::default(),
         note: note.into(),
+        ..Default::default()
     }
 }
 
@@ -276,6 +281,8 @@ fn observe_one(
                 prefixes: u.prefixes,
                 note: crate::snapshot::redact(&u.note),
                 subjects: u.subjects,
+                category: u.category,
+                privileges: u.privileges,
             }));
         kinds.extend(fixture.kinds);
         routes.extend(

@@ -865,3 +865,27 @@ tests and pg_duckdb PostgreSQL 18.4 catalog/probe tests.
 PostgreSQL special roles and ClickHouse negative/parameterized grants retain
 their existing unknown semantics; retiring Python does not establish parity for
 those unsupported scopes. Operational rollout and live comparisons are separate.
+
+## R10 — Observation limits and scoped ClickHouse unknowns {#R10}
+
+Status: implemented; isolated verification complete, PR checks pending. Separate configured
+exclusions and unsupported capability semantics from actual reader failures in the
+console. Collapse known limitations by default, retain affected service/subjects,
+privileges and resource prefixes, and keep unverified intent visible. Preserve
+four-locale labels and show unknown matrix cells explicitly rather than as absent.
+
+Observe ClickHouse column and named collection use grants with exact resource
+types. Unsupported negative or ambiguous grants keep the affected privilege and
+role dependants unknown while unrelated observed facts remain visible. Do not
+plan changes to affected privileges or memberships that could transfer unknown
+access. Bound propagation and retain an example source cause. This stage does not
+fully evaluate partial revokes or PostgreSQL special capabilities.
+
+Acceptance: native/SSR/WASM checks, fictional HTTP transport and official isolated
+ClickHouse/PostgreSQL 18 tests cover positive scope preservation, unknown
+propagation, snapshot round trips and fail-closed plans. Public privacy checks
+must pass. No production IAM modification or operational image promotion is part
+of this implementation. Validation passed: 68 native workspace tests, Clippy,
+SSR/WASM with four locales, official ClickHouse 26.6.2.160 and PostgreSQL 18.6,
+snapshot/history/core differential cases and native runtime checks. Next action:
+review CI and merge the scoped PR; release/image promotion remains separate.

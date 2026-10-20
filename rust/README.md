@@ -80,8 +80,13 @@ Responses and transport errors are withheld from diagnostics to prevent echoing
 credentials. HTTPS uses verified rustls certificates with bundled Mozilla roots;
 a configured `ca_bundle_env` supplies verified private CA roots. Isolated HTTPS tests cover CA and hostname refusal.
 
-Column grants, partial revokes, parameterized/ambiguous scopes and their role
-dependants remain unknown. GRANT/ADMIN delegation is reported separately because
+Column grants use exact `column:database.table.column` scopes, and named collection
+use grants use `named_collection:name`. Column-only access never implies a table grant.
+Partial revokes and unsupported parameterized/ambiguous scopes leave the affected
+privilege unknown, including role dependants; unrelated privileges and observed
+memberships remain visible. Membership changes that could transfer unknown access
+are not planned. The reason records an example source grant, not every unsupported row.
+GRANT/ADMIN delegation is reported separately because
 grant atoms do not model it. On older servers, `system.grants` can erase prefix
 wildcard information: bounded `SHOW GRANTS` batches check for it, and any prefix
 wildcard makes the instance unread. Global, DB, table and nested-role permissions
@@ -148,6 +153,13 @@ MEMBER and grant atoms do not model them. These safeguards intentionally exceed
 the Python reader. The target is DB/schema/table/column/default-table ACLs and role
 memberships; sequence/function/type ACLs, effective RLS, owner powers, target-user
 login/data access and a cluster-wide atomic snapshot are not represented.
+
+The console separates configured exclusions and unsupported privilege semantics
+into collapsed observation-limit details. Real reader failures and unverified
+intent remain visible. Neither collapsing a notice nor its informational level
+changes unknown access to allow/deny or enables an IAM change. Snapshot gap records
+add optional `category` and `privileges`; old records default to an unread gap
+covering all privileges. A service with scoped gaps is shown as partially observed.
 
 ### Verify PostgreSQL ACLs (R3e1)
 
