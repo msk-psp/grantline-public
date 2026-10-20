@@ -28,8 +28,8 @@ const provider=createServer(async(req,res)=>{
     const now=Math.floor(Date.now()/1000);
     const claims={iss:fault==='issuer'?'https://wrong.example':issuer,sub:fault==='subject'?'intruder':'reviewer',aud:fault==='audience'?'wrong':'fixture-console',exp:now+(fault==='expiry'?-300:300),iat:now,nonce:fault==='nonce'?'wrong':p.nonce};
     const body=b64({alg:'RS256',kid:'fixture'})+'.'+b64(claims);
-    let signature=sign('RSA-SHA256',Buffer.from(body),privateKey).toString('base64url');if(fault==='signature')signature='x'+signature.slice(1);
-    return json({access_token:'synthetic-oidc-access',token_type:'Bearer',expires_in:300,id_token:body+'.'+signature});
+    const signature=sign('RSA-SHA256',Buffer.from(body),privateKey);if(fault==='signature')signature[0]^=1;
+    return json({access_token:'synthetic-oidc-access',token_type:'Bearer',expires_in:300,id_token:body+'.'+signature.toString('base64url')});
   }
   res.writeHead(404);res.end();
 });

@@ -832,3 +832,34 @@ Isolated contract tests and official service/container checks establish software
 behavior, not a completed operational deployment. Real SSO/workspace/repository,
 service reload/effective access, published multiarchitecture release and traffic
 cutover remain separately authorized deployment acceptance checks.
+
+## R8 — Precise PostgreSQL column observation {#R8}
+
+Status: implemented; isolated verification complete, PR checks in progress. Column ACLs use
+`column:database.schema.table.column`, preserving subject, privilege, grantor and
+grant options without turning a column grant into a table grant. A column ACL
+must not obscure sibling table ACLs in the schema. Table privileges cover their
+exact child columns; the reverse never applies. Fixed read-only
+`has_column_privilege` probes support SELECT/INSERT/UPDATE/REFERENCES; column
+writes remain refused. Excluded/unread databases also obscure column scopes.
+
+Acceptance: isolated official PostgreSQL exercises inheritance, PUBLIC, quoted
+names, allowed and denied columns, table siblings, snapshot round trips and
+reader/write isolation. The active CI baseline is official PostgreSQL 18.6 with
+a runtime major-version assertion, plus the pinned pg_duckdb PostgreSQL 18
+reader/probe distribution check. Older 17.11 results above are historical.
+No production ACL change is part of this stage.
+
+## R9 — Retire the Python service {#R9}
+
+Status: planned after R8. Remove the Python application, package entry point,
+legacy container and application-only CI. Keep only the modules needed by the
+existing offline differential suites under `tests/reference`, and keep native
+provider/image/privacy verification scripts. The reference is test-only and is
+excluded from container builds. Default and release containers use Rust/Leptos.
+Keep the `Dockerfile.rust` path compatible with existing consumers.
+
+Next action: finish the R8 isolated verification and stack the R9 cleanup PR.
+PostgreSQL special roles and ClickHouse negative/parameterized grants retain
+their existing unknown semantics; retiring Python does not establish parity for
+those unsupported scopes. Operational rollout and live comparisons are separate.

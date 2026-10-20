@@ -55,6 +55,8 @@ jobs:
         run: python3 scripts/check_rust_clickhouse.py --docker
       - name: Verify native PostgreSQL reader against isolated official server
         run: python3 scripts/check_rust_postgres.py --docker
+      - name: Verify PostgreSQL 18 column observation against isolated pg_duckdb
+        run: python3 scripts/check_rust_postgres.py --docker --image pgduckdb/pgduckdb:18-main@sha256:7fd0a59aa577b4839124b9141f81b7d59162228984cdfa1ffcc8da433d297569
       - name: Verify native S3 readers against isolated HTTP and official SeaweedFS
         run: python3 scripts/check_rust_s3_network.py --docker
       - name: Verify native S3 subject probes against isolated HTTP and official SeaweedFS
