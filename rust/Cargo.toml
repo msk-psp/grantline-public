@@ -29,7 +29,7 @@ percent-encoding = "2"
 futures-util = "0.3"
 tokio-postgres = "0.7"
 tokio-postgres-rustls = { version = "0.14", features = ["ring", "webpki-roots"] }
-hmac = "0.12"
+hmac = "0.13"
 roxmltree = "0.21"
 openidconnect = { version = "4.0.1", default-features = false, features = ["reqwest", "rustls-tls"] }
 base64 = "0.22"
