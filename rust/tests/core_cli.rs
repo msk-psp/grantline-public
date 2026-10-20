@@ -148,6 +148,7 @@ fn snapshots_are_private_non_overwriting_and_preserve_unknowns() {
         prefixes: vec!["table:hr.".into()],
         subjects: Default::default(),
         note: "postgres://demo:fixture-password@localhost unavailable".into(),
+        ..Default::default()
     });
     let cmp = snapshot::compare(&prev, &cur);
     assert_eq!(cmp.obscured.len(), 41);

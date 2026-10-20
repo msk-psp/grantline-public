@@ -113,8 +113,25 @@ pub fn covers(held: &Grant, wanted: &Grant, kinds: &Kinds) -> bool {
                 || held
                     .resource
                     .strip_prefix("db:")
-                    .zip(wanted.resource.strip_prefix("table:"))
+                    .zip(
+                        wanted
+                            .resource
+                            .strip_prefix("table:")
+                            .or_else(|| wanted.resource.strip_prefix("column:")),
+                    )
                     .is_some_and(|(db, table)| table.starts_with(&format!("{db}.")))
+                || held
+                    .resource
+                    .strip_prefix("table:")
+                    .zip(wanted.resource.strip_prefix("column:"))
+                    .is_some_and(|(table, column)| {
+                        table.split('.').count() == 2
+                            && column.rsplit_once('.').is_some_and(|(parent, name)| {
+                                parent == table
+                                    && !name.is_empty()
+                                    && !name.contains(['*', '?', '['])
+                            })
+                    })
         }
         "s3" => held
             .resource
@@ -168,6 +185,15 @@ pub fn level(privs: &BTreeSet<String>) -> &'static str {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ObservationGap {
+    #[default]
+    Unread,
+    Excluded,
+    Unsupported,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Unobserved {
     pub system: String,
@@ -176,11 +202,34 @@ pub struct Unobserved {
     pub subjects: BTreeSet<String>,
     #[serde(default)]
     pub note: String,
+    #[serde(default)]
+    pub category: ObservationGap,
+    #[serde(default)]
+    pub privileges: BTreeSet<String>,
 }
 impl Unobserved {
+    pub fn blocks_change(&self, grant: &Grant) -> bool {
+        self.covers(grant)
+            || (self.category == ObservationGap::Unsupported
+                && !self.privileges.is_empty()
+                && grant.system == self.system
+                && grant.privilege == "MEMBER"
+                && (self.subjects.contains(&grant.subject)
+                    || grant
+                        .resource
+                        .strip_prefix("role:")
+                        .is_some_and(|role| self.subjects.contains(role))))
+    }
     pub fn covers(&self, grant: &Grant) -> bool {
         grant.system == self.system
             && (self.subjects.is_empty() || self.subjects.contains(&grant.subject))
+            && (self.privileges.is_empty()
+                || self.privileges.contains(&grant.privilege)
+                || self
+                    .privileges
+                    .iter()
+                    .any(|p| matches!(p.as_str(), "ALL" | "ALL PRIVILEGES"))
+                || matches!(grant.privilege.as_str(), "ALL" | "ALL PRIVILEGES"))
             && self.prefixes.iter().any(|p| {
                 if p.starts_with("bucket:") && p != "bucket:" {
                     grant.resource == *p || grant.resource.starts_with(&format!("{p}/"))
@@ -225,7 +274,7 @@ pub fn plan(input: PlanInput) -> Plan {
     };
     let observed = normalize(input.observed);
     let intent = normalize(input.intent);
-    let blind = |g: &&Grant| input.unobserved.iter().any(|u| u.covers(g));
+    let blind = |g: &&Grant| input.unobserved.iter().any(|u| u.blocks_change(g));
     let unverified: BTreeSet<_> = intent.iter().filter(blind).cloned().collect();
     let visible_intent: BTreeSet<_> = intent.difference(&unverified).cloned().collect();
     let visible_observed: BTreeSet<_> = observed.iter().filter(|g| !blind(g)).cloned().collect();
@@ -342,5 +391,65 @@ mod tests {
         });
         assert!(output.changes.is_empty());
         assert_eq!(output.unverified.len(), 1);
+    }
+    #[test]
+    fn privilege_gap_preserves_other_facts_but_blocks_unknown_access_and_role_changes() {
+        let unknown = Unobserved {
+            system: "clickhouse".into(),
+            subjects: BTreeSet::from(["reader".into()]),
+            prefixes: vec![String::new()],
+            privileges: BTreeSet::from(["SELECT".into()]),
+            category: ObservationGap::Unsupported,
+            ..Default::default()
+        };
+        let select = Grant::new("clickhouse", "reader", "global:*", "SELECT");
+        let insert = Grant::new("clickhouse", "reader", "db:demo", "INSERT");
+        let member = Grant::new("clickhouse", "alice", "role:reader", "MEMBER");
+        assert!(unknown.covers(&select));
+        assert!(unknown.covers(&Grant::new("clickhouse", "reader", "global:*", "ALL")));
+        assert!(!unknown.covers(&insert) && !unknown.covers(&member));
+        assert!(unknown.blocks_change(&member));
+        let output = plan(PlanInput {
+            observed: vec![select.clone(), insert.clone(), member.clone()],
+            intent: vec![select, member],
+            managed: BTreeSet::from(["alice".into(), "reader".into()]),
+            unobserved: vec![unknown],
+            ..Default::default()
+        });
+        assert_eq!(output.unverified.len(), 2);
+        assert_eq!(output.changes, vec![("revoke".into(), insert.key())]);
+    }
+    #[test]
+    fn clickhouse_columns_and_named_collections_keep_their_exact_scope() {
+        let kinds = Kinds::new();
+        let column = Grant::new("clickhouse", "alice", "column:demo.events.a", "SELECT");
+        let table = Grant::new("clickhouse", "alice", "table:demo.events", "SELECT");
+        assert!(covers(&table, &column, &kinds));
+        assert!(covers(
+            &Grant::new("clickhouse", "alice", "db:demo", "SELECT"),
+            &column,
+            &kinds
+        ));
+        assert!(!covers(&column, &table, &kinds));
+        assert!(!covers(
+            &column,
+            &Grant::new("clickhouse", "alice", "column:demo.events.b", "SELECT"),
+            &kinds
+        ));
+        assert!(!covers(
+            &Grant::new(
+                "clickhouse",
+                "alice",
+                "named_collection:demo",
+                "NAMED COLLECTION"
+            ),
+            &Grant::new(
+                "clickhouse",
+                "alice",
+                "named_collection:demo_other",
+                "NAMED COLLECTION"
+            ),
+            &kinds
+        ));
     }
 }

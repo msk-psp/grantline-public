@@ -4,7 +4,7 @@ pub mod writer;
 use crate::{
     Result,
     config::Adapter,
-    model::{Grant, Kinds, Unobserved},
+    model::{Grant, Kinds, ObservationGap, Unobserved},
     planner::Finding,
 };
 use futures_util::TryStreamExt;
@@ -46,6 +46,7 @@ fn unread(system: &str, prefixes: Vec<String>, note: &str) -> Unobserved {
         prefixes,
         subjects: BTreeSet::new(),
         note: note.into(),
+        ..Default::default()
     }
 }
 fn db_prefixes(db: &str) -> Vec<String> {
@@ -439,11 +440,16 @@ async fn observe_async(cfg: Config, adapter: &Adapter, system: &str) -> Result<O
         if !include.iter().any(|p| p.matches(&db.name))
             || exclude.iter().any(|p| p.matches(&db.name))
         {
-            out.unknown.push(unread(
+            let mut gap = unread(
                 system,
                 db_prefixes(&db.name),
-                "Database excluded from configured catalog observation",
-            ));
+                &format!(
+                    "Database '{}' is excluded by the configured catalog scope",
+                    db.name
+                ),
+            );
+            gap.category = ObservationGap::Excluded;
+            out.unknown.push(gap);
             continue;
         }
         match database(
@@ -469,7 +475,7 @@ async fn observe_async(cfg: Config, adapter: &Adapter, system: &str) -> Result<O
         }
     }
     if !unknown.is_empty() {
-        out.unknown.push(Unobserved {system:system.into(),prefixes:vec![String::new()],subjects:unknown,note:"Superuser/predefined role privileges or membership INHERIT/SET options cannot be represented, including role dependants".into()});
+        out.unknown.push(Unobserved {system:system.into(),prefixes:vec![String::new()],subjects:unknown,note:"Superuser/predefined role capabilities or restricted INHERIT/SET membership are outside the supported ACL model; affected role dependants are included".into(),category:ObservationGap::Unsupported,..Default::default()});
     }
     out.grants
         .retain(|g| !out.unknown.iter().any(|u| u.covers(g)));

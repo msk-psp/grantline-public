@@ -1,5 +1,50 @@
 pub const LANGUAGES: [&str; 4] = ["en", "ko", "ja", "zh-CN"];
 const MESSAGES: &[(&str, [&str; 3])] = &[
+    (
+        "Observation scope and limitations",
+        ["관측 범위와 제한", "観測範囲と制限", "观测范围与限制"],
+    ),
+    (
+        "Excluded by configuration",
+        ["설정상 관측 제외", "設定による除外", "配置排除"],
+    ),
+    (
+        "Unsupported privilege semantics",
+        [
+            "권한 해석 지원 범위 밖",
+            "権限の解釈が未対応",
+            "尚不支持此权限语义",
+        ],
+    ),
+    ("Read failed", ["조회 실패", "読み取り失敗", "读取失败"]),
+    (
+        "Partially observed",
+        ["일부 관측됨", "一部観測済み", "部分已观测"],
+    ),
+    (
+        "Some permissions could not be read; affected access is unknown.",
+        [
+            "일부 권한을 읽지 못했습니다. 해당 범위의 접근 여부는 알 수 없습니다.",
+            "一部の権限を読み取れませんでした。対象範囲のアクセスは不明です。",
+            "部分权限读取失败，相关范围的访问状态未知。",
+        ],
+    ),
+    (
+        "Requested permissions could not be verified; no changes are planned for them.",
+        [
+            "요청한 권한 중 확인하지 못한 항목은 변경 계획에서 제외됩니다.",
+            "確認できない要求権限は変更計画から除外されます。",
+            "无法验证的请求权限不会纳入变更计划。",
+        ],
+    ),
+    (
+        "Excluded or unsupported permissions remain unknown. Other observed permissions are still shown.",
+        [
+            "관측 제외·미지원 범위는 접근 여부를 확정하지 않습니다. 확인한 다른 권한은 계속 표시합니다.",
+            "除外・未対応の範囲はアクセス不明です。その他の観測済み権限は引き続き表示します。",
+            "排除或尚不支持的范围保持未知，其他已观测权限仍会显示。",
+        ],
+    ),
     ("Access routes", ["접근 경로", "アクセス経路", "访问路径"]),
     (
         "Inherited grants",
