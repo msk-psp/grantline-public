@@ -88,6 +88,8 @@ pub struct Graph {
     pub names: BTreeMap<String, String>,
     pub envs: BTreeMap<String, Vec<String>>,
     pub teams: BTreeMap<String, String>,
+    #[serde(default)]
+    pub homes: BTreeMap<String, BTreeSet<String>>,
 }
 #[derive(Debug, Serialize)]
 pub struct Paths {
@@ -112,6 +114,7 @@ impl Graph {
             .iter()
             .map(|g| g.subject.clone())
             .chain(bridges.iter().map(|b| b.from.clone()))
+            .chain(kinds.keys().cloned())
             .collect();
         for [_, src, dst, _] in routes {
             subjects.insert(src.clone());
@@ -177,7 +180,12 @@ impl Graph {
             );
         }
         let edges: Vec<_> = merged.into_values().collect();
-        let srcs: BTreeSet<_> = edges.iter().map(|e| e.src.clone()).collect();
+        // An observed identity exists even when its privileges are empty or unread.
+        let srcs: BTreeSet<_> = edges
+            .iter()
+            .map(|e| e.src.clone())
+            .chain(kinds.keys().cloned())
+            .collect();
         let dsts: BTreeSet<_> = edges.iter().map(|e| e.dst.clone()).collect();
         let principals: BTreeSet<_> = srcs.difference(&dsts).cloned().collect();
         let hops = srcs.intersection(&dsts).cloned().collect();
@@ -207,6 +215,15 @@ impl Graph {
                 envs.entry(s.clone()).or_default().push(env.clone());
             }
         }
+        let mut homes: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        for e in &edges {
+            for node in [&e.src, &e.dst] {
+                homes
+                    .entry(node.clone())
+                    .or_default()
+                    .insert(e.system.clone());
+            }
+        }
         Ok(Self {
             edges,
             principals,
@@ -221,6 +238,7 @@ impl Graph {
                 .collect(),
             envs,
             teams: cfg.teams.clone(),
+            homes,
         })
     }
     pub fn kind_of(&self, node: &str) -> &str {
@@ -322,5 +340,35 @@ impl Graph {
             }
         }
         Ok(longest)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn observed_entities_need_no_grants_but_labels_alone_are_not_inventory() {
+        let cfg = GraphConfig {
+            people: BTreeMap::from([("not-observed".into(), "Name only".into())]),
+            ..Default::default()
+        };
+        let kinds = [
+            ("alice", "account"),
+            ("svc-empty", "account"),
+            ("group:empty", "group"),
+            ("policy:empty", "policy"),
+            ("reader", "role"),
+        ]
+        .into_iter()
+        .map(|(a, b)| (a.into(), b.into()))
+        .collect();
+        let graph = Graph::build(&BTreeSet::new(), &[], &kinds, &[], &cfg).unwrap();
+        assert_eq!(graph.principals.len(), 5);
+        assert!(graph.edges.is_empty());
+        assert!(!graph.principals.contains("not-observed"));
+        assert_eq!(graph.kind_of("svc-empty"), "svc-account");
+        assert_eq!(graph.kind_of("group:empty"), "group");
+        assert_eq!(graph.kind_of("policy:empty"), "policy");
     }
 }

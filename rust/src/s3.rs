@@ -151,6 +151,14 @@ fn mapped(action: &str) -> Option<&str> {
         | "s3:AbortMultipartUpload" => "Write",
         "s3:GetObjectTagging" | "s3:PutObjectTagging" => "Tagging",
         "s3:ListAllMyBuckets" => "ListAllMyBuckets",
+        // Version and retention operations do not imply access to current objects.
+        "s3:GetObjectVersion"
+        | "s3:ListBucketVersions"
+        | "s3:GetBucketVersioning"
+        | "s3:GetObjectRetention"
+        | "s3:GetObjectLegalHold"
+        | "s3:DeleteObjectVersion"
+        | "s3:BypassGovernanceRetention" => action.strip_prefix("s3:")?,
         "s3:*" | "*" => "Admin",
         _ => return None,
     })
@@ -222,9 +230,14 @@ fn prefix_caps(st: &Value) -> Option<BTreeSet<String>> {
         || prefixes.is_empty()
         || actions.is_empty()
         || resources.is_empty()
-        || actions
-            .iter()
-            .any(|a| !["s3:ListBucket", "s3:GetBucketLocation"].contains(&a.as_str()))
+        || actions.iter().any(|a| {
+            ![
+                "s3:ListBucket",
+                "s3:GetBucketLocation",
+                "s3:ListBucketVersions",
+            ]
+            .contains(&a.as_str())
+        })
         || prefixes.iter().any(|p| p.contains("${"))
     {
         return None;

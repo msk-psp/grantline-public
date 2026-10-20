@@ -162,6 +162,112 @@ fn unrepresentable_revoke_and_capabilities_are_blocked() {
 }
 
 #[test]
+fn version_and_retention_reads_preserve_accounts_and_exact_privileges() {
+    let dir = setup();
+    let root = dir.path();
+    put(
+        root,
+        policy(vec![
+            stmt("s3:GetObject", "arn:aws:s3:::demo/team/*"),
+            stmt("s3:GetObjectVersion", "arn:aws:s3:::demo/team/*"),
+            stmt("s3:GetBucketVersioning", "arn:aws:s3:::demo"),
+            stmt("s3:GetObjectRetention", "arn:aws:s3:::demo/team/*"),
+            stmt("s3:GetObjectLegalHold", "arn:aws:s3:::demo/team/*"),
+            json!({"Effect":"Allow","Action":"s3:ListBucketVersions","Resource":"arn:aws:s3:::demo","Condition":{"StringLike":{"s3:prefix":["team","team/*"]}}}),
+        ]),
+    );
+    let loaded = config::load(&root.join("config.toml")).unwrap();
+    let obs = engine::observe(&loaded, None).unwrap();
+    assert!(obs.snapshot.unobserved.is_empty());
+    assert_eq!(obs.snapshot.grants.len(), 7);
+    for privilege in [
+        "Read",
+        "GetObjectVersion",
+        "GetBucketVersioning",
+        "GetObjectRetention",
+        "GetObjectLegalHold",
+        "ListBucketVersions",
+    ] {
+        assert!(obs.snapshot.grants.iter().any(|g| g.privilege == privilege));
+    }
+    assert!(
+        obs.snapshot
+            .grants
+            .iter()
+            .filter(|g| g.privilege == "ListBucketVersions")
+            .all(|g| g
+                .resource
+                .starts_with("capability:s3/ListBucketVersions bucket=demo prefix="))
+    );
+    let graph = engine::graph(&loaded, &obs).unwrap();
+    assert!(graph.principals.contains("demo"));
+    assert_eq!(
+        graph.homes["demo"],
+        std::collections::BTreeSet::from(["object-store".into()])
+    );
+    let version = Grant::new(
+        "object-store",
+        "demo",
+        "bucket:demo/team",
+        "GetObjectVersion",
+    );
+    assert!(!grantline_rs::model::covers(
+        &version,
+        &Grant::new("object-store", "demo", "bucket:demo/team", "Read"),
+        &loaded.kinds
+    ));
+    assert!(policy_with(&json!({"Statement":[]}), &version, true).is_err());
+    // A new unsupported clause must still hide access, but not the observed identity.
+    put(
+        root,
+        policy(vec![
+            stmt("s3:GetObject", "arn:aws:s3:::demo/team/*"),
+            stmt("s3:FutureOperation", "arn:aws:s3:::demo/*"),
+        ]),
+    );
+    let obs = engine::observe(&loaded, None).unwrap();
+    assert!(obs.snapshot.grants.is_empty());
+    assert_eq!(obs.snapshot.unobserved.len(), 1);
+    let graph = engine::graph(&loaded, &obs).unwrap();
+    assert!(graph.principals.contains("demo"));
+    assert!(graph.edges.is_empty());
+}
+
+#[test]
+fn version_denies_and_governance_actions_do_not_become_current_object_access() {
+    let dir = setup();
+    let root = dir.path();
+    put(
+        root,
+        policy(vec![
+            stmt("s3:GetObjectVersion", "arn:aws:s3:::demo/team/*"),
+            json!({"Effect":"Deny","Action":"s3:GetObjectVersion","Resource":"arn:aws:s3:::demo/team/*"}),
+        ]),
+    );
+    let loaded = config::load(&root.join("config.toml")).unwrap();
+    let obs = engine::observe(&loaded, None).unwrap();
+    assert!(obs.snapshot.unobserved.is_empty());
+    assert!(obs.snapshot.grants.is_empty());
+    put(
+        root,
+        policy(vec![
+            stmt("s3:DeleteObjectVersion", "arn:aws:s3:::demo/team/*"),
+            stmt("s3:BypassGovernanceRetention", "arn:aws:s3:::demo/team/*"),
+        ]),
+    );
+    let obs = engine::observe(&loaded, None).unwrap();
+    assert!(obs.snapshot.unobserved.is_empty());
+    assert_eq!(obs.snapshot.grants.len(), 2);
+    assert!(!obs.snapshot.grants.iter().any(|g| matches!(
+        g.privilege.as_str(),
+        "Read" | "Write" | "Admin" | "GetObjectVersion"
+    )));
+    for g in &obs.snapshot.grants {
+        assert!(policy_with(&json!({"Statement":[]}), g, false).is_err());
+    }
+}
+
+#[test]
 fn missing_shared_policies_and_empty_attached_policies_shadow_actions() {
     let dir = setup();
     let root = dir.path();

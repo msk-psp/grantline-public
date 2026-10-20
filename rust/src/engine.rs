@@ -7,7 +7,11 @@ use crate::{
     snapshot::Snapshot,
 };
 use serde::Deserialize;
-use std::{collections::BTreeMap, fs, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::Path,
+};
 
 #[derive(Deserialize)]
 struct Atom {
@@ -64,6 +68,7 @@ pub struct Observation {
     pub kinds: BTreeMap<String, String>,
     pub routes: Vec<Route>,
     pub s3: BTreeMap<String, crate::s3::Observed>,
+    pub homes: BTreeMap<String, BTreeSet<String>>,
 }
 fn unread(system: &str, note: &str) -> Unobserved {
     Unobserved {
@@ -90,6 +95,7 @@ pub fn observe_with_live(
     let mut kinds = BTreeMap::new();
     let mut routes = Vec::new();
     let mut s3 = BTreeMap::new();
+    let mut homes: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     if let Some(path) = imported {
         snapshot = Snapshot::load(path, &loaded.kinds)?;
         snapshot
@@ -118,6 +124,7 @@ pub fn observe_with_live(
             kinds,
             routes,
             s3,
+            homes,
         });
     }
     let adapters: Vec<_> = loaded.config.adapters.iter().collect();
@@ -141,6 +148,12 @@ pub fn observe_with_live(
         for (system, result) in results {
             match result {
                 Ok(Ok(mut obs)) => {
+                    for node in obs.kinds.keys() {
+                        homes
+                            .entry(node.clone())
+                            .or_default()
+                            .insert((*system).clone());
+                    }
                     snapshot.grants.append(&mut obs.snapshot.grants);
                     snapshot.unobserved.append(&mut obs.snapshot.unobserved);
                     findings.append(&mut obs.findings);
@@ -160,6 +173,7 @@ pub fn observe_with_live(
         kinds,
         routes,
         s3,
+        homes,
     })
 }
 fn observe_one(
@@ -277,6 +291,7 @@ fn observe_one(
         kinds,
         routes,
         s3,
+        homes: BTreeMap::new(),
     })
 }
 pub fn plan(loaded: &Loaded, observation: &Observation) -> Report {
@@ -296,11 +311,19 @@ pub fn plan(loaded: &Loaded, observation: &Observation) -> Report {
     report
 }
 pub fn graph(loaded: &Loaded, observation: &Observation) -> Result<Graph> {
-    Graph::build(
+    let mut graph = Graph::build(
         &observation.snapshot.grants,
         &loaded.config.bridges,
         &observation.kinds,
         &observation.routes,
         &loaded.config.graph,
-    )
+    )?;
+    for (node, systems) in &observation.homes {
+        graph
+            .homes
+            .entry(node.clone())
+            .or_default()
+            .extend(systems.clone());
+    }
+    Ok(graph)
 }

@@ -42,6 +42,37 @@ pub struct Graph {
     pub kind: BTreeMap<String, String>,
     pub envs: BTreeMap<String, Vec<String>>,
     pub teams: BTreeMap<String, String>,
+    pub homes: BTreeMap<String, BTreeSet<String>>,
+}
+impl Graph {
+    fn scoped(&self, service: &str, environment: &str) -> Self {
+        let mut graph = self.clone();
+        let matches = |s: &str| {
+            (service.is_empty() || s == service || s == "*")
+                && (environment.is_empty()
+                    || s == "*"
+                    || self
+                        .envs
+                        .get(s)
+                        .is_some_and(|es| es.iter().any(|e| e == environment)))
+        };
+        graph.edges.retain(|e| matches(&e.system));
+        graph.homes.retain(|_, systems| {
+            systems.retain(|s| matches(s));
+            !systems.is_empty()
+        });
+        if !service.is_empty() || !environment.is_empty() {
+            let connected: BTreeSet<_> =
+                graph.edges.iter().flat_map(|e| [&e.src, &e.dst]).collect();
+            graph
+                .principals
+                .retain(|n| graph.homes.contains_key(n) || connected.contains(n));
+            graph
+                .hops
+                .retain(|n| graph.homes.contains_key(n) || connected.contains(n));
+        }
+        graph
+    }
 }
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
@@ -74,6 +105,7 @@ pub struct Plan {
 pub struct Unread {
     pub system: String,
     pub note: String,
+    pub subjects: BTreeSet<String>,
 }
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
@@ -171,7 +203,10 @@ fn matched(b: &Bootstrap, g: &Grant) -> bool {
                 .contains(&b.query.to_lowercase()))
 }
 fn badge(p: String) -> AnyView {
-    let class = if matches!(p.as_str(), "ALL" | "DELETE" | "Write" | "DROP") {
+    let class = if matches!(
+        p.as_str(),
+        "ALL" | "DELETE" | "Write" | "DROP" | "DeleteObjectVersion" | "BypassGovernanceRetention"
+    ) {
         "badge danger"
     } else if matches!(p.as_str(), "INSERT" | "UPDATE" | "CREATE") {
         "badge warning"
@@ -254,7 +289,7 @@ pub fn Console(bootstrap: Bootstrap) -> impl IntoView {
     let body = if b.error.is_some() || b.loading {
         view!{<p class="notice" role="status">{if b.loading{tr(&b.lang,"Loading catalog…")}else{tr(&b.lang,"Catalog unavailable; access is unknown.")}}</p>}.into_any()
     } else {
-        match b.page.as_str(){"services"=>services(&b),"matrix"=>matrix_page(&b),"changes"=>changes(&b),"history"=>history(&b),"approvals"=>reviews(&b),"act"=>view!{<RequestForm bootstrap=b.clone()/>}.into_any(),"account"=>details::subject(&b),"resource"=>details::resource(&b),"accounts"|"resources"=>grants_table(&lang,b.data.plan.observed.iter().filter(|g|matched(&b,g)).cloned().collect()),_=>view!{<PermissionMap graph=b.data.graph.clone() service_kinds=b.data.service_kinds.clone() service=b.service.clone() environment=b.environment.clone() query=b.query.clone() lang=lang.clone()/>}.into_any()}
+        match b.page.as_str(){"services"=>services(&b),"matrix"=>matrix_page(&b),"changes"=>changes(&b),"history"=>history(&b),"approvals"=>reviews(&b),"act"=>view!{<RequestForm bootstrap=b.clone()/>}.into_any(),"account"=>details::subject(&b),"resource"=>details::resource(&b),"accounts"=>details::accounts(&b),"resources"=>grants_table(&lang,b.data.plan.observed.iter().filter(|g|matched(&b,g)).cloned().collect()),_=>view!{<PermissionMap graph=b.data.graph.clone() service_kinds=b.data.service_kinds.clone() service=b.service.clone() environment=b.environment.clone() query=b.query.clone() lang=lang.clone()/>}.into_any()}
     };
     let menus = nav
         .into_iter()
@@ -290,7 +325,7 @@ pub fn Console(bootstrap: Bootstrap) -> impl IntoView {
     <a class="button secondary" href=b.refresh_url.clone()>{tr(&b.lang,"Refresh")}</a>
     </div>{b.error.as_ref().map(|_|view!{<div role="alert" class="notice error">{tr(&b.lang,"Catalog unavailable; access is unknown.")}</div>})}{(!b.data.snapshot.unobserved.is_empty()).then(||view!{<div role="status" class="notice warning">
     <strong>{tr(&b.lang,"Access is unknown for unread services.")}</strong>{b.data.snapshot.unobserved.iter().map(|u|view!{<p>
-    <code class="entity">{u.system.clone()}</code>{u.note.clone()}</p>}).collect_view()}</div>})}{(!b.interactive).then(||view!{<div class="notice">{tr(&b.lang,"Interactive bundle unavailable; build the UI to enable interactions.")}</div>})}{(!matches!(b.page.as_str(),"history"|"approvals"|"act")).then(||view!{<form class="filters" method="get">
+    <code class="entity">{u.system.clone()}</code>{u.note.clone()}{u.subjects.iter().map(|s|view!{<code class="entity">{s.clone()}</code>}).collect_view()}</p>}).collect_view()}</div>})}{(!b.interactive).then(||view!{<div class="notice">{tr(&b.lang,"Interactive bundle unavailable; build the UI to enable interactions.")}</div>})}{(!matches!(b.page.as_str(),"history"|"approvals"|"act")).then(||view!{<form class="filters" method="get">
     <label>
     <span class="sr-only">{tr(&b.lang,"Search")}</span>
     <input name="q" value=b.query.clone() placeholder=tr(&b.lang,"Search")/>
