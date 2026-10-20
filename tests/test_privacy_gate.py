@@ -118,4 +118,23 @@ with tempfile.TemporaryDirectory() as directory:
     invalid = subprocess.run(["python3", str(gate_path), "--root", str(root), "--range", "missing-input", message_head], capture_output=True, text=True)
     assert invalid.returncode == 2 and "missing-input" not in invalid.stdout + invalid.stderr
 
+    # The local push guard still catches unsafe messages without a CI scanner.
+    update = f"refs/heads/demo {message_head} refs/heads/demo {clean_head}\n"
+    blocked = subprocess.run([str(push_hook)], cwd=root, input=update, text=True, capture_output=True)
+    assert blocked.returncode == 1 and "commit-message-slack-user-id" in blocked.stdout
+    assert signals["slack-user-id"] not in blocked.stdout + blocked.stderr
+
+    # Exercise Git's installed hook, not only a direct invocation of the script.
+    run(root, "reset", "--hard", clean_head)
+    run(root, "config", "core.hooksPath", str(hook.parent))
+    path.write_text(signals["credential-token"])
+    run(root, "add", "fixture.txt")
+    blocked = subprocess.run(["git", "commit", "-qm", "local hook fixture"], cwd=root, text=True, capture_output=True)
+    assert blocked.returncode == 1 and "credential-token" in blocked.stderr
+    assert signals["credential-token"] not in blocked.stdout + blocked.stderr
+    assert run(root, "rev-parse", "HEAD") == clean_head
+    path.write_text(safe)
+    run(root, "add", "fixture.txt")
+    run(root, "commit", "--allow-empty", "-qm", "safe installed hook")
+
 print("privacy gate: patterns, redaction, index snapshots and commit ranges passed")

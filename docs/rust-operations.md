@@ -4,8 +4,10 @@ The Rust binary and browser WASM run without Python or Node in production.
 A minimal Python oracle under `tests/reference` is used only by differential
 tests. It is not installed or included in the application image. Old release
 artifacts and persisted-state backups remain the explicit rollback path.
-The release workflow gates GHCR publication on privacy, reference regressions,
-native adapter tests, WASM/SSR tests and a read-only native container smoke test.
+The release workflow gates GHCR publication on native distribution checks,
+reference regressions, native adapter tests, WASM/SSR tests and a read-only native
+container smoke test. Privacy scans run locally through the contributor
+[Git hooks](../CONTRIBUTING.md#local-privacy-checks), outside GitHub Actions.
 It publishes amd64/arm64 only after a GitHub Release is published. Merging the
 stack neither publishes a release nor deploys any service. Existing image tags
 are unchanged until a release updates them; pin a version and digest.

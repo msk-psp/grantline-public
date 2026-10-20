@@ -46,17 +46,26 @@ while extending native permission semantics.
 | Shared icons and logo licenses | `rust/ui/assets/` |
 | Requirements and recorded boundaries | `docs/prd/` |
 
-## Before pushing
+## Local privacy checks
+
+Enable the repository's hooks once per clone:
 
 ```bash
 git config --local core.hooksPath .githooks
 python3 scripts/privacy_gate.py --tracked
 ```
 
-Hooks inspect staged/newly published text and commit identities; CI repeats the
-range audit. Use a GitHub noreply author address. Keep real configuration, service
-credentials, operational identities and patient data outside the repository.
-Privacy pattern checks do not replace review of binary assets or PR descriptions.
+The `pre-commit` hook checks staged text and author/committer identities. The
+`pre-push` hook checks outgoing commit messages, identities and changed text,
+including intermediate commits that add then remove a value. These checks run
+locally; GitHub Actions runs the distribution, native and image tests without a
+privacy scan. Run `python3 tests/test_privacy_gate.py` locally when changing the
+scanner or hooks.
+
+Use a GitHub noreply author address. Keep real configuration, service credentials,
+operational identities and patient data outside the repository. Hooks require
+Python 3 and must be enabled in each clone; they do not replace review of binary
+assets or PR descriptions.
 
 Tests should reproduce a concrete mistake, and unread scopes must remain unknown.
 The console is read-only by default. Native writes require explicit credentials,
