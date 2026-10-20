@@ -732,7 +732,7 @@ pub fn apply(path: &Path, system: &str, write: bool, expected: Option<&str>) -> 
         hash.update((part.len() as u64).to_be_bytes());
         hash.update(part);
     }
-    let plan_id = format!("{:x}", hash.finalize());
+    let plan_id = crate::hex(&hash.finalize());
     if write && expected != Some(plan_id.as_str()) {
         return Err(
             "Reviewed ClickHouse plan is stale or belongs to another source/session; preview again"

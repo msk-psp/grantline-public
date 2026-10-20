@@ -4,6 +4,11 @@ updates:
     directory: /rust
     schedule:
       interval: weekly
+    groups:
+      rustcrypto:
+        patterns:
+          - hmac
+          - sha2
   - package-ecosystem: github-actions
     directory: /
     schedule:

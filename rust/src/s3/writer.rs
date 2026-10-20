@@ -14,7 +14,7 @@ use std::{
 
 const LIMIT: u64 = 4 * 1024 * 1024;
 fn digest(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    crate::hex(&Sha256::digest(bytes))
 }
 fn hash_parts(parts: &[&[u8]]) -> String {
     let mut h = Sha256::new();
@@ -22,7 +22,7 @@ fn hash_parts(parts: &[&[u8]]) -> String {
         h.update((part.len() as u64).to_be_bytes());
         h.update(part);
     }
-    format!("{:x}", h.finalize())
+    crate::hex(&h.finalize())
 }
 
 // Reject duplicate keys rather than silently deleting credentials or policy fields.
