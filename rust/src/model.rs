@@ -98,6 +98,16 @@ pub fn covers(held: &Grant, wanted: &Grant, kinds: &Kinds) -> bool {
         return true;
     }
     match dialect {
+        "postgres" => held
+            .resource
+            .strip_prefix("table:")
+            .zip(wanted.resource.strip_prefix("column:"))
+            .is_some_and(|(table, column)| {
+                table.split('.').count() == 3
+                    && column.rsplit_once('.').is_some_and(|(parent, name)| {
+                        parent == table && !name.is_empty() && !name.contains(['*', '?', '['])
+                    })
+            }),
         "clickhouse" => {
             held.resource == "global:*"
                 || held
@@ -268,6 +278,26 @@ pub fn plan(input: PlanInput) -> Plan {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn column_privileges_are_narrower_than_the_exact_parent_table() {
+        let table = Grant::new("postgres", "demo", "table:db.s.events", "SELECT");
+        let column = Grant::new("postgres", "demo", "column:db.s.events.a", "SELECT");
+        assert!(covers(&table, &column, &Kinds::new()));
+        assert!(!covers(&column, &table, &Kinds::new()));
+        for (resource, privilege) in [
+            ("column:db.s.events.b", "UPDATE"),
+            ("column:db.s.events_extra.a", "SELECT"),
+            ("column:db.s.events.", "SELECT"),
+        ] {
+            assert!(!covers(
+                &table,
+                &Grant::new("postgres", "demo", resource, privilege),
+                &Kinds::new()
+            ));
+        }
+        assert!(crate::commands::preview(&column, "grant", "postgres").is_err());
+        assert!(crate::commands::preview(&column, "revoke", "postgres").is_err());
+    }
     #[test]
     fn metadata_is_not_permission_identity() {
         let a = Grant::new("s3", "demo", "bucket:demo/team", "Read");

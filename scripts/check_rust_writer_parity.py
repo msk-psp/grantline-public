@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 import time
 import uuid
-from check_rust_postgres import IMAGE as PG_IMAGE
+from check_rust_postgres import IMAGE as PG_IMAGE, assert_postgres_major
 from check_rust_clickhouse import IMAGE as CH_IMAGE
 from check_rust_postgres_writer import intent as pg_intent
 from check_rust_clickhouse_writer import intent as ch_intent
@@ -63,6 +63,7 @@ def test(kind, image, port, context):
                 return preview
 
             if kind == 'pg':
+                assert_postgres_major(sql)
                 sql('CREATE ROLE gl_owner LOGIN; CREATE ROLE gl_user LOGIN; CREATE DATABASE gl_data OWNER gl_owner;', db='postgres')
                 sql('CREATE TABLE a_target(a int); CREATE VIEW v_target AS SELECT a FROM a_target; CREATE SCHEMA app;', user='gl_owner')
                 # Remove defaults in this fixture to isolate PUBLIC changes and their inverse.

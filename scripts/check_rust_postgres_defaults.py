@@ -8,7 +8,7 @@ import time
 import uuid
 from pathlib import Path
 
-from check_rust_postgres import IMAGE, MARKER, ROOT
+from check_rust_postgres import IMAGE, MARKER, ROOT, assert_postgres_major
 from check_rust_postgres_writer import config_at, intent, run
 
 
@@ -49,6 +49,7 @@ def docker_test(binary, context):
             time.sleep(0.2)
         else:
             raise RuntimeError('Disposable PostgreSQL failed to start')
+        assert_postgres_major(sql)
         sql('CREATE ROLE gl_creator LOGIN; CREATE ROLE gl_other LOGIN; CREATE ROLE gl_bare LOGIN; CREATE ROLE gl_user LOGIN; CREATE ROLE gl_group; CREATE ROLE "gl"";user" LOGIN; CREATE ROLE "gl"";creator" LOGIN; CREATE DATABASE gl_data; CREATE DATABASE other_db;', db='postgres')
         sql('CREATE SCHEMA bare; GRANT CREATE ON SCHEMA bare TO gl_bare; CREATE SCHEMA app AUTHORIZATION gl_creator; CREATE SCHEMA old_scope AUTHORIZATION gl_creator; CREATE SCHEMA other_scope AUTHORIZATION gl_creator; CREATE SCHEMA "odd"";schema" AUTHORIZATION "gl"";creator"; CREATE SCHEMA z_failure AUTHORIZATION gl_creator; CREATE SCHEMA a_first AUTHORIZATION gl_creator; GRANT CREATE ON SCHEMA app TO gl_other; GRANT USAGE ON SCHEMA app,old_scope,other_scope,"odd"";schema" TO PUBLIC;')
         sql('CREATE TABLE app.existing(a int); INSERT INTO app.existing VALUES(42)', user='gl_creator')

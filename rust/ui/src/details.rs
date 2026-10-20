@@ -166,15 +166,23 @@ pub(super) fn resource(b: &Bootstrap) -> AnyView {
 }
 fn contains(scope: &str, resource: &str) -> bool {
     resource == scope
-        || (!scope.is_empty() && resource.starts_with(&format!("{}/", scope.trim_end_matches('/'))))
+        || (scope.starts_with("bucket:")
+            && resource.starts_with(&format!("{}/", scope.trim_end_matches('/'))))
         || scope.strip_prefix("db:").is_some_and(|db| {
-            ["table:", "schema:", "default:"]
+            ["table:", "column:", "schema:", "default:"]
                 .iter()
                 .any(|kind| resource.starts_with(&format!("{kind}{db}.")))
         })
-        || scope
-            .strip_prefix("schema:")
-            .is_some_and(|s| resource.starts_with(&format!("table:{s}.")))
+        || scope.strip_prefix("schema:").is_some_and(|s| {
+            resource.starts_with(&format!("table:{s}."))
+                || resource.starts_with(&format!("column:{s}."))
+        })
+        || scope.strip_prefix("table:").is_some_and(|table| {
+            resource
+                .strip_prefix("column:")
+                .and_then(|c| c.rsplit_once('.'))
+                .is_some_and(|(parent, _)| parent == table)
+        })
 }
 fn child(scope: &str, resource: &str) -> Option<String> {
     if scope == resource {
@@ -188,10 +196,17 @@ fn child(scope: &str, resource: &str) -> Option<String> {
             rest.split('/').next()?
         ));
     }
-    if let Some(db) = scope.strip_prefix("db:")
-        && let Some(rest) = resource.strip_prefix(&format!("table:{db}."))
+    if let Some(db) = scope.strip_prefix("db:") {
+        for kind in ["table", "column"] {
+            if let Some(rest) = resource.strip_prefix(&format!("{kind}:{db}.")) {
+                return Some(format!("schema:{db}.{}", rest.split('.').next()?));
+            }
+        }
+    }
+    if scope.starts_with("schema:")
+        && let Some(column) = resource.strip_prefix("column:")
     {
-        return Some(format!("schema:{db}.{}", rest.split('.').next()?));
+        return Some(format!("table:{}", column.rsplit_once('.')?.0));
     }
     Some(resource.to_owned())
 }
@@ -271,6 +286,28 @@ mod tests {
         assert!(!contains("bucket:demo/team", "bucket:demo/teammate"));
         assert!(contains("db:demo", "table:demo.app.events"));
         assert!(!contains("db:demo", "table:demo2.app.events"));
+        assert!(contains("db:demo", "column:demo.app.events.a"));
+        assert!(contains("schema:demo.app", "column:demo.app.events.a"));
+        assert!(contains(
+            "table:demo.app.events",
+            "column:demo.app.events.a"
+        ));
+        assert!(!contains(
+            "table:demo.app.events",
+            "column:demo.app.events_extra.a"
+        ));
+        assert!(!contains(
+            "column:demo.app.events.a",
+            "column:demo.app.events.a/b"
+        ));
+        assert_eq!(
+            child("db:demo", "column:demo.app.events.a"),
+            Some("schema:demo.app".into())
+        );
+        assert_eq!(
+            child("schema:demo.app", "column:demo.app.events.a"),
+            Some("table:demo.app.events".into())
+        );
         assert_eq!(
             child("bucket:demo", "bucket:demo/team/reports"),
             Some("bucket:demo/team".into())

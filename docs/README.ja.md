@@ -41,7 +41,7 @@ cargo +1.99.0 run --locked --manifest-path rust/Cargo.toml -- -c examples/demo/g
 このバージョンのリリースワークフローはUID 10001で動作するnative Rust・WASM
 イメージをビルドします。Python・Nodeランタイムは含みません。既存タグは変わらず、
 マージだけでは新しいイメージを公開しません。ローカルビルドには
-`docker build -f Dockerfile.rust -t grantline-native:local .`を使ってください。
+`docker build -t grantline-native:local .`を使ってください。
 
 GitHub Releaseの公開時に、GHCRへ`linux/amd64`・`linux/arm64`イメージを配布します。
 安定版は`latest`も更新します。プレリリースには個別のバージョンタグを使います。
@@ -84,8 +84,9 @@ rust/target/debug/grantline-rs -c examples/demo/grantline.toml history  # 記録
 書き込みの前には必ずネイティブ操作をプレビューし、実行の試行と結果を監査記録に残します。
 宣言に基づく取り消しは、管理対象のアカウントと宣言が記述するシステムに限定されます。
 
-Python参照実装は`uv pip install -e .`と既存の`Dockerfile`で利用できます。
-Pythonとnativeのプロセスで同じ承認ストアを共有しないでください。
+アプリと標準コンテナはRust/Leptosです。最小限のPython参照コードは
+[tests/reference](../tests/reference/README.md)に比較検証用としてのみ残し、
+サービスのエントリポイントやコンテナイメージには含めません。
 
 ## ライセンス
 

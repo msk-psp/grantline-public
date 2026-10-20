@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "tests/reference"))
 from grantline.diff import plan  # noqa: E402
 from grantline.intent import Intent  # noqa: E402
 from grantline.model import KINDS, Grant, Unobserved  # noqa: E402
