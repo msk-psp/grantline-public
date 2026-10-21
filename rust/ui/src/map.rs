@@ -1,12 +1,20 @@
-use super::{Edge, Graph, tr};
+#[cfg(any(feature = "hydrate", test))]
+use super::Edge;
+use super::{Graph, tr};
 use leptos::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
+#[cfg(any(feature = "hydrate", test))]
 const COL: usize = 350;
+#[cfg(any(feature = "hydrate", test))]
 const ROW: usize = 48;
+#[cfg(any(feature = "hydrate", test))]
 const W: usize = 270;
+#[cfg(any(feature = "hydrate", test))]
 const H: usize = 32;
+#[cfg(any(feature = "hydrate", test))]
 const TOP: usize = 150;
+#[cfg(any(feature = "hydrate", test))]
 const KINDS: [&str; 6] = [
     "human",
     "svc-account",
@@ -16,30 +24,27 @@ const KINDS: [&str; 6] = [
     "instance",
 ];
 
+#[cfg(feature = "hydrate")]
+mod gpu;
+mod index;
+#[cfg(feature = "hydrate")]
+mod runtime;
+#[cfg(any(feature = "hydrate", test))]
+mod scene;
+
 pub fn highlighted(graph: &Graph, start: &str) -> BTreeSet<String> {
-    let mut out = BTreeSet::from([start.to_owned()]);
-    for reverse in [false, true] {
-        let mut seen = BTreeSet::new();
-        let mut stack = vec![start.to_owned()];
-        while let Some(n) = stack.pop() {
-            if seen.insert(n.clone()) {
-                out.insert(n.clone());
-                for e in &graph.edges {
-                    let (a, b) = if reverse {
-                        (&e.dst, &e.src)
-                    } else {
-                        (&e.src, &e.dst)
-                    };
-                    if *a == n {
-                        stack.push(b.clone());
-                    }
-                }
-            }
-        }
-    }
-    out
+    let index = index::Index::new(graph, [start.to_owned()]);
+    let active = index.reach(index.ids[start], false);
+    index
+        .names
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| active[*i] != 0)
+        .map(|(_, name)| name.clone())
+        .collect()
 }
 
+#[cfg(any(feature = "hydrate", test))]
 #[derive(Clone)]
 struct Node {
     id: String,
@@ -50,6 +55,7 @@ struct Node {
     x: usize,
     y: usize,
 }
+#[cfg(any(feature = "hydrate", test))]
 struct Layout {
     nodes: Vec<Node>,
     edges: Vec<Edge>,
@@ -57,8 +63,8 @@ struct Layout {
     groups: Vec<(usize, usize, String)>,
     width: usize,
     height: usize,
-    limited: bool,
 }
+#[cfg(any(feature = "hydrate", test))]
 fn kind<'a>(graph: &'a Graph, id: &str) -> &'a str {
     graph.kind.get(id).map(String::as_str).unwrap_or_else(|| {
         if graph.hops.iter().any(|n| n == id) {
@@ -68,6 +74,7 @@ fn kind<'a>(graph: &'a Graph, id: &str) -> &'a str {
         }
     })
 }
+#[cfg(any(feature = "hydrate", test))]
 fn service_rank(name: &str) -> usize {
     match name {
         "postgres" => 0,
@@ -76,6 +83,7 @@ fn service_rank(name: &str) -> usize {
         _ => 3,
     }
 }
+#[cfg(any(feature = "hydrate", test))]
 fn layout(
     graph: &Graph,
     service_kinds: &BTreeMap<String, String>,
@@ -98,15 +106,27 @@ fn layout(
     if !query.is_empty() {
         visible.clear();
         let q = query.to_lowercase();
-        for n in connected.iter().filter(|n| {
-            n.to_lowercase().contains(&q)
-                || graph
-                    .names
-                    .get(*n)
-                    .is_some_and(|label| label.to_lowercase().contains(&q))
-        }) {
-            visible.extend(highlighted(graph, n));
-        }
+        let index = index::Index::new(graph, []);
+        let starts: Vec<_> = connected
+            .iter()
+            .filter(|n| {
+                n.to_lowercase().contains(&q)
+                    || graph
+                        .names
+                        .get(*n)
+                        .is_some_and(|label| label.to_lowercase().contains(&q))
+            })
+            .map(|n| index.ids[n])
+            .collect();
+        let active = index.reach_many(&starts, false);
+        visible.extend(
+            index
+                .names
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| active[*i] != 0)
+                .map(|(_, n)| n.clone()),
+        );
     }
     let mut homes = graph.homes.clone();
     let mut resources: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
@@ -219,7 +239,6 @@ fn layout(
     let mut groups = Vec::new();
     let mut positioned = Vec::new();
     let mut rows_max = 5;
-    let total = nodes.len();
     for k in KINDS {
         let members: Vec<_> = nodes
             .iter()
@@ -241,9 +260,6 @@ fn layout(
         let mut row = 0;
         let mut last = None;
         for n in members {
-            if positioned.len() >= 1000 {
-                break;
-            }
             let g = group(n);
             if !g.is_empty() && last.as_ref() != Some(&g) {
                 groups.push((x, TOP + ROW * row, g.clone()));
@@ -262,9 +278,6 @@ fn layout(
         let x = 60 + columns.len() * COL;
         columns.push((x, "Resources".into(), reached.len()));
         for (row, id) in reached.iter().enumerate() {
-            if positioned.len() >= 1000 {
-                break;
-            }
             positioned.push(Node {
                 id: id.clone(),
                 kind: "resource".into(),
@@ -283,12 +296,8 @@ fn layout(
                 .filter(|e| e.system == *system && reached.contains(&e.dst) && e.kind != "flat")
                 .cloned(),
         );
-        rows_max = rows_max.max(reached.len().min(1000));
+        rows_max = rows_max.max(reached.len());
     }
-    let limited = total > positioned.iter().filter(|n| n.kind != "resource").count()
-        || expanded
-            .and_then(|s| resources.get(s))
-            .is_some_and(|r| r.len() > positioned.iter().filter(|n| n.kind == "resource").count());
     Layout {
         width: (60 + COL * columns.len() + W).max(700),
         height: TOP + 20 + ROW * rows_max,
@@ -296,9 +305,9 @@ fn layout(
         edges,
         columns,
         groups,
-        limited,
     }
 }
+#[cfg(any(feature = "hydrate", test))]
 fn tone(edge: &Edge) -> &'static str {
     if edge.kind == "bridge" {
         "bridge"
@@ -334,6 +343,7 @@ fn tone(edge: &Edge) -> &'static str {
         "read"
     }
 }
+#[cfg(any(feature = "hydrate", test))]
 fn route(x: usize, y: usize, dx: usize, dy: usize) -> String {
     let back = dx < x;
     let (x1, x2) = if back {
@@ -356,6 +366,27 @@ fn route(x: usize, y: usize, dx: usize, dy: usize) -> String {
     }
 }
 
+#[derive(Clone, Default)]
+struct FocusInfo {
+    id: String,
+    label: String,
+    position: usize,
+    total: usize,
+}
+
+fn command(_viewport: NodeRef<leptos::html::Div>, _action: &str) {
+    #[cfg(feature = "hydrate")]
+    if let Some(root) = _viewport.get() {
+        let init = web_sys::CustomEventInit::new();
+        init.set_detail(&wasm_bindgen::JsValue::from_str(_action));
+        if let Ok(event) =
+            web_sys::CustomEvent::new_with_event_init_dict("grantline-map-command", &init)
+        {
+            let _ = root.dispatch_event(&event);
+        }
+    }
+}
+
 #[component]
 pub(super) fn PermissionMap(
     graph: Graph,
@@ -365,74 +396,39 @@ pub(super) fn PermissionMap(
     query: String,
     lang: String,
 ) -> impl IntoView {
-    let graph = graph.scoped(&service, &environment);
-    let graph = StoredValue::new(graph);
-    let kinds = StoredValue::new(service_kinds);
-    let hover = RwSignal::new(None::<String>);
+    let graph = StoredValue::new(graph.scoped(&service, &environment));
     let selected = RwSignal::new(None::<String>);
-    let expanded = RwSignal::new(None::<String>);
-    let zoom = RwSignal::new(1_f64);
-    let pan = RwSignal::new((0_f64, 0_f64));
-    let drag = RwSignal::new(None::<(i32, i32, f64, f64)>);
-    let dragged = RwSignal::new(false);
+    let focus = RwSignal::new(None::<FocusInfo>);
+    let unavailable = RwSignal::new(false);
     let viewport = NodeRef::<leptos::html::Div>::new();
-    let active = Memo::new(move |_| {
-        hover.get().or(selected.get()).map(|id| {
-            graph.with_value(|g| {
-                if id.starts_with('@') {
-                    let folded = layout(g, &kinds.get_value(), "", None);
-                    highlighted(
-                        &Graph {
-                            edges: folded.edges,
-                            ..Default::default()
-                        },
-                        &id,
-                    )
-                } else {
-                    let mut set = highlighted(g, &id);
-                    for e in &g.edges {
-                        if set.contains(&e.src)
-                            && set.contains(&e.dst)
-                            && !g.principals.contains(&e.dst)
-                            && !g.hops.contains(&e.dst)
-                        {
-                            set.insert(format!("@{}", e.system));
-                        }
-                    }
-                    set
+    #[cfg(feature = "hydrate")]
+    {
+        let kinds = StoredValue::new(service_kinds);
+        let query = StoredValue::new(query);
+        let locale = StoredValue::new(lang.clone());
+        let runtime = StoredValue::new_local(None::<runtime::Runtime>);
+        Effect::new(move |_| {
+            if let Some(root) = viewport.get() {
+                match runtime::Runtime::mount(
+                    root.into(),
+                    graph.get_value(),
+                    kinds.get_value(),
+                    query.get_value(),
+                    locale.get_value(),
+                    selected,
+                    focus,
+                ) {
+                    Ok(driver) => runtime.set_value(Some(driver)),
+                    Err(_) => unavailable.set(true),
                 }
-            })
-        })
-    });
-    let zoom_at = move |factor: f64, x: f64, y: f64| {
-        let old = zoom.get_untracked();
-        let next = (old * factor).clamp(0.35, 4.0);
-        pan.update(|(px, py)| {
-            *px = x - (x - *px) * next / old;
-            *py = y - (y - *py) * next / old;
+            }
         });
-        zoom.set(next);
-    };
-    let zoom_center = move |factor| {
-        let (x, y) = viewport
-            .get()
-            .map(|e| {
-                (
-                    f64::from(e.client_width()) / 2.0,
-                    f64::from(e.client_height()) / 2.0,
-                )
-            })
-            .unwrap_or((400.0, 250.0));
-        zoom_at(factor, x, y);
-    };
-    let reset = move || {
-        hover.set(None);
-        selected.set(None);
-        expanded.set(None);
-        zoom.set(1.0);
-        pan.set((0.0, 0.0));
-    };
-    let render_lang = lang.clone();
+        on_cleanup(move || {
+            runtime.try_update_value(|driver| *driver = None);
+        });
+    }
+    #[cfg(not(feature = "hydrate"))]
+    let _ = (service_kinds, query);
     let detail_lang = lang.clone();
     let detail_scope = format!(
         "&system={}&environment={}",
@@ -444,80 +440,30 @@ pub(super) fn PermissionMap(
         <div class="map-tools">
         <p class="muted">{tr(&lang,"Hover or focus a resource to follow its access routes.")}</p>
         <div class="map-view" role="group" aria-label=tr(&lang,"View")>
-        <button class="quiet" aria-label=tr(&lang,"Zoom in") on:click=move |_|zoom_center(1.25)>"+"</button>
-        <button class="quiet" aria-label=tr(&lang,"Zoom out") on:click=move |_|zoom_center(0.8)>"−"</button>
-        <button class="quiet" on:click=move |_|reset()>{tr(&lang,"Fit view")}</button>
-        <button class="quiet" on:click=move |_|{hover.set(None);selected.set(None);}>{tr(&lang,"Clear selection")}</button>
+        <button class="quiet" aria-label=tr(&lang,"Zoom in") on:click=move |_|command(viewport,"zoom-in")>"+"</button>
+        <button class="quiet" aria-label=tr(&lang,"Zoom out") on:click=move |_|command(viewport,"zoom-out")>"−"</button>
+        <button class="quiet" on:click=move |_|command(viewport,"reset")>{tr(&lang,"Fit view")}</button>
+        <button class="quiet" on:click=move |_|command(viewport,"clear")>{tr(&lang,"Clear selection")}</button>
         </div>
         {move||selected.get().map(|id|{
-            let href=if let Some(system)=id.strip_prefix('@') {format!("/services?system={}",super::encode(system))} else {let resource=graph.with_value(|g|g.terminals.contains(&id));format!("/{}?{}={}&lang={}",if resource{"resource"}else{"account"},if resource{"resource"}else{"subject"},super::encode(&id),super::encode(&detail_lang))+&detail_scope};
+            let href=if let Some(system)=id.strip_prefix('@') {format!("/services?system={}",super::encode(system))} else {let resource=graph.with_value(|g|g.terminals.contains(&id) || g.edges.iter().any(|e|e.dst==id) && !g.principals.contains(&id) && !g.hops.contains(&id));format!("/{}?{}={}&lang={}",if resource{"resource"}else{"account"},if resource{"resource"}else{"subject"},super::encode(&id),super::encode(&detail_lang))+&detail_scope};
             view!{<a class="entity" href=href>{tr(&detail_lang,"View details")}" · "{id}</a>}
         })}</div>
-        <div class="map-viewport" node_ref=viewport class:dragging=move||drag.get().is_some()
-            on:wheel=move |e|{e.prevent_default();zoom_center(if e.delta_y()<0.0 {1.1} else {1.0/1.1});}
-            on:pointerdown=move |e|{if e.button()==0{let (px,py)=pan.get_untracked();dragged.set(false);drag.set(Some((e.client_x(),e.client_y(),px,py)));}}
-            on:pointermove=move |e|{if let Some((x,y,px,py))=drag.get_untracked(){let(dx,dy)=(e.client_x()-x,e.client_y()-y);if dx.abs()+dy.abs()>3{dragged.set(true);pan.set((px+f64::from(dx),py+f64::from(dy)));}}}
-            on:pointerup=move |_|drag.set(None) on:pointerleave=move |_|{drag.set(None);hover.set(None);}
-            on:keydown=move |e|{if e.key()=="Escape"{reset();}}>
-        {move || {
-            let l=graph.with_value(|g|layout(g,&kinds.get_value(),&query,expanded.get().as_deref()));
-            let positions:BTreeMap<_,_>=l.nodes.iter().map(|n|(n.id.clone(),(n.x,n.y))).collect();
-            let edges=l.edges.into_iter().filter_map(|e| {
-                let (&(x,y),&(dx,dy))=(positions.get(&e.src)?,positions.get(&e.dst)?);
-                let class=format!("map-edge e-{}",tone(&e));
-                let (src,dst)=(e.src.clone(),e.dst.clone());
-                let title=format!("{} · {}",e.system,if e.note.is_empty(){e.privs.join(", ")}else{e.note.clone()});
-                Some(view!{<path data-src=e.src data-dst=e.dst d=route(x,y,dx,dy) class=class
-                    class:dim=move||active.get().is_some_and(|s|!s.contains(&src)||!s.contains(&dst))
-                    class:lit=move||active.get().is_some() marker-end="url(#map-arrow)"><title>{title}</title></path>})
-            }).collect_view();
-            let nodes=l.nodes.into_iter().map(|n| {
-                let id=n.id.clone(); let id_enter=id.clone();let id_focus=id.clone();let id_click=id.clone();let id_key=id.clone();let id_hot=id.clone();let id_dim=id.clone();let id_selected=id.clone();
-                let instance=n.kind=="instance";
-                let tag=if instance {format!("{} {} ›",n.count,tr(&render_lang,"Resources"))} else {
-                    let envs:BTreeSet<_>=graph.with_value(|g|n.homes.iter().flat_map(|s|g.envs.get(s).into_iter().flatten().cloned()).collect());
-                    if envs.len()>1 {envs.into_iter().collect::<Vec<_>>().join("·")} else {envs.into_iter().next().filter(|s|s!="prod").unwrap_or_default()}
-                };
-                let home_kinds:BTreeSet<_>=n.homes.iter().filter_map(|s|kinds.with_value(|ks|ks.get(s).cloned())).collect();
-                let tag_x=W-12-home_kinds.len()*19;
-                let room=tag_x.saturating_sub(tag.chars().count()*6+20)/7;
-                let label=if n.label.chars().count()>room {n.label.chars().take(room.saturating_sub(1)).collect::<String>()+"…"}else{n.label.clone()};
-                let icons=home_kinds.into_iter().enumerate().map(|(i,k)| {
-                    let x=W-26-i*19;
-                    match k.as_str(){
-                        "postgres"=>view!{<image x=x y="8" width="16" height="16" href="/static/postgresql.png"/>}.into_any(),
-                        "s3"=>view!{<image x=x y="8" width="16" height="16" href="/static/seaweedfs.png"/>}.into_any(),
-                        "clickhouse"=>view!{<text class="map-ch-icon" x=x y="21">"▥"</text>}.into_any(),
-                        _=>view!{<text class="map-home-icon" x=x y="21">"◇"</text>}.into_any()
-                    }
-                }).collect_view();
-                view!{<g class=format!("map-node {}",n.kind) data-node-id=id.clone() role="button" tabindex="0" aria-label=id
-                    aria-expanded=move||if instance{Some(if expanded.get().as_deref()==id_selected.strip_prefix('@'){"true"}else{"false"})}else{None}
-                    class:dim=move||active.get().is_some_and(|s|!s.contains(&id_dim))
-                    class:hot=move||active.get().is_some_and(|s|s.contains(&id_hot))
-                    class:selected=move||selected.get().as_ref()==Some(&id_click)
-                    transform=format!("translate({},{})",n.x,n.y)
-                    on:mouseenter=move |_|{if drag.get_untracked().is_none(){hover.set(Some(id_enter.clone()));}}
-                    on:mouseleave=move |_|hover.set(None)
-                    on:focus=move |_|hover.set(Some(id_focus.clone())) on:blur=move |_|hover.set(None)
-                    on:click={let id=n.id.clone();move |_|{if !dragged.get_untracked(){if instance{expanded.update(|s|*s=if s.as_deref()==id.strip_prefix('@'){None}else{id.strip_prefix('@').map(str::to_owned)});}selected.update(|s|*s=if s.as_ref()==Some(&id){None}else{Some(id.clone())});}}}
-                    on:keydown=move|e|{if matches!(e.key().as_str(),"Enter"|" "){e.prevent_default();if instance{expanded.update(|s|*s=if s.as_deref()==id_key.strip_prefix('@'){None}else{id_key.strip_prefix('@').map(str::to_owned)});}selected.set(Some(id_key.clone()));}}>
-                    <title>{format!("{}\n{}",n.label,n.homes.into_iter().collect::<Vec<_>>().join(", "))}</title>
-                    <rect width=W height=H rx="9"/>
-                    <text x="12" y="20">{label}</text><text class="map-tag" x=tag_x y="20" text-anchor="end">{tag}</text>{icons}
-                </g>}
-            }).collect_view();
-            let columns=l.columns.into_iter().map(|(x,title,count)|view!{<g><text class="column-title" x=x y=TOP-30>{tr(&render_lang,&title)}</text><text class="column-subtitle" x=x y=TOP-14>{format!("{count} · a–z")}</text></g>}).collect_view();
-            let groups=l.groups.into_iter().map(|(x,y,title)|view!{<text class="map-group" x=x y=y+20>{tr(&render_lang,&title)}</text>}).collect_view();
-            view!{<svg class="permission-map" role="group" aria-label=tr(&render_lang,"Map") viewBox=format!("0 0 {} {}",l.width,l.height)
-                style:transform=move||{let(x,y)=pan.get();format!("translate({x}px,{y}px) scale({})",zoom.get())}>
-                <defs><marker id="map-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0.5 L8,4 L0,7.5 z" fill="context-stroke"/></marker></defs>
-                {columns}{groups}{edges}{nodes}
-                </svg>{l.limited.then(||view!{<p class="map-limit">{tr(&render_lang,"Rows are limited; narrow the filter to see more.")}</p>})}
-            }
-        }}
-        <div class="map-hint">{tr(&lang,"Click to follow · scroll to zoom · drag to pan · Esc to reset")}</div>
+        <div class="map-viewport" node_ref=viewport tabindex="0" role="listbox"
+            aria-label=tr(&lang,"Map") aria-describedby="map-keys"
+            aria-activedescendant=move||focus.with(|f|f.as_ref().map(|_|"map-active-node"))>
+            <canvas class="map-gpu" aria-hidden="true"></canvas>
+            <canvas class="map-labels" aria-hidden="true"></canvas>
+            {move||focus.get().map(|item|view!{
+                <span id="map-active-node" class="sr-only" role="option" data-node-id=item.id.clone()
+                    aria-posinset=item.position aria-setsize=item.total
+                    aria-selected=move||selected.with(|s|s.as_ref()==Some(&item.id))>{item.label}</span>
+            })}
+            <noscript><p class="notice">{tr(&lang,"Enable JavaScript to explore the map.")}</p></noscript>
+            {let lang=lang.clone();move||unavailable.get().then(||view!{<p class="notice">{tr(&lang,"Map unavailable. Use Accounts or Resources.")}</p>})}
+            <div class="map-hint">{tr(&lang,"Click to follow · scroll to zoom · Shift+scroll to pan · drag to pan · Esc to reset")}</div>
         </div>
+        <p class="sr-only" id="map-keys">{tr(&lang,"Arrow keys: navigate nodes. Enter: select or expand. Home/End: first/last node. Page Up/Down: pan.")}</p>
         <div class="map-legend">
         {[("human","Users"),("service","Services"),("svc-account","Service accounts"),("role","Roles"),("group","Groups"),("policy","Policies"),("instance","Service instances")].into_iter().map(|(class,label)|view!{<span class=class><i></i>{tr(&lang,label)}</span>}).collect_view()}
         <span class="legend-read">"→ "{tr(&lang,"Read")}</span><span class="legend-write">"→ "{tr(&lang,"Write")}</span><span class="legend-admin">"→ "{tr(&lang,"Admin")}</span>
@@ -550,7 +496,7 @@ mod tests {
         );
         assert!(!g.scoped("", "staging").principals.contains(&"loner".into()));
     }
-    fn fixture() -> Graph {
+    pub(super) fn fixture() -> Graph {
         let mut g = Graph {
             principals: vec!["alice".into(), "service:app".into()],
             hops: vec![

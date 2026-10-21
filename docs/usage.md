@@ -146,6 +146,54 @@ English, 한국어, 日本語 and 简体中文 are supported by `rust/ui/src/i18
 The language selector persists the choice; browser language is used on the first
 visit. Account, environment and resource names are literal identifiers.
 
+## GPU permission map
+
+The map uses Rust/WASM and WebGL2 for nodes and directed curves. Labels and service
+icons are drawn only for visible rows. It retains the column layout and entity
+colors, with instant highlight/dimming instead of per-element CSS transitions.
+WebGL2 is optional: a Canvas2D fallback keeps navigation available when the context
+is unavailable or lost. The renderer tries WebGL2 again when the context recovers.
+JavaScript/WASM is required for the interactive map; Accounts and Resources remain
+server-rendered alternatives.
+
+Hover to trace access; click to retain a selection. Click a service instance to
+expand its resources. Scroll to zoom at the pointer, Shift+scroll to pan vertically,
+or drag to pan. With the map focused, use arrows to navigate, Enter/Space to select
+or expand, Home/End for the first/last node, Page Up/Down to pan and Escape to reset.
+The active node exposes its full name, service and position to assistive technology.
+Hover also exposes its full label through the browser tooltip. Detail links retain
+service, environment and language filters. Resource names remain literal.
+
+For a repeatable scale check, build the normal native/WASM bundle, then run:
+
+```bash
+node scripts/check_rust_graph.mjs --check --port 0
+node scripts/check_rust_graph.mjs --port 8426
+```
+
+Open `http://127.0.0.1:8426/?graphSize=100000`. This loopback-only, read-only fixture
+uses fictional users and resources; it never reads production services. Focus the
+map and press End, Enter to expand S3, then End again to reach resource 99,999.
+To test search at that size, open
+`http://127.0.0.1:8426/?graphSize=100000&q=resource-099999`.
+The normal filter form omits the test-only `graphSize` parameter, so retain it in
+the URL when testing other searches. The fixture defaults to 1,000 resources.
+
+For local profiling, `.map-viewport` exposes `data-renderer`, `data-graph-frame`
+and `data-graph-gpu`. Frame data separates CPU preparation, event-to-submit,
+visible geometry, active count, draw calls and geometry/state uploads. GPU times
+are asynchronous and include a frame ID; pair only matching IDs. Unsupported timer
+extensions or disjoint results do not provide a GPU duration. The renderer emits
+`grantline-map-frame` after each submitted update. An unchanged hover schedules
+no redraw. A new uncached path walks reachable edges and allocates a byte mask;
+mask upload/counting still scales with total node count. Initial graph loading,
+layout, expansion and buffer upload are separate costs from steady hover.
+
+A measured CPU/GPU time below 10 ms is a result for that fixture and device, not a
+universal interaction guarantee. Browser compositing, display refresh, contention
+and dense visible connections can take additional time. Test target hardware
+before promoting a new image.
+
 ## Containers
 
 `docker build -t grantline-native:local .` builds the native Rust/WASM image.

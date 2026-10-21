@@ -86,42 +86,17 @@ td .badge{margin:0 3px 3px 0}
 .map-view button{padding:7px 10px;min-width:34px;font:12px ui-monospace,Menlo,monospace}
 .map-viewport{position:relative;height:82vh;min-height:520px;overflow:hidden;border:1px solid var(--line);border-radius:16px;background:var(--map-glass);cursor:grab;user-select:none;touch-action:none;contain:strict}
 .map-viewport.dragging{cursor:grabbing}
-.permission-map{display:block;width:100%;height:auto;overflow:visible;transform-origin:0 0;will-change:transform;backface-visibility:hidden}
-.map-node{cursor:pointer;outline:none;transition:opacity .28s ease;color:var(--muted)}
-.map-node rect{fill:var(--map-node);stroke:currentColor;stroke-width:1.6}
-.map-node text{fill:var(--text);font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;pointer-events:none}
-.map-node image{pointer-events:none}
-.map-node.human,.map-legend .human{color:var(--map-read)}
-.map-node.service,.map-node.svc-account,.map-legend .service,.map-legend .svc-account{color:var(--map-service)}
-.map-node.role,.map-legend .role{color:var(--map-write)}
-.map-node.group,.map-node.policy,.map-legend .group,.map-legend .policy{color:var(--map-group)}
-.map-node.svc-account rect,.map-node.policy rect{stroke-width:1;stroke-dasharray:4 3}
-.map-node.instance rect{stroke-width:1;stroke-dasharray:2 3}
-.map-node.instance text{font-weight:600}
-.map-node .map-tag{font-size:10px;fill:var(--muted);font-weight:400}
-.map-node .map-ch-icon{fill:#f2c500;font-size:17px}
-.map-node .map-home-icon{fill:var(--muted)}
-.map-node.hot rect{stroke-width:2.2;fill:color-mix(in srgb,currentColor 10%,var(--map-node))}
-.map-node:hover rect,.map-node:focus rect{stroke-width:2.6;fill:color-mix(in srgb,var(--accent) 18%,var(--map-node))}
-.map-node:focus-visible rect{stroke-width:3.5}
-.map-node.selected rect{stroke-width:3.5}
-.map-node.dim{opacity:.22}
-.map-edge{stroke:var(--muted);stroke-width:1.2;fill:none;opacity:.34;pointer-events:none;transition:opacity .28s ease}
-.map-edge.e-read,.legend-read{stroke:var(--map-read);color:var(--map-read)}
-.map-edge.e-write,.legend-write{stroke:var(--map-write);color:var(--map-write)}
-.map-edge.e-admin,.map-edge.e-bridge,.legend-admin{stroke:var(--map-admin);color:var(--map-admin)}
-.map-edge.e-member{stroke:var(--map-member)}
-.map-edge.e-policy,.map-edge.e-route{stroke:var(--map-group)}
-.map-edge.e-route{stroke-dasharray:2 3}
-.map-edge.e-bridge{stroke-width:1.8;stroke-dasharray:5 4}
-.map-edge.lit{stroke-width:2.2;opacity:1}
-.map-edge.dim{opacity:.05}
-.column-title,.column-subtitle,.map-group{fill:var(--muted);font:10px ui-monospace,Menlo,monospace}
-.column-title{letter-spacing:.14em;text-transform:uppercase}
-.column-subtitle{opacity:.8}
-.map-group{font-weight:600;letter-spacing:.08em;text-transform:uppercase}
+.map-viewport[title]:not(.dragging){cursor:pointer}
+.map-gpu,.map-labels{position:absolute;inset:0;width:100%;height:100%;display:block;pointer-events:none}
+.map-viewport:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.map-legend .human{color:var(--map-read)}
+.map-legend .service,.map-legend .svc-account{color:var(--map-service)}
+.map-legend .role{color:var(--map-write)}
+.map-legend .group,.map-legend .policy{color:var(--map-group)}
+.legend-read{color:var(--map-read)}
+.legend-write{color:var(--map-write)}
+.legend-admin{color:var(--map-admin)}
 .map-hint{position:absolute;left:14px;bottom:10px;right:14px;color:var(--muted);font:10.5px/1.4 ui-monospace,Menlo,monospace;pointer-events:none}
-.map-limit{position:absolute;top:8px;left:14px;color:var(--warn);font-size:12px}
 .map-legend{display:flex;gap:12px 22px;flex-wrap:wrap;margin-top:15px;font:11.5px ui-monospace,Menlo,monospace;color:var(--muted)}
 .map-legend span{display:inline-flex;align-items:center;gap:7px}
 .map-legend i{width:18px;height:11px;border:1.6px solid currentColor;border-radius:3px}

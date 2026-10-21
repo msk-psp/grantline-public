@@ -917,3 +917,40 @@ SSR/WASM with four locales, official ClickHouse 26.6.2.160 and PostgreSQL 18.6,
 snapshot/history/core differential cases and native runtime checks. The first
 public release/image promotion is the next action above. Unsupported partial
 revokes and PostgreSQL special capabilities remain unknown.
+
+
+## R11 — Rust GPU permission map {#R11}
+
+Status: implemented on the feature branch; review, merge and deployment are separate.
+The Leptos map now uses a Rust/WASM WebGL2 renderer, following Sigma's separation
+of graph processing, persistent GPU geometry and rendering. It adds no Sigma or
+JavaScript graph dependency. Preserve entity border colors, grouped columns,
+curved directed routes, service expansion, selection, scoped detail links, themes
+and four locales. Text and official service icons use a viewport-bounded Canvas2D
+overlay. Keyboard navigation and the active node's full accessible label remain
+available; unavailable WebGL2 and context loss use a Canvas2D fallback.
+
+Integer IDs and forward/reverse CSR indices replace repeated full-edge searches.
+Separate directional walks retain access-route semantics without lighting sibling
+resources. A bounded 8 MiB/32-entry LRU reuses active masks. Hover updates an integer
+GPU state texture without rebuilding geometry; discrete highlights submit at once,
+while camera updates coalesce per frame. Remove the previous 1,000-node cutoff:
+all resources remain searchable and keyboard-addressable. Binary searches cull
+resource rows and exact resource routes outside the viewport; folded service
+routes retain the overview. Dense visible hub connections can still cost work.
+
+Acceptance includes reference-equivalent cycles, diamonds, multi-source search,
+cross-service aggregation, scope preservation and a 100,000-resource scene.
+The read-only fixture in `scripts/check_rust_graph.mjs` serves the real SSR/WASM
+bundle with fictional data, including approximately 225,000 raw connections.
+Local browser checks exercise first/repeated highlight, hub fan-out, expansion,
+last-resource search/navigation, zoom/pan, scoped links, themes, locales and GPU
+context recovery. CPU event-to-submit and asynchronous GPU timer-query results
+are measured separately. They do not prove input-to-present latency, performance
+on every device, or a completed production rollout. See [usage](../usage.md#gpu-permission-map)
+for the repeatable fixture and measurement boundary. Execution evidence belongs
+to the task handoff and PR, rather than a permanent device-specific speed guarantee.
+
+Next action: review and merge this renderer, then authorize an image promotion
+and operational browser acceptance separately. Approval status tracking and
+Valkey remain the deferred items listed above.
