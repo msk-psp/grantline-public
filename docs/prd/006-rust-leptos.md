@@ -921,7 +921,8 @@ revokes and PostgreSQL special capabilities remain unknown.
 
 ## R11 — Rust GPU permission map {#R11}
 
-Status: implemented on the feature branch; review, merge and deployment are separate.
+Status: GPU renderer merged. Bucket-focused resources and policy prioritization are
+implemented on the follow-up feature branch; review, merge and deployment are separate.
 The Leptos map now uses a Rust/WASM WebGL2 renderer, following Sigma's separation
 of graph processing, persistent GPU geometry and rendering. It adds no Sigma or
 JavaScript graph dependency. Preserve entity border colors, grouped columns,
@@ -951,6 +952,33 @@ on every device, or a completed production rollout. See [usage](../usage.md#gpu-
 for the repeatable fixture and measurement boundary. Execution evidence belongs
 to the task handoff and PR, rather than a permanent device-specific speed guarantee.
 
-Next action: review and merge this renderer, then authorize an image promotion
+### Bucket resources and policy focus
+
+The expanded S3 resource column shows one row per bucket, combining prefixes,
+objects and bucket-scoped capabilities. A count retains the number of original
+resource scopes. Bucket patterns stay literal; account-wide capabilities without
+a bucket remain distinct. Database resources and service/environment filters keep
+their existing scope. A bucket row means access to at least one contained scope,
+not a newly inferred full-bucket grant. Its detail link shows the original grants,
+including bucket-specific capabilities; prefix searches keep their original path
+boundaries while rendering their matching bucket row.
+
+The permission index retains the original graph. Bucket hover combines its original
+resource routes; hovering an account does not walk through the collapsed bucket to
+another account. Policies attached to the highlighted people/service accounts move
+to the top of the policy column in their original relative order. This includes
+their other policies for discovery, while only the actual permission paths are lit.
+Unrelated policies stay dimmed below. Clearing hover/selection restores the original
+order. Policy-column hover freezes that order so rows do not jump under the pointer.
+
+Reordering updates only policy instances and their incident edge buffer ranges;
+other columns, camera, original graph index and full GPU geometry remain intact.
+Labels, hit testing, keyboard navigation and Canvas fallback use the same row order.
+Acceptance covers distinct prefix owners within one bucket, exact prefix search,
+scoped capability details, stable policy partition/restoration and 100,000 prefixes
+sharing a single bucket. The browser fixture adds two independent control buckets
+and unrelated/secondary policies for repeated-hover and pointer-stability checks.
+
+Next action: review and merge the bucket/resource focus follow-up, then authorize an image promotion
 and operational browser acceptance separately. Approval status tracking and
 Valkey remain the deferred items listed above.

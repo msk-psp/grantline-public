@@ -24,6 +24,8 @@ const KINDS: [&str; 6] = [
     "instance",
 ];
 
+mod buckets;
+pub(super) use buckets::bucket;
 #[cfg(feature = "hydrate")]
 mod gpu;
 mod index;
@@ -42,6 +44,13 @@ pub fn highlighted(graph: &Graph, start: &str) -> BTreeSet<String> {
         .filter(|(i, _)| active[*i] != 0)
         .map(|(_, name)| name.clone())
         .collect()
+}
+
+fn resource_node(graph: &Graph, id: &str) -> bool {
+    !graph.principals.iter().chain(&graph.hops).any(|n| n == id)
+        && (id.starts_with("bucket:")
+            || graph.terminals.iter().any(|n| n == id)
+            || graph.edges.iter().any(|e| e.dst == id))
 }
 
 #[cfg(any(feature = "hydrate", test))]
@@ -87,8 +96,8 @@ fn service_rank(name: &str) -> usize {
 fn layout(
     graph: &Graph,
     service_kinds: &BTreeMap<String, String>,
-    query: &str,
     expanded: Option<&str>,
+    visible_override: Option<&BTreeSet<String>>,
 ) -> Layout {
     let keep: BTreeSet<_> = graph
         .principals
@@ -102,32 +111,7 @@ fn layout(
         .flat_map(|e| [e.src.clone(), e.dst.clone()])
         .chain(keep.iter().cloned())
         .collect();
-    let mut visible = connected.clone();
-    if !query.is_empty() {
-        visible.clear();
-        let q = query.to_lowercase();
-        let index = index::Index::new(graph, []);
-        let starts: Vec<_> = connected
-            .iter()
-            .filter(|n| {
-                n.to_lowercase().contains(&q)
-                    || graph
-                        .names
-                        .get(*n)
-                        .is_some_and(|label| label.to_lowercase().contains(&q))
-            })
-            .map(|n| index.ids[n])
-            .collect();
-        let active = index.reach_many(&starts, false);
-        visible.extend(
-            index
-                .names
-                .iter()
-                .enumerate()
-                .filter(|(i, _)| active[*i] != 0)
-                .map(|(_, n)| n.clone()),
-        );
-    }
+    let visible = visible_override.unwrap_or(&connected);
     let mut homes = graph.homes.clone();
     let mut resources: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut fan: BTreeMap<(String, String), Edge> = BTreeMap::new();
@@ -170,7 +154,7 @@ fn layout(
     }
     edges.extend(fan.into_values());
     let mut nodes: Vec<_> = keep
-        .intersection(&visible)
+        .intersection(visible)
         .map(|id| {
             let k = kind(graph, id);
             let label = if matches!(k, "group" | "policy" | "service") {
@@ -211,7 +195,7 @@ fn layout(
                 .unwrap_or_else(|| "Users".into())
         } else if n.kind == "service" {
             "Services".into()
-        } else if n.kind == "instance" {
+        } else if matches!(n.kind.as_str(), "instance" | "policy") {
             String::new()
         } else {
             n.homes
@@ -446,7 +430,7 @@ pub(super) fn PermissionMap(
         <button class="quiet" on:click=move |_|command(viewport,"clear")>{tr(&lang,"Clear selection")}</button>
         </div>
         {move||selected.get().map(|id|{
-            let href=if let Some(system)=id.strip_prefix('@') {format!("/services?system={}",super::encode(system))} else {let resource=graph.with_value(|g|g.terminals.contains(&id) || g.edges.iter().any(|e|e.dst==id) && !g.principals.contains(&id) && !g.hops.contains(&id));format!("/{}?{}={}&lang={}",if resource{"resource"}else{"account"},if resource{"resource"}else{"subject"},super::encode(&id),super::encode(&detail_lang))+&detail_scope};
+            let href=if let Some(system)=id.strip_prefix('@') {format!("/services?system={}",super::encode(system))} else {let resource=graph.with_value(|g|resource_node(g,&id));format!("/{}?{}={}&lang={}",if resource{"resource"}else{"account"},if resource{"resource"}else{"subject"},super::encode(&id),super::encode(&detail_lang))+&detail_scope};
             view!{<a class="entity" href=href>{tr(&detail_lang,"View details")}" · "{id}</a>}
         })}</div>
         <div class="map-viewport" node_ref=viewport tabindex="0" role="listbox"
@@ -475,6 +459,14 @@ pub(super) fn PermissionMap(
 mod tests {
     use super::*;
     #[test]
+    fn bucket_summary_details_do_not_misclassify_named_identities() {
+        let mut graph = fixture();
+        assert!(resource_node(&graph, "bucket:summary"));
+        assert!(!resource_node(&graph, "alice"));
+        graph.principals.push("bucket:person".into());
+        assert!(!resource_node(&graph, "bucket:person"));
+    }
+    #[test]
     fn isolated_inventory_stays_searchable_with_service_and_environment_filters() {
         let mut g = fixture();
         g.principals.push("loner".into());
@@ -485,7 +477,7 @@ mod tests {
         g.envs.insert("s3".into(), vec!["prod".into()]);
         let kinds = BTreeMap::from([("s3".into(), "s3".into())]);
         let scoped = g.scoped("s3", "prod");
-        let map = layout(&scoped, &kinds, "new person", None);
+        let map = scene::Model::new(scoped, kinds).scene("new person", None, "en");
         assert_eq!(map.nodes.len(), 1);
         assert_eq!(map.nodes[0].id, "loner");
         assert!(map.edges.is_empty());
@@ -541,7 +533,7 @@ mod tests {
     fn original_columns_collapse_resources_and_keep_exact_routes_when_expanded() {
         let g = fixture();
         let kinds = BTreeMap::from([("s3".into(), "s3".into())]);
-        let folded = layout(&g, &kinds, "", None);
+        let folded = layout(&g, &kinds, None, None);
         assert_eq!(folded.columns.len(), 6);
         assert!(folded.nodes.iter().any(|n| n.id == "@s3" && n.count == 2));
         assert!(!folded.nodes.iter().any(|n| n.id == "bucket:a"));
@@ -550,7 +542,7 @@ mod tests {
             .map(|id| folded.nodes.iter().find(|n| &n.id == id).unwrap().x)
             .collect();
         assert!(xs.windows(2).all(|w| w[1] - w[0] == COL));
-        let opened = layout(&g, &kinds, "", Some("s3"));
+        let opened = layout(&g, &kinds, Some("s3"), None);
         assert_eq!(opened.columns.len(), 7);
         assert!(
             opened
@@ -562,7 +554,8 @@ mod tests {
         assert!(h.contains("service:app"));
         assert!(!h.contains("alice"));
         assert_eq!(
-            layout(&g, &kinds, "bucket:b", None)
+            scene::Model::new(g, kinds)
+                .scene("bucket:b", None, "en")
                 .nodes
                 .iter()
                 .filter(|n| n.kind == "instance")

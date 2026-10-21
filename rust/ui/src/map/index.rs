@@ -105,6 +105,20 @@ impl Index {
         self.reach_many(&[start], instances)
     }
 
+    #[cfg(any(feature = "hydrate", test))]
+    pub fn descendants(&self, starts: &[usize]) -> Vec<u8> {
+        let mut active = vec![0; self.names.len()];
+        let mut stack = starts.to_vec();
+        while let Some(node) = stack.pop() {
+            if active[node] != 0 {
+                continue;
+            }
+            active[node] = 1;
+            stack.extend(self.outgoing.neighbors(node).iter().map(|link| link.node));
+        }
+        active
+    }
+
     pub fn reach_many(&self, starts: &[usize], instances: bool) -> Vec<u8> {
         let mut active = vec![0; self.names.len()];
         let mut visited = vec![0_u8; self.names.len()];

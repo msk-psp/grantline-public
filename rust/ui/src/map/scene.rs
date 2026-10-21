@@ -9,13 +9,41 @@ pub(super) struct Model {
     pub kinds: BTreeMap<String, String>,
     pub index: Index,
     folded: Index,
+    buckets: BTreeMap<String, Vec<usize>>,
+    people: Vec<usize>,
+    policies: Vec<usize>,
     cache: VecDeque<(usize, Rc<Vec<u8>>)>,
 }
 
 impl Model {
     pub fn new(graph: Graph, kinds: BTreeMap<String, String>) -> Self {
-        let folded = layout(&graph, &kinds, "", None);
-        let index = Index::new(&graph, folded.nodes.iter().map(|n| n.id.clone()));
+        let (view, buckets) = super::buckets::fold(&graph, &kinds);
+        let folded = layout(&view, &kinds, None, None);
+        let index = Index::new(
+            &graph,
+            folded
+                .nodes
+                .iter()
+                .map(|n| n.id.clone())
+                .chain(buckets.keys().cloned()),
+        );
+        let people = view
+            .principals
+            .iter()
+            .chain(&view.hops)
+            .filter(|id| matches!(super::kind(&view, id), "human" | "svc-account" | "service"))
+            .filter_map(|id| index.ids.get(id).copied())
+            .collect();
+        let policies = view
+            .kind
+            .iter()
+            .filter(|(_, k)| k.as_str() == "policy")
+            .filter_map(|(id, _)| index.ids.get(id).copied())
+            .collect();
+        let buckets = buckets
+            .into_iter()
+            .map(|(id, members)| (id, members.into_iter().map(|n| index.ids[&n]).collect()))
+            .collect();
         let folded = Index::with_names(
             &Graph {
                 edges: folded.edges,
@@ -24,10 +52,13 @@ impl Model {
             index.names.clone(),
         );
         Self {
-            graph,
+            graph: view,
             kinds,
             index,
             folded,
+            buckets,
+            people,
+            policies,
             cache: VecDeque::new(),
         }
     }
@@ -40,11 +71,15 @@ impl Model {
             self.cache.push_front(item);
             return result;
         }
-        let result = Rc::new(if id.starts_with('@') {
+        let mut active = if id.starts_with('@') {
             self.folded.reach(start, false)
+        } else if let Some(members) = self.buckets.get(id) {
+            self.index.reach_many(members, true)
         } else {
             self.index.reach(start, true)
-        });
+        };
+        self.project_buckets(&mut active);
+        let result = Rc::new(active);
         if result.len() <= 8 * 1024 * 1024 {
             self.cache.push_front((start, result.clone()));
             let limit = (8 * 1024 * 1024 / self.index.names.len().max(1)).clamp(1, 32);
@@ -54,11 +89,67 @@ impl Model {
     }
 
     pub fn scene(&self, query: &str, expanded: Option<&str>, lang: &str) -> Scene {
-        Scene::new(
-            layout(&self.graph, &self.kinds, query, expanded),
-            self,
-            lang,
-        )
+        let visible = (!query.is_empty()).then(|| {
+            let q = query.to_lowercase();
+            let mut starts = BTreeSet::new();
+            for (i, name) in self.index.names.iter().enumerate() {
+                if name.to_lowercase().contains(&q)
+                    || self
+                        .graph
+                        .names
+                        .get(name)
+                        .is_some_and(|label| label.to_lowercase().contains(&q))
+                {
+                    if let Some(members) = self.buckets.get(name) {
+                        starts.extend(members.iter().copied());
+                    } else {
+                        starts.insert(i);
+                    }
+                }
+            }
+            let mut active = self
+                .index
+                .reach_many(&starts.into_iter().collect::<Vec<_>>(), false);
+            self.project_buckets(&mut active);
+            self.index
+                .names
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| active[*i] != 0)
+                .map(|(_, n)| n.clone())
+                .collect()
+        });
+        let mut data = layout(&self.graph, &self.kinds, expanded, visible.as_ref());
+        for node in &mut data.nodes {
+            if node.kind == "resource"
+                && let Some(members) = self.buckets.get(&node.id)
+            {
+                node.count = members.len();
+            }
+        }
+        Scene::new(data, self, lang)
+    }
+
+    fn project_buckets(&self, active: &mut [u8]) {
+        for (id, members) in &self.buckets {
+            if members.iter().any(|&i| active[i] != 0) {
+                active[self.index.ids[id]] = 1;
+            }
+        }
+    }
+
+    pub fn policy_priority(&self, active: &[u8]) -> Vec<u8> {
+        let people: Vec<_> = self
+            .people
+            .iter()
+            .copied()
+            .filter(|&i| active[i] != 0)
+            .collect();
+        let mut priority = self.folded.descendants(&people);
+        for &id in &self.policies {
+            priority[id] |= active[id];
+        }
+        priority
     }
 }
 
@@ -133,6 +224,10 @@ pub(super) struct Scene {
     pub height: usize,
     pub ids: Vec<usize>,
     pub lookup: HashMap<String, usize>,
+    pub policy_range: Range<usize>,
+    pub policy_edges: Vec<Range<usize>>,
+    policy_base: Vec<usize>,
+    policy_rows: Vec<usize>,
     columns_nodes: Vec<Range<usize>>,
     base_edges: usize,
     resource_edges: Vec<(usize, Range<usize>)>,
@@ -149,7 +244,7 @@ impl Scene {
             .enumerate()
             .map(|(i, n)| (n.id.clone(), i))
             .collect();
-        let ids = layout
+        let ids: Vec<usize> = layout
             .nodes
             .iter()
             .map(|n| model.index.ids[&n.id])
@@ -216,6 +311,8 @@ impl Scene {
                     .collect();
                 let tag = if n.kind == "instance" {
                     format!("{} {} ›", n.count, tr(lang, "Resources"))
+                } else if n.kind == "resource" && n.count > 0 {
+                    format!("{} {}", n.count, tr(lang, "Resources"))
                 } else if envs.len() > 1 {
                     envs.into_iter().collect::<Vec<_>>().join("·")
                 } else {
@@ -242,6 +339,29 @@ impl Scene {
                 }
             })
             .collect();
+        let policy_range = columns_nodes
+            .iter()
+            .find(|r| layout.nodes[r.start].kind == "policy")
+            .cloned()
+            .unwrap_or(0..0);
+        let policy_base = ids[policy_range.clone()].to_vec();
+        let policy_ids: BTreeSet<_> = policy_base.iter().copied().collect();
+        let policy_rows = layout.nodes[policy_range.clone()]
+            .iter()
+            .map(|n| n.y)
+            .collect();
+        let mut policy_edges: Vec<Range<usize>> = Vec::new();
+        for (i, edge) in edges.iter().enumerate() {
+            if policy_ids.contains(&edge.src) || policy_ids.contains(&edge.dst) {
+                if let Some(last) = policy_edges.last_mut()
+                    && last.end == i
+                {
+                    last.end = i + 1;
+                } else {
+                    policy_edges.push(i..i + 1);
+                }
+            }
+        }
         Self {
             nodes: layout.nodes,
             labels,
@@ -252,10 +372,66 @@ impl Scene {
             height: layout.height,
             ids,
             lookup,
+            policy_range,
+            policy_edges,
+            policy_base,
+            policy_rows,
             columns_nodes,
             base_edges,
             resource_edges: blocks,
         }
+    }
+
+    /// Stable partition of the policy column only; preserve every other node position.
+    pub fn prioritize_policies(&mut self, priority: Option<&[u8]>) -> bool {
+        let hot = |id: &usize| priority.is_some_and(|p| p[*id] != 0);
+        let order: Vec<_> = self
+            .policy_base
+            .iter()
+            .filter(|id| hot(id))
+            .chain(self.policy_base.iter().filter(|id| !hot(id)))
+            .copied()
+            .collect();
+        if self.ids[self.policy_range.clone()] == order {
+            return false;
+        }
+        let mut positions: HashMap<_, _> = self
+            .policy_range
+            .clone()
+            .map(|i| (self.ids[i], i))
+            .collect();
+        for (row, id) in order.into_iter().enumerate() {
+            let target = self.policy_range.start + row;
+            let source = positions[&id];
+            let displaced = self.ids[target];
+            self.nodes.swap(source, target);
+            self.labels.swap(source, target);
+            self.ids.swap(source, target);
+            positions.insert(id, target);
+            positions.insert(displaced, source);
+            *self
+                .lookup
+                .get_mut(&self.nodes[source].id)
+                .expect("node exists") = source;
+            *self
+                .lookup
+                .get_mut(&self.nodes[target].id)
+                .expect("node exists") = target;
+        }
+        for (row, i) in self.policy_range.clone().enumerate() {
+            self.nodes[i].y = self.policy_rows[row];
+        }
+        for range in &self.policy_edges {
+            for edge in &mut self.edges[range.clone()] {
+                if let Some(&i) = positions.get(&edge.src) {
+                    edge.from.1 = self.nodes[i].y;
+                }
+                if let Some(&i) = positions.get(&edge.dst) {
+                    edge.to.1 = self.nodes[i].y;
+                }
+            }
+        }
+        true
     }
 
     pub fn visible(&self, camera: Camera, width: f64, height: f64) -> Visible {
@@ -368,6 +544,185 @@ pub(super) fn kind_index(kind: &str) -> usize {
 mod tests {
     use super::*;
     use crate::Edge;
+
+    fn policies() -> Model {
+        let mut graph = Graph {
+            principals: vec!["alice".into(), "bob".into(), "carol".into()],
+            hops: ["policy:a", "policy:b", "policy:z", "policy:z-secondary"]
+                .map(str::to_owned)
+                .to_vec(),
+            ..Default::default()
+        };
+        for id in &graph.hops {
+            graph.kind.insert(id.clone(), "policy".into());
+        }
+        for (src, dst) in [
+            ("alice", "policy:z"),
+            ("alice", "policy:z-secondary"),
+            ("bob", "policy:a"),
+            ("carol", "policy:b"),
+            ("policy:z", "bucket:assets/private/*"),
+            ("policy:a", "bucket:assets/public/*"),
+            ("policy:z-secondary", "bucket:other/team/*"),
+            ("policy:b", "bucket:isolated/*"),
+        ] {
+            graph.edges.push(Edge {
+                src: src.into(),
+                dst: dst.into(),
+                system: "s3".into(),
+                ..Default::default()
+            });
+        }
+        Model::new(graph, BTreeMap::from([("s3".into(), "s3".into())]))
+    }
+
+    #[test]
+    fn bucket_rows_union_prefix_routes_without_joining_sibling_people_or_other_buckets() {
+        let mut model = policies();
+        let scene = model.scene("", Some("s3"), "en");
+        assert_eq!(
+            scene.nodes.iter().filter(|n| n.kind == "resource").count(),
+            3
+        );
+        assert_eq!(scene.nodes[scene.lookup["bucket:assets"]].count, 2);
+        assert!(!scene.lookup.contains_key("bucket:assets/private/*"));
+        let active = model.active("alice");
+        assert_eq!(active[model.index.ids["bucket:assets"]], 1);
+        assert_eq!(active[model.index.ids["bob"]], 0);
+        assert_eq!(active[model.index.ids["policy:a"]], 0);
+        let bucket = model.active("bucket:assets");
+        for name in ["alice", "bob", "policy:a", "policy:z"] {
+            assert_eq!(bucket[model.index.ids[name]], 1);
+        }
+        for name in ["carol", "policy:b", "policy:z-secondary", "bucket:other"] {
+            assert_eq!(bucket[model.index.ids[name]], 0);
+        }
+    }
+
+    #[test]
+    fn prefix_search_stays_exact_while_rendering_and_prioritizing_bucket_rows() {
+        let mut model = policies();
+        let scene = model.scene("private", Some("s3"), "en");
+        assert!(scene.lookup.contains_key("bucket:assets"));
+        assert!(scene.lookup.contains_key("alice"));
+        assert!(!scene.lookup.contains_key("bob"));
+        assert!(!scene.lookup.contains_key("bucket:other"));
+        let active = model.active("bucket:assets/private/*");
+        let priority = model.policy_priority(&active);
+        assert_eq!(priority[model.index.ids["policy:z-secondary"]], 1);
+        assert_eq!(active[model.index.ids["policy:z-secondary"]], 0);
+        assert_eq!(priority[model.index.ids["policy:a"]], 0);
+    }
+
+    #[test]
+    fn policy_partition_preserves_positions_labels_routes_and_hit_testing_then_restores() {
+        let mut model = policies();
+        let mut scene = model.scene("", Some("s3"), "en");
+        let base: Vec<_> = scene
+            .nodes
+            .iter()
+            .map(|n| (n.id.clone(), n.x, n.y))
+            .collect();
+        let edges: Vec<_> = scene.edges.iter().map(|e| (e.from, e.to)).collect();
+        let order = |s: &Scene| {
+            s.nodes[s.policy_range.clone()]
+                .iter()
+                .map(|n| n.id.as_str().to_owned())
+                .collect::<Vec<_>>()
+        };
+        let active = model.active("bucket:assets");
+        let priority = model.policy_priority(&active);
+        assert!(scene.prioritize_policies(Some(&priority)));
+        assert_eq!(
+            order(&scene),
+            ["policy:a", "policy:z", "policy:z-secondary", "policy:b"]
+        );
+        assert!(!scene.prioritize_policies(Some(&priority)));
+        for (id, x, y) in &base {
+            let i = scene.lookup[id];
+            if scene.nodes[i].kind != "policy" {
+                assert_eq!((scene.nodes[i].x, scene.nodes[i].y), (*x, *y));
+            }
+        }
+        for i in scene.policy_range.clone() {
+            let n = &scene.nodes[i];
+            assert_eq!(scene.ids[i], model.index.ids[&n.id]);
+            assert_eq!(scene.labels[i].text, n.label);
+            let scale = Camera::default().scale(1200., &scene);
+            assert_eq!(
+                scene.hit(
+                    Camera::default(),
+                    1200.,
+                    (n.x + 8) as f64 * scale,
+                    (n.y + 8) as f64 * scale
+                ),
+                Some(i)
+            );
+        }
+        for edge in &scene.edges {
+            if let Some(i) = scene
+                .nodes
+                .iter()
+                .position(|n| model.index.ids[&n.id] == edge.src)
+            {
+                assert_eq!(edge.from, (scene.nodes[i].x, scene.nodes[i].y));
+            }
+            if let Some(i) = scene
+                .nodes
+                .iter()
+                .position(|n| model.index.ids[&n.id] == edge.dst)
+            {
+                assert_eq!(edge.to, (scene.nodes[i].x, scene.nodes[i].y));
+            }
+        }
+        assert!(scene.prioritize_policies(None));
+        assert_eq!(
+            scene
+                .nodes
+                .iter()
+                .map(|n| (n.id.clone(), n.x, n.y))
+                .collect::<Vec<_>>(),
+            base
+        );
+        assert_eq!(
+            scene
+                .edges
+                .iter()
+                .map(|e| (e.from, e.to))
+                .collect::<Vec<_>>(),
+            edges
+        );
+    }
+
+    #[test]
+    fn hundred_thousand_prefixes_share_one_bucket_and_a_single_merged_route() {
+        let graph = Graph {
+            principals: vec!["user".into()],
+            edges: (0..100_000)
+                .map(|n| Edge {
+                    src: "user".into(),
+                    dst: format!("bucket:assets/item-{n:06}"),
+                    system: "s3".into(),
+                    privs: vec!["Read".into()],
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        };
+        let mut model = Model::new(graph, BTreeMap::from([("s3".into(), "s3".into())]));
+        let scene = model.scene("", Some("s3"), "en");
+        assert_eq!(scene.nodes.len(), 3);
+        assert_eq!(scene.edges.len(), 2);
+        assert_eq!(scene.nodes[scene.lookup["bucket:assets"]].count, 100_000);
+        assert!(
+            model
+                .scene("item-099999", Some("s3"), "en")
+                .lookup
+                .contains_key("bucket:assets")
+        );
+        let active = model.active("bucket:assets");
+        assert_eq!(active[model.index.ids["user"]], 1);
+    }
     #[test]
     fn every_resource_remains_addressable_with_bounded_visible_geometry() {
         let graph = Graph {

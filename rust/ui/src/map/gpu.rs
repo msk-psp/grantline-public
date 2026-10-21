@@ -247,6 +247,14 @@ impl Pipeline {
             Gl::STATIC_DRAW,
         );
     }
+    fn update(&self, first: usize, data: &[f32]) {
+        self.gl.bind_buffer(Gl::ARRAY_BUFFER, Some(&self.instances));
+        self.gl.buffer_sub_data_with_i32_and_array_buffer_view(
+            Gl::ARRAY_BUFFER,
+            first as i32 * self.stride,
+            &Float32Array::from(data),
+        );
+    }
     fn draw(&self, range: Range<usize>) {
         if range.is_empty() {
             return;
@@ -288,6 +296,7 @@ pub(super) struct Gpu {
     pub measured: Option<(u64, f64)>,
     pub geometry_uploads: usize,
     pub state_uploads: usize,
+    pub policy_layout_uploads: usize,
 }
 impl Gpu {
     pub fn new(canvas: &HtmlCanvasElement, count: usize) -> Result<Self, JsValue> {
@@ -381,11 +390,20 @@ impl Gpu {
             measured: None,
             geometry_uploads: 0,
             state_uploads: 0,
+            policy_layout_uploads: 0,
         })
     }
     pub fn scene(&mut self, scene: &Scene) {
-        let mut nodes = Vec::with_capacity(scene.nodes.len() * 5);
-        for (i, n) in scene.nodes.iter().enumerate() {
+        self.nodes
+            .upload(&Self::node_data(scene, 0..scene.nodes.len()));
+        self.edges
+            .upload(&Self::edge_data(scene, 0..scene.edges.len()));
+        self.geometry_uploads += 1;
+    }
+    fn node_data(scene: &Scene, range: Range<usize>) -> Vec<f32> {
+        let mut nodes = Vec::with_capacity(range.len() * 5);
+        for i in range {
+            let n = &scene.nodes[i];
             nodes.extend_from_slice(&[
                 n.x as f32,
                 n.y as f32,
@@ -398,9 +416,11 @@ impl Gpu {
                 },
             ]);
         }
-        self.nodes.upload(&nodes);
-        let mut edges = Vec::with_capacity(scene.edges.len() * 8);
-        for e in &scene.edges {
+        nodes
+    }
+    fn edge_data(scene: &Scene, range: Range<usize>) -> Vec<f32> {
+        let mut edges = Vec::with_capacity(range.len() * 8);
+        for e in &scene.edges[range] {
             edges.extend_from_slice(&[
                 e.from.0 as f32,
                 e.from.1 as f32,
@@ -412,8 +432,18 @@ impl Gpu {
                 e.dash,
             ]);
         }
-        self.edges.upload(&edges);
-        self.geometry_uploads += 1;
+        edges
+    }
+    pub fn policy_order(&mut self, scene: &Scene) {
+        self.nodes.update(
+            scene.policy_range.start,
+            &Self::node_data(scene, scene.policy_range.clone()),
+        );
+        for range in &scene.policy_edges {
+            self.edges
+                .update(range.start, &Self::edge_data(scene, range.clone()));
+        }
+        self.policy_layout_uploads += 1;
     }
     pub fn state(&mut self, active: Option<&[u8]>) -> Result<(), JsValue> {
         self.bytes.fill(0);
