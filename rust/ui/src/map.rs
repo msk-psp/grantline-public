@@ -46,6 +46,13 @@ pub fn highlighted(graph: &Graph, start: &str) -> BTreeSet<String> {
         .collect()
 }
 
+fn resource_node(graph: &Graph, id: &str) -> bool {
+    !graph.principals.iter().chain(&graph.hops).any(|n| n == id)
+        && (id.starts_with("bucket:")
+            || graph.terminals.iter().any(|n| n == id)
+            || graph.edges.iter().any(|e| e.dst == id))
+}
+
 #[cfg(any(feature = "hydrate", test))]
 #[derive(Clone)]
 struct Node {
@@ -423,7 +430,7 @@ pub(super) fn PermissionMap(
         <button class="quiet" on:click=move |_|command(viewport,"clear")>{tr(&lang,"Clear selection")}</button>
         </div>
         {move||selected.get().map(|id|{
-            let href=if let Some(system)=id.strip_prefix('@') {format!("/services?system={}",super::encode(system))} else {let resource=graph.with_value(|g|g.terminals.contains(&id) || g.edges.iter().any(|e|e.dst==id) && !g.principals.contains(&id) && !g.hops.contains(&id));format!("/{}?{}={}&lang={}",if resource{"resource"}else{"account"},if resource{"resource"}else{"subject"},super::encode(&id),super::encode(&detail_lang))+&detail_scope};
+            let href=if let Some(system)=id.strip_prefix('@') {format!("/services?system={}",super::encode(system))} else {let resource=graph.with_value(|g|resource_node(g,&id));format!("/{}?{}={}&lang={}",if resource{"resource"}else{"account"},if resource{"resource"}else{"subject"},super::encode(&id),super::encode(&detail_lang))+&detail_scope};
             view!{<a class="entity" href=href>{tr(&detail_lang,"View details")}" · "{id}</a>}
         })}</div>
         <div class="map-viewport" node_ref=viewport tabindex="0" role="listbox"
@@ -451,6 +458,14 @@ pub(super) fn PermissionMap(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn bucket_summary_details_do_not_misclassify_named_identities() {
+        let mut graph = fixture();
+        assert!(resource_node(&graph, "bucket:summary"));
+        assert!(!resource_node(&graph, "alice"));
+        graph.principals.push("bucket:person".into());
+        assert!(!resource_node(&graph, "bucket:person"));
+    }
     #[test]
     fn isolated_inventory_stays_searchable_with_service_and_environment_filters() {
         let mut g = fixture();
