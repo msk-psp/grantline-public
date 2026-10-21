@@ -30,9 +30,9 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
         run: |
-          python3 -c 'import os,re; t=os.environ["RELEASE_TAG"]; assert re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?",t) and len(t)<=128'
+          python3 -c 'import os,re,sys; t=os.environ["RELEASE_TAG"]; sys.exit(0 if len(t)<=128 and re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?",t) else "Invalid release tag")'
           gh release view "$RELEASE_TAG" --json isDraft,isPrerelease,tagName > release.json
-          python3 -c 'import json; r=json.load(open("release.json")); assert not r["isDraft"]'
+          python3 -c 'import json,sys; r=json.load(open("release.json")); sys.exit("Draft release cannot be published" if r["isDraft"] else 0)'
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: refs/tags/${{ github.event.release.tag_name || inputs.tag }}
@@ -93,6 +93,7 @@ jobs:
           labels: |
             org.opencontainers.image.revision=${{ needs.source.outputs.revision }}
             org.opencontainers.image.version=${{ needs.source.outputs.tag }}
+            org.opencontainers.image.licenses=Apache-2.0
       - name: Build native platform and stage by digest
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         id: image
