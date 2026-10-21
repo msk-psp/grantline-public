@@ -78,10 +78,12 @@ keep Python as a development-only oracle until all stages pass.
 
 ## Next action
 
-Publish `v0.1.0` from the tested main commit and verify both GHCR platforms and
-anonymous pulls. Promote the reviewed image by digest through the deployment
-repository, retaining the previous image and private state for rollback.
-Release publication, deployment and effective IAM changes remain separate states.
+The first release is [v0.1.0](https://github.com/msk-psp/grantline-public/releases/tag/v0.1.0).
+Its notes link the image publication run; the release tag remains fixed while a
+manual workflow resume can finish the same source. Release acceptance requires
+native image smoke tests for both platforms, anonymous GHCR pulls and reviewed
+operator-owned deployment by digest with a retained rollback image. Release,
+deployment and effective IAM changes remain separate states.
 After this release, extend approval status beyond PR creation to track
 `merged → applied → verified`; that work is not implemented by this migration.
 Valkey remains a deferred enhancement; the bounded in-process observation cache
@@ -818,6 +820,14 @@ were not contacted. R6 supplies distribution and migration instructions.
 ## R6 — Native distribution and private upgrade {#R6}
 
 Status: merged in #37/#38; native distribution is the default after #44/#45.
+
+The publisher builds AMD64 and ARM64 on their native Linux runners and stages
+images by digest. Each platform runs the image smoke suite before the final
+multi-platform version index is published. Stable releases also update `latest`;
+existing version tags are never overwritten. `workflow_dispatch` accepts an
+existing published release tag, resolves its immutable commit and passes that
+same source to distribution, native tests and image builds. It does not retag
+source or substitute the workflow revision for the application revision.
 
 `Dockerfile.rust` pins official Rust 1.99 and Debian base digests, builds locked
 native/WASM artifacts and runs UID 10001 without Python/Node. A separately

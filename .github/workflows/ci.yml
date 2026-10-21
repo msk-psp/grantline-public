@@ -4,6 +4,10 @@ on:
     branches: [main]
   pull_request:
   workflow_call:
+    inputs:
+      source_ref:
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -13,5 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_ref || github.sha }}
       - name: Verify native distribution boundaries
         run: python3 tests/test_native_distribution.py
