@@ -164,7 +164,7 @@ real configured deployment, the command is:
 docker run --rm -p 127.0.0.1:8420:8420 \
   --mount type=bind,src=/path/to/config,dst=/config,readonly \
   --mount type=bind,src=/path/to/private-state,dst=/data \
-  grantline-native:local \
+  ghcr.io/msk-psp/grantline-public:v0.1.0 \
   -c /config/config.toml serve --live --host 0.0.0.0 --port 8420
 ```
 

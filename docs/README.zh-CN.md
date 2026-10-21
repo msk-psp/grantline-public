@@ -43,7 +43,7 @@ Python 或 Node 运行时。现有标签保留原有运行时；合并代码不�
 稳定版本同时更新 `latest`；预发布版本仅使用独立的版本标签。
 
 ```bash
-docker run --rm -p 127.0.0.1:8420:8420 ghcr.io/msk-psp/grantline-public:latest
+docker run --rm -p 127.0.0.1:8420:8420 ghcr.io/msk-psp/grantline-public:v0.1.0
 ```
 
 打开 **http://127.0.0.1:8420/** 即可体验内置演示，无需凭据。

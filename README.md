@@ -41,7 +41,7 @@ The release workflow tests and publishes native Rust/WASM images with `linux/amd
 Stable releases also update `latest`; pre-releases keep their own version tag.
 
 ```bash
-docker run --rm -p 127.0.0.1:8420:8420 ghcr.io/msk-psp/grantline-public:latest
+docker run --rm -p 127.0.0.1:8420:8420 ghcr.io/msk-psp/grantline-public:v0.1.0
 ```
 
 Open **http://127.0.0.1:8420/** for the built-in demo. No credentials are needed.
