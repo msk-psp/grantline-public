@@ -88,6 +88,7 @@ td .badge{margin:0 3px 3px 0}
 .map-viewport.dragging{cursor:grabbing}
 .map-viewport[title]:not(.dragging){cursor:pointer}
 .map-gpu,.map-labels{position:absolute;inset:0;width:100%;height:100%;display:block;pointer-events:none}
+.map-viewport[data-renderer=canvas2d-fallback] .map-gpu{visibility:hidden}
 .map-viewport:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 .map-legend .human{color:var(--map-read)}
 .map-legend .service,.map-legend .svc-account{color:var(--map-service)}

@@ -81,11 +81,11 @@ impl Driver {
         }
         self.frame();
     }
-    fn point(&self, e: &PointerEvent) -> (f64, f64) {
+    fn point(&self, x: i32, y: i32) -> (f64, f64) {
         let r = self.root.get_bounding_client_rect();
         (
-            f64::from(e.client_x()) - r.left(),
-            f64::from(e.client_y()) - r.top(),
+            f64::from(x - self.root.client_left()) - r.left(),
+            f64::from(y - self.root.client_top()) - r.top(),
         )
     }
     fn publish_focus(&self) {
@@ -147,7 +147,7 @@ impl Driver {
                 self.invalidate();
             }
         } else {
-            let (x, y) = self.point(e);
+            let (x, y) = self.point(e.client_x(), e.client_y());
             let hit = self.scene.hit(self.camera, self.width, x, y);
             if hit != self.hover {
                 self.focus = hit;
@@ -729,13 +729,8 @@ impl Runtime {
             if !d.dragged
                 && let Some(e) = e.dyn_ref::<web_sys::MouseEvent>()
             {
-                let r = d.root.get_bounding_client_rect();
-                if let Some(i) = d.scene.hit(
-                    d.camera,
-                    d.width,
-                    f64::from(e.client_x()) - r.left(),
-                    f64::from(e.client_y()) - r.top(),
-                ) {
+                let (x, y) = d.point(e.client_x(), e.client_y());
+                if let Some(i) = d.scene.hit(d.camera, d.width, x, y) {
                     d.choose(i);
                 }
             }
@@ -746,12 +741,9 @@ impl Runtime {
                 if e.shift_key() {
                     d.camera.y -= e.delta_y();
                 } else {
-                    let r = d.root.get_bounding_client_rect();
-                    d.camera.zoom_at(
-                        if e.delta_y() < 0. { 1.1 } else { 1. / 1.1 },
-                        f64::from(e.client_x()) - r.left(),
-                        f64::from(e.client_y()) - r.top(),
-                    );
+                    let (x, y) = d.point(e.client_x(), e.client_y());
+                    d.camera
+                        .zoom_at(if e.delta_y() < 0. { 1.1 } else { 1. / 1.1 }, x, y);
                 }
                 d.set_hover(None);
                 d.invalidate();
