@@ -45,7 +45,7 @@ GitHub Release를 발행하면 GHCR에 `linux/amd64`·`linux/arm64` 이미지를
 안정 릴리스는 `latest`도 갱신하며, 사전 릴리스는 해당 버전 태그만 사용합니다.
 
 ```bash
-docker run --rm -p 127.0.0.1:8420:8420 ghcr.io/msk-psp/grantline-public:latest
+docker run --rm -p 127.0.0.1:8420:8420 ghcr.io/msk-psp/grantline-public:v0.1.0
 ```
 
 **http://127.0.0.1:8420/** 에서 인증 정보 없이 내장 데모를 볼 수 있습니다.

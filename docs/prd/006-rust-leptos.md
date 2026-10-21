@@ -2,9 +2,10 @@
 
 Decision: **accepted, staged implementation** (2026-10-15). Supersedes the
 unscheduled Dioxus proposal in [PRD 004](004-port-to-rust.md). The target is a
-complete Rust backend and Leptos UI; Python remains the reference until parity
-and live validation permit replacement. This is a distribution and maintenance
-decision, not a claim that a language change removes network or SVG latency.
+complete Rust backend and Leptos UI. The Rust service and default container have
+replaced the Python runtime; the minimal offline oracle lives only in
+`tests/reference`. This is a distribution and maintenance decision, not a claim
+that a language change removes network or SVG latency.
 
 ## R1 — Native core and approval playground {#R1}
 
@@ -28,20 +29,27 @@ adapter commands. It is a test interface, not a replacement production plan CLI.
 Playground identities and role switching provide no production authentication.
 State is disposable, private to the process and erased when it exits.
 
-## Remaining stages
+## Implementation status (2026-10-21)
 
 | Stage | Implementation | Acceptance before promotion | Status |
 |---|---|---|---|
 | R2 | Typed config/intent, snapshots, findings, graph and offline plan CLI | Fixture decisions, diagnostics, PG/CH SQL previews, snapshot round trips and graph paths match Python; S3 commands/coalescing remain R3 | Merged in PR #16 |
 | R3 | PostgreSQL, ClickHouse and S3 native adapters, probes and writers | Existing regression cases ported; separately authorized live read/probe and reversible write validation per adapter | R3a–R3e3 merged; R3f merged; R3g1 merged; R3g2 merged; R3g3 membership writer merged in PR #28; R3g4 merged in PR #29; R3h1/R3h2 merged in #31; R3h3 merged in #32; conditional remote JSON writer implemented; protocol-specific tree/IAM writes remain explicitly unsupported |
-| R4 | Production sessions/OIDC, durable approval store, Slack signatures/DMs, code writer and GitHub PRs | Requester binding, all approvers, callback replay, immutable plan and repo scope verified end to end; approval/PR/applied access reported separately | Implemented in this stack; isolated verification, operational promotion pending |
-| R5 | All console pages, Leptos hydration and interactive permission map | Repeated hover highlight/dimming, matrix scrolling, accessible dark mode, logs and four locales verified in browser | Implemented in this stack; isolated verification, operational promotion pending |
-| R6 | Release image, migration/rollback and operating guide | Reproducible native/WASM builds, upgrade of persisted state, image smoke tests and explicitly authorized rollout | Implemented in this stack; native image/state migration checked locally, operational promotion pending |
+| R4 | Production sessions/OIDC, durable approval store, Slack signatures/DMs, code writer and GitHub PRs | Requester binding, all approvers, callback replay, immutable plan and repo scope verified end to end; approval/PR/applied access reported separately | Merged in #34–#38; signed OIDC and durable Slack/GitHub loopback CI passed |
+| R5 | All console pages, Leptos hydration and interactive permission map | Repeated hover highlight/dimming, matrix scrolling, accessible dark mode, logs and four locales verified in browser | Merged in #36/#38; SSR/WASM, four locales and interactive map checks passed |
+| R6 | Release image, migration/rollback and operating guide | Reproducible native/WASM builds, upgrade of persisted state, image smoke tests and explicitly authorized rollout | Merged in #37/#38; native image and migration CI passed; first public release is v0.1.0 |
+
+The table records source and isolated verification. Deployment-specific SSO,
+external Slack/GitHub and effective IAM access require operator-owned evidence;
+a merged PR or image publication does not prove them. Later completed work:
+R7 #39 (parallel reads/workflow parity), R8 #43 (column observation), R9 #44/#45
+(Python retirement), R10 #49 (scoped observation limits), and #47/#51
+(base64 and grouped RustCrypto compatibility).
 
 ## R2 — Offline CLI and data contracts {#R2}
 
-Status: implemented offline; verification commands below and current PR checks
-record the boundary. The native CLI loads the existing TOML config and intent,
+Status: merged in PR #16; offline differential checks remain part of CI.
+The native CLI loads the existing TOML config and intent,
 resolving paths against the config directory. PostgreSQL/ClickHouse fixtures
 support observation, fact findings and native command previews. A Python JSONL
 snapshot can supply observations for any configured instance, including S3.
@@ -70,10 +78,20 @@ keep Python as a development-only oracle until all stages pass.
 
 ## Next action
 
-### R7 — Python workflow parity and observation performance {#R7}
+Publish `v0.1.0` from the tested main commit and verify both GHCR platforms and
+anonymous pulls. Promote the reviewed image by digest through the deployment
+repository, retaining the previous image and private state for rollback.
+Release publication, deployment and effective IAM changes remain separate states.
+After this release, extend approval status beyond PR creation to track
+`merged → applied → verified`; that work is not implemented by this migration.
+Valkey remains a deferred enhancement; the bounded in-process observation cache
+is already implemented.
 
-Status: implemented and locally/isolated validated (2026-10-19); stacked PR
-integration and remote CI remain separate. Compatibility covers the represented
+## R7 — Python workflow parity and observation performance {#R7}
+
+Status: merged in PR #39 after the main integration in #38; native, provider,
+WASM/auth/workflow and image CI passed. The 2026-10-19 isolated results below
+record the original validation scope. Compatibility covers the represented
 permission workflows under the native authenticated/reviewed-write contract,
 not acceptance of legacy bearer links or implicit approval-time IAM execution.
 
@@ -101,18 +119,10 @@ Execution evidence and the exact remaining scope are recorded in the workspace
 task `grantline-rust-parity-complete`; each acceptance item is marked complete
 only after its tests run.
 
-Next: merge the main-integration PR first, then retarget/merge the parity PR.
-Operational cutover, real provider authentication and effective target access
-remain separate authorized acceptance; merging these source changes is not deployment.
-
-PR #38 collects the already-merged #34–#37 feature-branch stack into main;
-merge it before the R7 parity follow-up.
-R1–R6 software paths are implemented within their explicit adapter contracts.
-After stack CI and review, authorize a separate isolated operational pilot using
-real configured OIDC/Slack/GitHub identities and read-only service comparisons.
-A release publication and production/staging traffic switch require separate
-operator action. Unsupported protocol/object scopes remain refused, never
-silently simulated or treated as empty access.
+PR #38 integrated the #34–#37 stack; #39 completed the R7 follow-up. Their
+software paths are implemented within explicit adapter contracts. Unsupported
+protocol/object scopes remain refused or unknown. Operator-specific authentication,
+service reload/effective access and traffic cutover require separate validation.
 
 ## R3 — Native adapter migration {#R3}
 
@@ -805,14 +815,18 @@ checks for repeated hover, dimming, matrix scrolling, themes, official icons and
 four locale transitions. Real operational SSO, Slack, GitHub and IAM services
 were not contacted. R6 supplies distribution and migration instructions.
 
-## R6 — Native distribution and private upgrade
+## R6 — Native distribution and private upgrade {#R6}
+
+Status: merged in #37/#38; native distribution is the default after #44/#45.
 
 `Dockerfile.rust` pins official Rust 1.99 and Debian base digests, builds locked
 native/WASM artifacts and runs UID 10001 without Python/Node. A separately
 explicit read-only public fixture preview permits container networking; it
 refuses live services or authenticated modes. Release publication depends on
-reference/privacy, native adapter/WASM/auth/workflow/migration tests and native
-image smoke tests. Existing Python Dockerfile remains an explicit rollback path.
+native distribution, adapter/WASM/auth/workflow/migration tests and native image
+smoke tests. Privacy verification runs locally in pre-commit/pre-push hooks, not
+in CI. `Dockerfile` is native; `Dockerfile.rust` is a compatibility alias. An old
+Python image is an operator-retained rollback artifact, not a current build target.
 
 The copy-only `migrate` CLI defaults to dry-run. Write requires stopped source
 writers, `--write --offline`, bounded private inputs, a new destination and an
@@ -835,7 +849,8 @@ cutover remain separately authorized deployment acceptance checks.
 
 ## R8 — Precise PostgreSQL column observation {#R8}
 
-Status: implemented; isolated verification complete, PR checks in progress. Column ACLs use
+Status: merged in PR #43; isolated PostgreSQL 18 and native CI passed.
+Column ACLs use
 `column:database.schema.table.column`, preserving subject, privilege, grantor and
 grant options without turning a column grant into a table grant. A column ACL
 must not obscure sibling table ACLs in the schema. Table privileges cover their
@@ -852,23 +867,24 @@ No production ACL change is part of this stage.
 
 ## R9 — Retire the Python service {#R9}
 
-Status: implemented; verification and PR checks in progress. Remove the Python application, package entry point,
+Status: merged in PR #44 and integrated into main in #45; native distribution
+and image CI passed. Removed the Python application, package entry point,
 legacy container and application-only CI. Keep only the modules needed by the
 existing offline differential suites under `tests/reference`, and keep native
 provider/image/privacy verification scripts. The reference is test-only and is
 excluded from container builds. Default and release containers use Rust/Leptos.
 Keep the `Dockerfile.rust` path compatible with existing consumers.
 
-Next action: review and merge the R8 column observation PR before the stacked
-R9 cleanup PR. R8 passed isolated official PostgreSQL 18.6 provider/writer/TLS
-tests and pg_duckdb PostgreSQL 18.4 catalog/probe tests.
+R8 merged before R9. Its verification used official PostgreSQL 18.6
+provider/writer/TLS tests and pg_duckdb PostgreSQL 18.4 catalog/probe tests.
 PostgreSQL special roles and ClickHouse negative/parameterized grants retain
 their existing unknown semantics; retiring Python does not establish parity for
 those unsupported scopes. Operational rollout and live comparisons are separate.
 
 ## R10 — Observation limits and scoped ClickHouse unknowns {#R10}
 
-Status: implemented; isolated verification complete, PR checks pending. Separate configured
+Status: merged in PR #49; isolated provider, SSR/WASM and native image CI passed.
+Separate configured
 exclusions and unsupported capability semantics from actual reader failures in the
 console. Collapse known limitations by default, retain affected service/subjects,
 privileges and resource prefixes, and keep unverified intent visible. Preserve
@@ -883,9 +899,11 @@ fully evaluate partial revokes or PostgreSQL special capabilities.
 
 Acceptance: native/SSR/WASM checks, fictional HTTP transport and official isolated
 ClickHouse/PostgreSQL 18 tests cover positive scope preservation, unknown
-propagation, snapshot round trips and fail-closed plans. Public privacy checks
-must pass. No production IAM modification or operational image promotion is part
+propagation, snapshot round trips and fail-closed plans. Local privacy hooks
+check publication inputs; privacy is no longer a CI job. No production IAM
+modification or operational image promotion is part
 of this implementation. Validation passed: 68 native workspace tests, Clippy,
 SSR/WASM with four locales, official ClickHouse 26.6.2.160 and PostgreSQL 18.6,
-snapshot/history/core differential cases and native runtime checks. Next action:
-review CI and merge the scoped PR; release/image promotion remains separate.
+snapshot/history/core differential cases and native runtime checks. The first
+public release/image promotion is the next action above. Unsupported partial
+revokes and PostgreSQL special capabilities remain unknown.

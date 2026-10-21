@@ -1,7 +1,8 @@
-# Grantline — Rust + Leptos migration
+# Grantline — Rust + Leptos
 
 Native Rust backend and Leptos SSR/WASM console, with no Python runtime.
-R1–R6 implementation is delivered as the [migration stack](../docs/prd/006-rust-leptos.md).
+R1–R10 are merged; the [migration record](../docs/prd/006-rust-leptos.md)
+links implementation stages and their verification boundaries.
 Network reads require `--live`; IAM writes require their own reviewed plan and
 explicit write flags. Read-only local preview is the default.
 
@@ -929,7 +930,7 @@ be changed with `--port 8424`. The former Python console and playground are reti
 - Native approval checks actor-bound tokens, independent reviewers, all required
   approvals, immutable plan content and terminal decisions.
 - Leptos SSR components render accessible forms with escaped dynamic content;
-  Axum handles the HTTP workflow. No browser JavaScript or WASM is needed for R1.
+  Axum handles the HTTP workflow; WASM hydrates the interactive console.
 - R2 loads TOML intent, reads offline observations, explains drift and produces
   fixture SQL previews, interoperable snapshots and authorization graphs.
 - R3a interprets local S3 IAM planes and produces grouped document previews,
@@ -948,16 +949,28 @@ be changed with `--port 8424`. The former Python console and playground are reti
 - R3h2 adds explicitly authorized DB scopes, future-relation scope disclosure and overlap/partial-revoke guards.
 - R3h3 adds canonical single-role memberships with direct ADMIN authority and exact inverse checks.
 
-## What remains
+- Native OIDC/trusted-proxy sessions, private durable approval state, signed Slack
+  callbacks/DMs and repository-scoped GitHub policy PR publication.
+- All console pages, interactive SSR/WASM map, repeated-hover highlight/dimming,
+  history/detail navigation, service icons and English/Korean/Japanese/Chinese UI.
+- Bounded parallel reads, shared observation cache/refresh, private CA support,
+  PostgreSQL column ACLs and scoped ClickHouse column/named-collection observation.
+- Conditional remote JSON and direct Filer identity writers under their explicit
+  review/stale-state contracts; native image/state migration and rollback tooling.
 
-Global and other-object PostgreSQL defaults and remote S3
-writers, production authentication,
-durable approvals, real Slack/GitHub writers, all existing console pages,
-WASM map interactions, four-language UI and release images are later stages.
-Remote S3 document writes and other native writers remain in R3. Approval, a
-simulated PR and effective IAM access are separate states. This experimental app
-is not ready to replace a production deployment. The playground stays fictional;
-CLI file application, service reload and effective access are separate states.
+## Current limits and follow-up
+
+PostgreSQL special/predefined role capabilities and unsupported membership options,
+ClickHouse partial revokes or ambiguous scopes, global/other-object PostgreSQL
+default writes and unsupported S3 protocol/object writes remain refused or unknown.
+The detailed adapter contracts below define the supported subset. A missing read
+must never be presented as no access.
+
+Approvals can publish policy PRs; they do not automatically merge or apply IAM.
+Tracking `merged → applied → verified` beyond PR creation is follow-up work.
+Valkey is deferred; observation caching currently uses bounded process memory.
+The playground remains fictional. Every deployment still needs its own real SSO,
+external integration, service reload/effective-access and rollback validation.
 
 ## Check the boundary
 
@@ -994,8 +1007,9 @@ actions, policy precedence, Deny, prefix capabilities, IAM trees, document group
 and unchanged source files. Rust additionally marks capabilities unknown when a
 policy is incomplete/missing, keeps empty attached policies authoritative and
 blocks previews that cannot exactly realize the requested grant set. Those safety
-boundaries intentionally exceed the Python oracle. Production/staging observation,
-production writers, performance and production integration remain unverified. The ClickHouse
+boundaries intentionally exceed the Python oracle. These suites use fictional
+fixtures or isolated providers; they do not establish an operator deployment
+result, production IAM changes or production latency. The ClickHouse
 suite uses loopback HTTP failure scenarios and a disposable official 26.6.2.160
 server pinned by multi-platform image digest. It checks actual SQL, nested roles,
 unsupported scopes, stale grants, visibility and a server-refused POST write;

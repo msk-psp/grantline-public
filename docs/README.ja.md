@@ -47,7 +47,7 @@ GitHub Releaseの公開時に、GHCRへ`linux/amd64`・`linux/arm64`イメージ
 安定版は`latest`も更新します。プレリリースには個別のバージョンタグを使います。
 
 ```bash
-docker run --rm -p 127.0.0.1:8420:8420 ghcr.io/msk-psp/grantline-public:latest
+docker run --rm -p 127.0.0.1:8420:8420 ghcr.io/msk-psp/grantline-public:v0.1.0
 ```
 
 **http://127.0.0.1:8420/** で、認証情報なしで内蔵デモを試せます。
