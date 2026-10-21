@@ -502,16 +502,16 @@ impl Driver {
                 self.state_dirty = true;
             }
             if self.state_dirty {
-                if let Some(gpu) = &mut self.gpu {
-                    if let Err(error) = gpu.state(self.active.as_ref().map(|s| s.as_slice())) {
-                        let _ = self
-                            .root
-                            .set_attribute("data-gpu-error", &format!("{error:?}"));
-                        self.gpu = None;
-                        let _ = self
-                            .root
-                            .set_attribute("data-renderer", "canvas2d-fallback");
-                    }
+                if let Some(gpu) = &mut self.gpu
+                    && let Err(error) = gpu.state(self.active.as_ref().map(|s| s.as_slice()))
+                {
+                    let _ = self
+                        .root
+                        .set_attribute("data-gpu-error", &format!("{error:?}"));
+                    self.gpu = None;
+                    let _ = self
+                        .root
+                        .set_attribute("data-renderer", "canvas2d-fallback");
                 }
                 self.state_dirty = false;
             }
