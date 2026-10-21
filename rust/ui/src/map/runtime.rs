@@ -106,6 +106,8 @@ impl Driver {
                             }
                         )
                     )
+                } else if n.kind == "resource" && n.count > 0 {
+                    format!("{} · {} {}", n.label, n.count, tr(&self.lang, "Resources"))
                 } else {
                     n.label.clone()
                 };
@@ -500,6 +502,23 @@ impl Driver {
                 self.active = key.as_deref().map(|id| self.model.active(id));
                 self.active_key = key;
                 self.state_dirty = true;
+                // Keep the pointed policy still while moving through the policy column.
+                if !self
+                    .hover
+                    .is_some_and(|i| self.scene.nodes[i].kind == "policy")
+                {
+                    let priority = self.active.as_ref().map(|a| self.model.policy_priority(a));
+                    let hover = self.hover.map(|i| self.scene.nodes[i].id.clone());
+                    let focus = self.focus.map(|i| self.scene.nodes[i].id.clone());
+                    if self.scene.prioritize_policies(priority.as_deref()) {
+                        self.hover = hover.and_then(|id| self.scene.lookup.get(&id).copied());
+                        self.focus = focus.and_then(|id| self.scene.lookup.get(&id).copied());
+                        self.publish_focus();
+                        if let Some(gpu) = &mut self.gpu {
+                            gpu.policy_order(&self.scene);
+                        }
+                    }
+                }
             }
             if self.state_dirty {
                 if let Some(gpu) = &mut self.gpu
@@ -558,9 +577,9 @@ impl Driver {
             let active_nodes = self
                 .active
                 .as_ref()
-                .map(|a| a.iter().filter(|&&v| v != 0).count());
+                .map(|a| self.scene.ids.iter().filter(|&&i| a[i] != 0).count());
             self.last_cpu = now() - start;
-            let stats = serde_json::json!({"frame":self.frame,"cpuMs":self.last_cpu,"eventToSubmitMs":if self.last_event>0.{Some(now()-self.last_event)}else{None},"nodes":self.scene.nodes.len(),"edges":self.scene.edges.len(),"visibleNodes":visible.nodes.iter().map(|r|r.len()).sum::<usize>(),"visibleEdges":visible.edges.iter().map(|r|r.len()).sum::<usize>(),"activeNodes":active_nodes,"drawCalls":draws,"geometryUploads":self.gpu.as_ref().map(|g|g.geometry_uploads),"stateUploads":self.gpu.as_ref().map(|g|g.state_uploads),"hover":self.hover.map(|i|&self.scene.nodes[i].id)});
+            let stats = serde_json::json!({"frame":self.frame,"cpuMs":self.last_cpu,"eventToSubmitMs":if self.last_event>0.{Some(now()-self.last_event)}else{None},"nodes":self.scene.nodes.len(),"edges":self.scene.edges.len(),"visibleNodes":visible.nodes.iter().map(|r|r.len()).sum::<usize>(),"visibleEdges":visible.edges.iter().map(|r|r.len()).sum::<usize>(),"activeNodes":active_nodes,"drawCalls":draws,"geometryUploads":self.gpu.as_ref().map(|g|g.geometry_uploads),"stateUploads":self.gpu.as_ref().map(|g|g.state_uploads),"policyLayoutUploads":self.gpu.as_ref().map(|g|g.policy_layout_uploads),"policyOrder":self.scene.nodes[self.scene.policy_range.clone()].iter().take(16).map(|n|&n.id).collect::<Vec<_>>(),"hover":self.hover.map(|i|&self.scene.nodes[i].id)});
             let _ = self
                 .root
                 .set_attribute("data-graph-frame", &stats.to_string());

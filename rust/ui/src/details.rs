@@ -166,6 +166,8 @@ pub(super) fn resource(b: &Bootstrap) -> AnyView {
 }
 fn contains(scope: &str, resource: &str) -> bool {
     resource == scope
+        || (resource.starts_with("capability:s3/")
+            && super::map::bucket(resource).as_deref() == Some(scope))
         || (scope.starts_with("bucket:")
             && resource.starts_with(&format!("{}/", scope.trim_end_matches('/'))))
         || scope.strip_prefix("db:").is_some_and(|db| {
@@ -284,6 +286,15 @@ mod tests {
     fn resource_navigation_keeps_scope_boundaries() {
         assert!(contains("bucket:demo/team", "bucket:demo/team/reports"));
         assert!(!contains("bucket:demo/team", "bucket:demo/teammate"));
+        assert!(contains(
+            "bucket:demo",
+            "capability:s3/ListBucketVersions bucket=demo prefix='team/*'"
+        ));
+        assert!(!contains(
+            "bucket:demo2",
+            "capability:s3/ListBucketVersions bucket=demo prefix='team/*'"
+        ));
+        assert!(!contains("bucket:demo", "capability:s3/ListAllMyBuckets"));
         assert!(contains("db:demo", "table:demo.app.events"));
         assert!(!contains("db:demo", "table:demo2.app.events"));
         assert!(contains("db:demo", "column:demo.app.events.a"));
