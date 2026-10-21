@@ -44,6 +44,7 @@ jobs:
           cargo +1.99.0 install --locked wasm-bindgen-cli --version 0.2.129
           scripts/build_rust_ui.sh
           node scripts/check_rust_ui.mjs
+          node scripts/check_rust_graph.mjs --check --port 0
           python3 scripts/check_rust_console_details.py
       - name: Compare native contracts with the isolated test reference
         run: |

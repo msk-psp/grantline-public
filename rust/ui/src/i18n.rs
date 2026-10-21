@@ -1,5 +1,31 @@
 pub const LANGUAGES: [&str; 4] = ["en", "ko", "ja", "zh-CN"];
 const MESSAGES: &[(&str, [&str; 3])] = &[
+    ("Expanded", ["펼침", "展開済み", "已展开"]),
+    ("Collapsed", ["접힘", "折りたたみ", "已折叠"]),
+    (
+        "Map unavailable. Use Accounts or Resources.",
+        [
+            "권한 맵을 표시할 수 없습니다. 계정 또는 리소스 화면을 이용하세요.",
+            "マップを表示できません。アカウントまたはリソース画面をご利用ください。",
+            "无法显示权限图。请使用账户或资源页面。",
+        ],
+    ),
+    (
+        "Enable JavaScript to explore the map.",
+        [
+            "권한 맵을 탐색하려면 JavaScript를 켜세요.",
+            "マップを操作するには JavaScript を有効にしてください。",
+            "请启用 JavaScript 以浏览权限图。",
+        ],
+    ),
+    (
+        "Arrow keys: navigate nodes. Enter: select or expand. Home/End: first/last node. Page Up/Down: pan.",
+        [
+            "방향키: 노드 이동. Enter: 선택 또는 펼치기. Home/End: 처음·마지막 노드. Page Up/Down: 화면 이동.",
+            "矢印キー: ノード移動。Enter: 選択・展開。Home/End: 最初・最後のノード。Page Up/Down: 画面移動。",
+            "方向键：切换节点。Enter：选择或展开。Home/End：首个或末个节点。Page Up/Down：移动视图。",
+        ],
+    ),
     (
         "Observation scope and limitations",
         ["관측 범위와 제한", "観測範囲と制限", "观测范围与限制"],
@@ -87,11 +113,11 @@ const MESSAGES: &[(&str, [&str; 3])] = &[
     ("Write", ["쓰기", "書き込み", "写入"]),
     ("Admin", ["관리자", "管理者", "管理"]),
     (
-        "Click to follow · scroll to zoom · drag to pan · Esc to reset",
+        "Click to follow · scroll to zoom · Shift+scroll to pan · drag to pan · Esc to reset",
         [
-            "클릭: 경로 추적 · 스크롤: 확대/축소 · 드래그: 이동 · Esc: 초기화",
-            "クリック: 経路追跡 · スクロール: 拡大縮小 · ドラッグ: 移動 · Esc: リセット",
-            "点击追踪路径 · 滚动缩放 · 拖动平移 · Esc 重置",
+            "클릭: 경로 추적 · 스크롤: 확대/축소 · Shift+스크롤: 상하 이동 · 드래그: 이동 · Esc: 초기화",
+            "クリック: 経路追跡 · スクロール: 拡大縮小 · Shift+スクロール: 上下移動 · ドラッグ: 移動 · Esc: リセット",
+            "点击追踪路径 · 滚动缩放 · Shift+滚动上下移动 · 拖动平移 · Esc 重置",
         ],
     ),
     (
