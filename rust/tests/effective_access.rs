@@ -337,6 +337,9 @@ async fn requested_scopes_identity_and_read_stages_are_independent() {
         html.contains("검증 실행")
             && html.contains("objects-staging")
             && html.contains("pg-staging")
+            && html.contains("조회 권한")
+            && html.contains("value=\"read\"")
+            && html.contains("value=\"create\"")
     );
     assert!(!html.contains(SECRET));
     for (mode, expected) in [
@@ -407,6 +410,7 @@ async fn requested_scopes_identity_and_read_stages_are_independent() {
         json!({"resource":"bucket:demo/team/*"}),
         json!({"table":"../sample"}),
         json!({"subject":"administrator"}),
+        json!({"postgres_operation":"unknown"}),
     ] {
         assert_eq!(server.check("operator", &cookie, &csrf, changes).0, 400);
     }
@@ -603,6 +607,32 @@ fn postgres_creation_permissions_use_subject_login_without_ddl() {
                     && r["verdict"] == "deny")
         );
         assert_eq!(postgres.sql(db,"SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname IN ('maintenance','registry');").trim(),"0");
+        postgres.sql(
+            db,
+            "CREATE TABLE registry.events(id integer); GRANT SELECT ON registry.events TO alice;",
+        );
+        let (status, read) = server.check(
+            "operator", &cookie, &csrf,
+            json!({"system":"pg-staging","resource":format!("table:{db}.registry.events"),"postgres_operation":"read"}),
+        );
+        assert_eq!(status, 200);
+        assert_eq!(verdicts(&read), vec!["allow", "allow", "allow"]);
+        assert!(
+            read["checks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|r| r["priv"] != "CREATE")
+        );
+        assert_eq!(read["data_rows_verified"], false);
+        assert_eq!(read["applied"], false);
+        postgres.sql(db, "REVOKE SELECT ON registry.events FROM alice;");
+        let (status, denied) = server.check(
+            "operator", &cookie, &csrf,
+            json!({"system":"pg-staging","resource":format!("table:{db}.registry.events"),"postgres_operation":"read"}),
+        );
+        assert_eq!(status, 200);
+        assert_eq!(verdicts(&denied), vec!["allow", "allow", "deny"]);
     }
     let (_, report) = server.check(
         "operator",

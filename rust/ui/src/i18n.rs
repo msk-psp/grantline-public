@@ -1,6 +1,31 @@
 pub const LANGUAGES: [&str; 4] = ["en", "ko", "ja", "zh-CN"];
 const MESSAGES: &[(&str, [&str; 3])] = &[
     (
+        "PostgreSQL operation",
+        [
+            "PostgreSQL 확인 항목",
+            "PostgreSQLの検証項目",
+            "PostgreSQL 检查类型",
+        ],
+    ),
+    ("Read access", ["조회 권한", "読み取り権限", "读取权限"]),
+    (
+        "Schema/table creation",
+        [
+            "스키마·테이블 생성",
+            "スキーマ・テーブル作成",
+            "创建模式或表",
+        ],
+    ),
+    (
+        "PostgreSQL read checks: a table checks CONNECT, USAGE and SELECT; a schema checks prerequisites only. No CREATE privilege or data-row query is required.",
+        [
+            "PostgreSQL 조회 확인: 테이블은 CONNECT·USAGE·SELECT를, 스키마는 접근 전제 조건만 확인합니다. CREATE 권한을 요구하거나 데이터 행을 조회하지 않습니다.",
+            "PostgreSQLの読み取り検証: テーブルはCONNECT・USAGE・SELECT、スキーマは前提条件のみを確認します。CREATE権限や行データの照会は不要です。",
+            "PostgreSQL 读取检查：表检查 CONNECT、USAGE 和 SELECT，模式仅检查访问前提条件。不要求 CREATE 权限，也不查询数据行。",
+        ],
+    ),
+    (
         "PostgreSQL: db:database checks new-schema creation; schema:database.schema also checks USAGE and table creation. These are ACL checks, not attempted DDL.",
         [
             "PostgreSQL: db:DB는 새 스키마 생성 권한을, schema:DB.스키마는 USAGE·테이블 생성 권한도 확인합니다. DDL 실행 없이 ACL을 평가합니다.",

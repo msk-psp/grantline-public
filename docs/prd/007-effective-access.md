@@ -37,6 +37,11 @@ Read, so it cannot diagnose a requested grant that is currently absent.
   schema USAGE/CREATE separately using an explicitly mapped subject TCP login.
   The existing fixed `has_*_privilege` evaluator verifies session/current user;
   no observer fallback, schema/table creation or permission writes are attempted.
+- [x] [E7] Operators can select PostgreSQL read checks independently of creation.
+  Exact table resources check CONNECT/USAGE/SELECT; database/schema resources
+  check prerequisites only. The UI defaults to read; API requests omitting the
+  operation retain creation checks. A read-only fixture must pass SELECT checks
+  while CREATE is denied, and revoking SELECT must change only that result.
 
 ## Boundaries and rollout
 
@@ -58,10 +63,13 @@ operator allowlist or restores the previous matching image/config; IAM is unchan
 ## Local evidence
 
 `cargo +1.99.0 test --locked --manifest-path rust/Cargo.toml --workspace --
---include-ignored`: 87 passed, including the opt-in disposable PostgreSQL 18.6
+--include-ignored`: 89 passed, including the opt-in disposable PostgreSQL 18.6
 case. `rust/tests/effective_access.rs` covers the API, HTTP fixtures and real
-PostgreSQL database/schema ACL distinctions; `rust/ui/src/verify.rs` covers result
-rendering and expected denials. The new API regression failed with 404 before
+PostgreSQL database/schema ACL distinctions, read checks with CREATE denied, and
+SELECT revocation without losing CONNECT/USAGE. API requests without an operation
+retain creation semantics; invalid operation values are rejected. The PostgreSQL
+read selector is covered by the SSR assertion. `rust/ui/src/verify.rs` covers result
+rendering and expected denials. The original API regression failed with 404 before
 implementation, then passed with authentication enforcement. Formatting, workspace
 Clippy (`-D warnings`), hydrated WASM release build and public-source privacy scan
 also passed. No live deployment or target-user desktop validation occurred.

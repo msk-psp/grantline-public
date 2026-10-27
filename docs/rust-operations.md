@@ -151,6 +151,14 @@ pg_duckdb credential forwarding or prove a user's desktop client/network works.
 Keep those checks separate. Update the native image and matching WASM bundle
 together; remove `probe_operators` to disable this feature immediately on restart.
 
+The access verifier separates PostgreSQL **Read access** from
+**Schema/table creation**. Read mode uses `table:database.schema.table` for
+CONNECT/USAGE/SELECT, `schema:database.schema` for CONNECT/USAGE prerequisites,
+or `role:name` for membership. Schema prerequisites alone do not prove that any
+table is readable. Checks use the configured target login and never require
+CREATE to report read access. Existing API clients that omit `postgres_operation`
+keep creation checks; new clients can explicitly select `read` or `create`.
+
 ## Slack and GitHub
 
 `approvals.identities` maps authenticated subjects to unique approval identities,
