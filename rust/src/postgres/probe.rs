@@ -11,6 +11,32 @@ use std::{collections::BTreeMap, time::Duration};
 const HOW: &str = "server-evaluated (has_*_privilege), not a login";
 const LOGIN_HOW: &str = "subject TCP login + server-evaluated ACL (no data read or write)";
 
+/// Read prerequisites never include schema/table creation privileges.
+pub fn read_grants(system: &str, subject: &str, resource: &str) -> Result<Vec<Grant>> {
+    let (kind, rest) = resource
+        .split_once(':')
+        .ok_or("Use an exact PostgreSQL resource")?;
+    let parts: Vec<_> = rest.split('.').collect();
+    let grants = match kind {
+        "db" if parts.len() == 1 => vec![Grant::new(system, subject, resource, "CONNECT")],
+        "schema" if parts.len() == 2 => vec![
+            Grant::new(system, subject, &format!("db:{}", parts[0]), "CONNECT"),
+            Grant::new(system, subject, resource, "USAGE"),
+        ],
+        "table" if parts.len() == 3 => vec![
+            Grant::new(system, subject, &format!("db:{}", parts[0]), "CONNECT"),
+            Grant::new(system, subject, &format!("schema:{}.{}", parts[0], parts[1]), "USAGE"),
+            Grant::new(system, subject, resource, "SELECT"),
+        ],
+        "role" if parts.len() == 1 => vec![Grant::new(system, subject, resource, "MEMBER")],
+        _ => return Err("Read checks require db:database, schema:database.schema, table:database.schema.table or role:name".into()),
+    };
+    for grant in &grants {
+        target(grant)?;
+    }
+    Ok(grants)
+}
+
 /// Creation prerequisites are requested checks, not inferred from observed grants.
 pub fn creation_grants(system: &str, subject: &str, resource: &str) -> Result<Vec<Grant>> {
     let (db, schema) = if let Some(db) = resource.strip_prefix("db:") {
@@ -325,6 +351,35 @@ pub fn run(adapter: &Adapter, grants: &[Grant]) -> Vec<Probe> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn read_checks_do_not_ask_for_ddl() {
+        let grants = read_grants("pg", "reader", "table:example.registry.events").unwrap();
+        assert_eq!(
+            grants
+                .iter()
+                .map(|g| g.privilege.as_str())
+                .collect::<Vec<_>>(),
+            ["CONNECT", "USAGE", "SELECT"]
+        );
+        assert_eq!(
+            read_grants("pg", "reader", "schema:example.registry")
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(
+            read_grants("pg", "reader", "role:registry_reader").unwrap()[0].privilege,
+            "MEMBER"
+        );
+        for resource in [
+            "table:example.registry.*",
+            "schema:example",
+            "db:",
+            "column:example.registry.events.id",
+        ] {
+            assert!(read_grants("pg", "reader", resource).is_err());
+        }
+    }
     #[test]
     fn database_and_schema_creation_are_distinct_checks() {
         let db = creation_grants("pg-staging", "alice", "db:demo").unwrap();

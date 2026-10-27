@@ -55,6 +55,11 @@ struct ProbeInput {
     table: String,
     #[serde(default = "expect_allow")]
     expected: String,
+    #[serde(default = "postgres_creation")]
+    postgres_operation: String,
+}
+fn postgres_creation() -> String {
+    "create".into()
 }
 fn expect_allow() -> String {
     "allow".into()
@@ -100,6 +105,7 @@ async fn effective_access(
     } else {
         adapter.probe_credentials.contains_key(&f.subject)
     }) || !matches!(f.expected.as_str(), "allow" | "deny")
+        || !matches!(f.postgres_operation.as_str(), "read" | "create")
         || [&f.system, &f.subject, &f.resource, &f.object, &f.table]
             .iter()
             .any(|s| s.len() > 1024 || s.chars().any(char::is_control))
@@ -118,7 +124,11 @@ async fn effective_access(
             .map_err(|_| "Another probe is running; retry after it completes".to_owned())?;
         let checks = if postgres {
             if !f.object.is_empty() || !f.table.is_empty() { return Err("Object and Iceberg fields require an S3 instance".into()); }
-            let grants = crate::postgres::probe::creation_grants(&f.system, &f.subject, &f.resource)?;
+            let grants = if f.postgres_operation == "read" {
+                crate::postgres::probe::read_grants(&f.system, &f.subject, &f.resource)?
+            } else {
+                crate::postgres::probe::creation_grants(&f.system, &f.subject, &f.resource)?
+            };
             serde_json::Value::Array(crate::postgres::probe::run(&adapter, &grants).into_iter().map(|p| {
                 serde_json::json!({"step":format!("{} {}",p.resource,p.privilege),"resource":p.resource,"priv":p.privilege,
                     "verdict":p.verdict,"status":null,"elapsed_ms":null,"how":p.how})
@@ -776,6 +786,14 @@ mod tests {
     use super::*;
     use http_body_util::BodyExt;
     use tower::ServiceExt;
+
+    #[test]
+    fn existing_probe_clients_keep_creation_semantics() {
+        let request: ProbeInput = serde_json::from_value(serde_json::json!({
+            "csrf":"fixture", "system":"pg", "subject":"reader", "resource":"schema:example.registry"
+        })).unwrap();
+        assert_eq!(request.postgres_operation, "create");
+    }
 
     #[tokio::test]
     async fn effective_access_api_requires_authentication_even_in_local_preview() {

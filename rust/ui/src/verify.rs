@@ -29,6 +29,7 @@ pub(super) fn VerifyForm(bootstrap: Bootstrap) -> impl IntoView {
     let object = RwSignal::new(String::new());
     let table = RwSignal::new(String::new());
     let expected = RwSignal::new("allow".to_owned());
+    let operation = RwSignal::new("read".to_owned());
     let busy = RwSignal::new(false);
     let message = RwSignal::new(String::new());
     let current = RwSignal::new(None::<Value>);
@@ -39,6 +40,7 @@ pub(super) fn VerifyForm(bootstrap: Bootstrap) -> impl IntoView {
     let lang = b.lang.clone();
     let previous_lang = b.lang.clone();
     let current_lang = b.lang.clone();
+    let description_lang = b.lang.clone();
     view! {<section class="card">
         <p class="notice">{tr(&b.lang,"Checks use the selected account. Empty prefixes and missing objects leave reads unverified. Object contents are discarded; data rows are not queried.")}</p>
         <form on:submit=move |ev| {
@@ -46,7 +48,7 @@ pub(super) fn VerifyForm(bootstrap: Bootstrap) -> impl IntoView {
             if busy.get_untracked() { return; }
             submit(json!({"csrf":csrf,"system":system.get_untracked(),"subject":subject.get_untracked(),
                 "resource":resource.get_untracked(),"object":object.get_untracked(),"table":table.get_untracked(),
-                "expected":expected.get_untracked()}), busy, message, current, previous);
+                "expected":expected.get_untracked(),"postgres_operation":operation.get_untracked()}), busy, message, current, previous);
         }>
         <label>{tr(&b.lang,"Service instance (environment)")}
             <select prop:value=move ||system.get() on:change=move |ev| {
@@ -64,8 +66,16 @@ pub(super) fn VerifyForm(bootstrap: Bootstrap) -> impl IntoView {
                     .map(|s|view!{<option value=s.clone() selected=s==subject.get()>{s.clone()}</option>}).collect_view()}
             </select>
         </label>
-        <p class="muted">{tr(&b.lang,"PostgreSQL: db:database checks new-schema creation; schema:database.schema also checks USAGE and table creation. These are ACL checks, not attempted DDL.")}</p>
-        <label>{tr(&b.lang,"Resource")}<input required maxlength="1024" placeholder=move||if is_s3.get(){"bucket:example/team"}else{"schema:example.registry"} prop:value=move||resource.get() on:input=move|ev|resource.set(event_target_value(&ev))/></label>
+        <label hidden=move||is_s3.get()>{tr(&b.lang,"PostgreSQL operation")}
+            <select prop:value=move||operation.get() on:change=move|ev|operation.set(event_target_value(&ev))>
+                <option value="read">{tr(&b.lang,"Read access")}</option>
+                <option value="create">{tr(&b.lang,"Schema/table creation")}</option>
+            </select>
+        </label>
+        <p class="muted" hidden=move||is_s3.get()>{move||tr(&description_lang,if operation.get()=="read"{
+            "PostgreSQL read checks: a table checks CONNECT, USAGE and SELECT; a schema checks prerequisites only. No CREATE privilege or data-row query is required."
+        }else{"PostgreSQL: db:database checks new-schema creation; schema:database.schema also checks USAGE and table creation. These are ACL checks, not attempted DDL."})}</p>
+        <label>{tr(&b.lang,"Resource")}<input required maxlength="1024" placeholder=move||if is_s3.get(){"bucket:example/team"}else if operation.get()=="read"{"table:example.registry.events"}else{"schema:example.registry"} prop:value=move||resource.get() on:input=move|ev|resource.set(event_target_value(&ev))/></label>
         <fieldset hidden=move||!is_s3.get()>
         <label>{tr(&b.lang,"Sample object key (optional)")}<input maxlength="1024" placeholder="team/sample.txt" prop:value=move||object.get() on:input=move|ev|object.set(event_target_value(&ev))/></label>
         <label>{tr(&b.lang,"Iceberg table (namespace/table, optional)")}<input maxlength="511" placeholder="demo.events/sample" prop:value=move||table.get() on:input=move|ev|table.set(event_target_value(&ev))/></label>
