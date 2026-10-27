@@ -114,7 +114,7 @@ pub(super) fn subject(b: &Bootstrap) -> AnyView {
         .cloned()
         .collect();
     let inherited: Vec<_> = rows.into_iter().filter(|g| g.subject != *name).collect();
-    view!{<section class="card"><h2>{name.clone()}</h2><p class="muted">{b.data.graph.names.get(name).cloned().unwrap_or_default()}</p><h3>{tr(&b.lang,"Direct grants")}</h3>{grants_table(&b.lang,direct)}<h3>{tr(&b.lang,"Inherited grants")}</h3>{grants_table(&b.lang,inherited)}</section>{route_list(b,routes,limited)}}.into_any()
+    view!{<section class="card"><h2>{name.clone()}</h2><p class="muted">{b.data.graph.names.get(name).cloned().unwrap_or_default()}</p>{b.probe_subjects.values().any(|names|names.contains(name)).then(||view!{<a class="button secondary" href=format!("/verify?subject={}&system={}&lang={}",encode(name),encode(&b.service),encode(&b.lang))>{tr(&b.lang,"Verify access")}</a>})}<h3>{tr(&b.lang,"Direct grants")}</h3>{grants_table(&b.lang,direct)}<h3>{tr(&b.lang,"Inherited grants")}</h3>{grants_table(&b.lang,inherited)}</section>{route_list(b,routes,limited)}}.into_any()
 }
 pub(super) fn resource(b: &Bootstrap) -> AnyView {
     let name = if b.resource.is_empty() {

@@ -1,5 +1,77 @@
 pub const LANGUAGES: [&str; 4] = ["en", "ko", "ja", "zh-CN"];
 const MESSAGES: &[(&str, [&str; 3])] = &[
+    (
+        "PostgreSQL: db:database checks new-schema creation; schema:database.schema also checks USAGE and table creation. These are ACL checks, not attempted DDL.",
+        [
+            "PostgreSQL: db:DB는 새 스키마 생성 권한을, schema:DB.스키마는 USAGE·테이블 생성 권한도 확인합니다. DDL 실행 없이 ACL을 평가합니다.",
+            "PostgreSQL: db:databaseはスキーマ作成、schema:database.schemaはUSAGEとテーブル作成も確認します。DDLは実行しません。",
+            "PostgreSQL：db:database 检查新建模式权限，schema:database.schema 还检查 USAGE 和建表权限。仅检查 ACL，不执行 DDL。",
+        ],
+    ),
+    (
+        "Verify access",
+        ["실제 접근 검증", "実アクセス検証", "实际访问验证"],
+    ),
+    (
+        "Live checks are disabled or no target credentials are configured for this operator.",
+        [
+            "이 관리자의 진단 기능이 비활성화되어 있거나 대상 계정 자격증명이 등록되지 않았습니다.",
+            "この管理者の検証は無効か、対象の認証情報が未設定です。",
+            "此管理员的验证未启用，或尚未配置目标凭据。",
+        ],
+    ),
+    (
+        "Checks use the selected account. Empty prefixes and missing objects leave reads unverified. Object contents are discarded; data rows are not queried.",
+        [
+            "선택한 계정으로 검증합니다. 빈 경로나 없는 객체는 읽기 성공으로 판단하지 않습니다. 객체 내용은 폐기하며 데이터 행은 조회하지 않습니다.",
+            "選択したアカウントで検証します。空のパスや存在しないオブジェクトの読み取りは未検証です。内容は破棄し、行は照会しません。",
+            "使用所选账户验证。空路径或不存在的对象不能证明可读。内容会被丢弃，不查询数据行。",
+        ],
+    ),
+    (
+        "Service instance (environment)",
+        [
+            "서비스 인스턴스 (환경)",
+            "サービスインスタンス（環境）",
+            "服务实例（环境）",
+        ],
+    ),
+    (
+        "Sample object key (optional)",
+        [
+            "검증할 객체 키 (선택)",
+            "サンプルオブジェクトキー（任意）",
+            "样本对象键（可选）",
+        ],
+    ),
+    (
+        "Iceberg table (namespace/table, optional)",
+        [
+            "Iceberg 테이블 (namespace/table, 선택)",
+            "Icebergテーブル（namespace/table、任意）",
+            "Iceberg 表（namespace/table，可选）",
+        ],
+    ),
+    ("Expected access", ["기대 결과", "期待する結果", "预期结果"]),
+    ("Allowed", ["허용", "許可", "允许"]),
+    ("Checking…", ["검증 중…", "検証中…", "验证中…"]),
+    ("Run checks", ["검증 실행", "検証を実行", "运行验证"]),
+    ("Current check", ["현재 검증", "今回の検証", "本次验证"]),
+    ("Previous check", ["이전 검증", "前回の検証", "上次验证"]),
+    ("Check", ["검증 항목", "検証項目", "验证项"]),
+    ("Result", ["결과", "結果", "结果"]),
+    ("Details", ["상세", "詳細", "详情"]),
+    ("Unverified", ["미검증", "未検証", "未验证"]),
+    ("As expected", ["기대와 일치", "期待どおり", "符合预期"]),
+    ("Unexpected", ["기대와 다름", "期待と異なる", "不符合预期"]),
+    (
+        "Checks do not apply permissions or verify SQL data rows. Approval and deployment must be followed by the same checks again.",
+        [
+            "검증은 권한을 변경하거나 SQL 데이터 행을 확인하지 않습니다. 승인·배포 후 같은 조건으로 다시 검증하세요.",
+            "権限変更やSQLデータ行の検証は行いません。承認・デプロイ後に同じ条件で再検証してください。",
+            "验证不会更改权限或验证 SQL 数据行。审批和部署后请使用相同条件重新验证。",
+        ],
+    ),
     ("Expanded", ["펼침", "展開済み", "已展开"]),
     ("Collapsed", ["접힘", "折りたたみ", "已折叠"]),
     (

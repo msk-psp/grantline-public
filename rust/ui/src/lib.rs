@@ -3,6 +3,7 @@ mod details;
 pub mod i18n;
 mod map;
 mod observation;
+mod verify;
 use i18n::tr;
 use leptos::prelude::*;
 use map::PermissionMap;
@@ -163,6 +164,7 @@ pub struct Bootstrap {
     pub action: String,
     pub privilege: String,
     pub history_comparison: Option<Value>,
+    pub probe_subjects: BTreeMap<String, Vec<String>>,
 }
 fn text(v: &Value, key: &str) -> String {
     v[key].as_str().unwrap_or_default().into()
@@ -279,6 +281,7 @@ pub fn Console(bootstrap: Bootstrap) -> impl IntoView {
         ("/history", "History"),
         ("/approvals", "Approvals"),
         ("/act", "Request access"),
+        ("/verify", "Verify access"),
     ];
     let title = match b.page.as_str() {
         "accounts" | "account" => "Accounts",
@@ -289,12 +292,13 @@ pub fn Console(bootstrap: Bootstrap) -> impl IntoView {
         "history" => "History",
         "approvals" => "Approvals",
         "act" => "Request access",
+        "verify" => "Verify access",
         _ => "Map",
     };
     let body = if b.error.is_some() || b.loading {
         view!{<p class="notice" role="status">{if b.loading{tr(&b.lang,"Loading catalog…")}else{tr(&b.lang,"Catalog unavailable; access is unknown.")}}</p>}.into_any()
     } else {
-        match b.page.as_str(){"services"=>services(&b),"matrix"=>matrix_page(&b),"changes"=>changes(&b),"history"=>history(&b),"approvals"=>reviews(&b),"act"=>view!{<RequestForm bootstrap=b.clone()/>}.into_any(),"account"=>details::subject(&b),"resource"=>details::resource(&b),"accounts"=>details::accounts(&b),"resources"=>grants_table(&lang,b.data.plan.observed.iter().filter(|g|matched(&b,g)).cloned().collect()),_=>view!{<PermissionMap graph=b.data.graph.clone() service_kinds=b.data.service_kinds.clone() service=b.service.clone() environment=b.environment.clone() query=b.query.clone() lang=lang.clone()/>}.into_any()}
+        match b.page.as_str(){"verify"=>view!{<verify::VerifyForm bootstrap=b.clone()/>}.into_any(),"services"=>services(&b),"matrix"=>matrix_page(&b),"changes"=>changes(&b),"history"=>history(&b),"approvals"=>reviews(&b),"act"=>view!{<RequestForm bootstrap=b.clone()/>}.into_any(),"account"=>details::subject(&b),"resource"=>details::resource(&b),"accounts"=>details::accounts(&b),"resources"=>grants_table(&lang,b.data.plan.observed.iter().filter(|g|matched(&b,g)).cloned().collect()),_=>view!{<PermissionMap graph=b.data.graph.clone() service_kinds=b.data.service_kinds.clone() service=b.service.clone() environment=b.environment.clone() query=b.query.clone() lang=lang.clone()/>}.into_any()}
     };
     let menus = nav
         .into_iter()
@@ -328,7 +332,7 @@ pub fn Console(bootstrap: Bootstrap) -> impl IntoView {
     <h1>{tr(&b.lang,title)}</h1>
     </div>
     <a class="button secondary" href=b.refresh_url.clone()>{tr(&b.lang,"Refresh")}</a>
-    </div>{b.error.as_ref().map(|_|view!{<div role="alert" class="notice error">{tr(&b.lang,"Catalog unavailable; access is unknown.")}</div>})}{observation::notices(&b)}{(!b.interactive).then(||view!{<div class="notice">{tr(&b.lang,"Interactive bundle unavailable; build the UI to enable interactions.")}</div>})}{(!matches!(b.page.as_str(),"history"|"approvals"|"act")).then(||view!{<form class="filters" method="get">
+    </div>{b.error.as_ref().map(|_|view!{<div role="alert" class="notice error">{tr(&b.lang,"Catalog unavailable; access is unknown.")}</div>})}{observation::notices(&b)}{(!b.interactive).then(||view!{<div class="notice">{tr(&b.lang,"Interactive bundle unavailable; build the UI to enable interactions.")}</div>})}{(!matches!(b.page.as_str(),"history"|"approvals"|"act"|"verify")).then(||view!{<form class="filters" method="get">
     <label>
     <span class="sr-only">{tr(&b.lang,"Search")}</span>
     <input name="q" value=b.query.clone() placeholder=tr(&b.lang,"Search")/>
