@@ -1,4 +1,4 @@
-//! Subject-signed ListObjectsV2/HEAD samples. Never consumes IAM secrets or object bodies.
+//! Subject-signed samples; the console also supports bounded, discarded Range GETs.
 use super::remote::{Signer, uri_encode};
 use crate::{
     Result,
@@ -6,7 +6,7 @@ use crate::{
     model::Grant,
     probe::{Probe, Verdict},
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::Read,
@@ -194,6 +194,8 @@ struct Response {
     code: Option<String>,
     body: Vec<u8>,
     metadata: bool,
+    length: Option<u64>,
+    content_range: Option<String>,
 }
 struct Budget {
     started: Instant,
@@ -204,6 +206,15 @@ struct Budget {
 }
 impl Budget {
     fn request(&mut self, method: &str, url: &Url, signer: &Signer<'_>) -> Result<Response> {
+        self.request_headers(method, url, signer, BTreeMap::new())
+    }
+    fn request_headers(
+        &mut self,
+        method: &str,
+        url: &Url,
+        signer: &Signer<'_>,
+        mut extra: BTreeMap<String, String>,
+    ) -> Result<Response> {
         self.calls += 1;
         if self.calls > 512 {
             return Err("S3 probe request budget exceeded".into());
@@ -227,11 +238,10 @@ impl Budget {
         } else {
             b""
         };
-        let extra = if method == "PUT" {
-            BTreeMap::from([("if-none-match".into(), "*".into())])
-        } else {
-            BTreeMap::new()
-        };
+        let range = extra.contains_key("range");
+        if method == "PUT" {
+            extra.insert("if-none-match".into(), "*".into());
+        }
         let headers = signer.sign(
             method,
             url,
@@ -270,6 +280,17 @@ impl Budget {
                 .map_err(|_| "S3 probe transport/TLS failure or timeout")?
         };
         let status = response.status().as_u16();
+        let length = response
+            .headers()
+            .get("content-length")
+            .and_then(|h| h.to_str().ok())
+            .and_then(|s| s.parse::<u64>().ok());
+        let content_range = response
+            .headers()
+            .get("content-range")
+            .and_then(|h| h.to_str().ok())
+            .filter(|s| s.len() <= 128)
+            .map(str::to_owned);
         let metadata = response
             .headers()
             .get("etag")
@@ -290,7 +311,11 @@ impl Budget {
             response
                 .body_mut()
                 .as_reader()
-                .take(1024 * 1024 + 1)
+                .take(if range && (200..300).contains(&status) {
+                    2
+                } else {
+                    1024 * 1024 + 1
+                })
                 .read_to_end(&mut body)
                 .map_err(|_| "Incomplete S3 response or timeout")?;
             self.bytes += body.len();
@@ -303,6 +328,8 @@ impl Budget {
             code,
             body,
             metadata,
+            length,
+            content_range,
         })
     }
     fn expired(&self) -> bool {
@@ -326,6 +353,326 @@ fn verdict_error(response: &Response) -> Verdict {
     } else {
         Verdict::Unknown
     }
+}
+
+#[derive(Debug, Serialize)]
+pub struct Check {
+    pub step: &'static str,
+    pub verdict: Verdict,
+    pub status: Option<u16>,
+    pub elapsed_ms: u64,
+    pub how: String,
+}
+impl Check {
+    fn unknown(step: &'static str, why: &str) -> Self {
+        Self {
+            step,
+            verdict: Verdict::Unknown,
+            status: None,
+            elapsed_ms: 0,
+            how: why.into(),
+        }
+    }
+}
+fn measured(
+    step: &'static str,
+    result: Result<Response>,
+    started: Instant,
+    valid: impl FnOnce(&Response) -> bool,
+) -> (Check, Option<Response>) {
+    match result {
+        Ok(response) => {
+            let verdict = if valid(&response) {
+                Verdict::Allow
+            } else if step == "CATALOG"
+                && response.status == 403
+                && serde_json::from_slice::<serde_json::Value>(&response.body)
+                    .ok()
+                    .is_some_and(|v| {
+                        v["error"]["code"] == 403
+                            && matches!(
+                                v["error"]["type"].as_str(),
+                                Some("ForbiddenException" | "AccessDeniedException")
+                            )
+                    })
+            {
+                Verdict::Deny
+            } else {
+                verdict_error(&response)
+            };
+            let how = match verdict {
+                Verdict::Allow => {
+                    "Subject-signed sample succeeded; this does not prove access to every object or data row"
+                }
+                Verdict::Deny => "Explicit AccessDenied from the service",
+                Verdict::Unknown => {
+                    "Missing object, authentication, invalid response or service failure; access is unverified"
+                }
+            };
+            (
+                Check {
+                    step,
+                    verdict,
+                    status: Some(response.status),
+                    elapsed_ms: started.elapsed().as_millis() as u64,
+                    how: how.into(),
+                },
+                Some(response),
+            )
+        }
+        Err(_) => (
+            Check {
+                elapsed_ms: started.elapsed().as_millis() as u64,
+                ..Check::unknown(
+                    step,
+                    "Transport, TLS, response limit or timeout; access is unverified",
+                )
+            },
+            None,
+        ),
+    }
+}
+fn range_valid(response: &Response) -> bool {
+    (response.status == 206
+        && response.body.len() == 1
+        && response.length == Some(1)
+        && response
+            .content_range
+            .as_deref()
+            .and_then(|r| r.strip_prefix("bytes 0-0/"))
+            .and_then(|total| total.parse::<u64>().ok())
+            .is_some_and(|total| total > 0))
+        || (response.status == 200
+            && response.metadata
+            && response.length == Some(0)
+            && response.body.is_empty())
+}
+fn range_read(
+    budget: &mut Budget,
+    base: &Url,
+    bucket: &str,
+    key: &str,
+    signer: &Signer<'_>,
+) -> Result<Response> {
+    budget.request_headers(
+        "GET",
+        &object_url(base, bucket, Some(key))?,
+        signer,
+        BTreeMap::from([("range".into(), "bytes=0-0".into())]),
+    )
+}
+fn metadata_key(location: &str, bucket: &str, prefix: &str) -> Option<String> {
+    let rest = location.strip_prefix("s3://")?;
+    let (actual_bucket, key) = rest.split_once('/')?;
+    (actual_bucket == bucket && valid_key(key) && key.starts_with(prefix)).then(|| key.to_owned())
+}
+
+/// Exact requested scopes can be checked before a grant exists. Never consult IAM credentials.
+pub fn check(
+    adapter: &Adapter,
+    subject: &str,
+    resource: &str,
+    sample: Option<&str>,
+    table: Option<&str>,
+) -> Result<Vec<Check>> {
+    let (bucket, prefix) = target(&Grant::new("s3", subject, resource, "Read"))?;
+    let sample = sample
+        .filter(|s| !s.is_empty())
+        .or_else(|| adapter.probe_objects.get(resource).map(String::as_str));
+    if sample.is_some_and(|key| !valid_key(key) || !key.starts_with(&prefix)) {
+        return Err("Sample object must be inside the exact requested prefix".into());
+    }
+    let table = table
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            let (namespace, table) = s
+                .split_once('/')
+                .ok_or("Use namespace/table for an Iceberg table")?;
+            if [namespace, table].iter().any(|s| {
+                s.is_empty()
+                    || s.len() > 255
+                    || matches!(*s, "." | "..")
+                    || !s
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b"_.-".contains(&b))
+            }) {
+                return Err("Invalid Iceberg namespace/table".to_owned());
+            }
+            Ok((namespace, table))
+        })
+        .transpose()?;
+    let mut checks: Vec<_> = ["LIST", "HEAD", "GET"]
+        .into_iter()
+        .chain(table.into_iter().flat_map(|_| ["CATALOG", "METADATA GET"]))
+        .map(|step| {
+            Check::unknown(
+                step,
+                "No configured subject credential or endpoint; no administrator fallback",
+            )
+        })
+        .collect();
+    let setup: Result<_> = (|| {
+        if !(1..=120).contains(&adapter.read_timeout_seconds)
+            || adapter.probe_region.is_empty()
+            || adapter.probe_region.len() > 64
+            || !adapter
+                .probe_region
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        {
+            return Err("Invalid S3 probe budget or region".into());
+        }
+        let base = endpoint(&env(adapter.endpoint_env.as_deref())?)?;
+        let credential = adapter
+            .probe_credentials
+            .get(subject)
+            .ok_or("No subject probe credential")?;
+        let key = env(credential.key_env.as_deref())?;
+        if !key
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b))
+        {
+            return Err("Invalid subject key".into());
+        }
+        let secret = env(credential.secret_env.as_deref())?;
+        let token = credential
+            .session_token_env
+            .as_deref()
+            .map(|n| env(Some(n)))
+            .transpose()?;
+        let tls = crate::tls::http(adapter.ca_bundle_env.as_deref())?;
+        Ok((base, key, secret, token, tls))
+    })();
+    let Ok((base, key, secret, token, tls)) = setup else {
+        return Ok(checks);
+    };
+    let signer = Signer {
+        key: &key,
+        secret: &secret,
+        token: token.as_deref(),
+        region: &adapter.probe_region,
+        service: "s3",
+    };
+    let mut budget = Budget {
+        tls,
+        started: Instant::now(),
+        timeout: Duration::from_secs(adapter.read_timeout_seconds),
+        calls: 0,
+        bytes: 0,
+    };
+    let mut url = object_url(&base, &bucket, None)?;
+    url.query_pairs_mut().extend_pairs([
+        ("list-type", "2"),
+        ("max-keys", "1"),
+        ("prefix", prefix.as_str()),
+        ("encoding-type", "url"),
+    ]);
+    let started = Instant::now();
+    let (listed, response) = measured("LIST", budget.request("GET", &url, &signer), started, |r| {
+        r.status == 200 && listing(&r.body, &bucket, &prefix).is_ok()
+    });
+    let object = sample.map(str::to_owned).or_else(|| {
+        response
+            .as_ref()
+            .filter(|r| r.status == 200)
+            .and_then(|r| listing(&r.body, &bucket, &prefix).ok())
+            .flatten()
+    });
+    checks[0] = listed;
+    if let Some(object) = object {
+        let started = Instant::now();
+        checks[1] = measured(
+            "HEAD",
+            budget.request("HEAD", &object_url(&base, &bucket, Some(&object))?, &signer),
+            started,
+            |r| r.status == 200 && r.metadata,
+        )
+        .0;
+        let started = Instant::now();
+        checks[2] = measured(
+            "GET",
+            range_read(&mut budget, &base, &bucket, &object, &signer),
+            started,
+            range_valid,
+        )
+        .0;
+    } else {
+        checks[1] = Check::unknown(
+            "HEAD",
+            "No in-scope object selected; an empty or denied LIST does not verify reads",
+        );
+        checks[2] = Check::unknown(
+            "GET",
+            "No in-scope object selected; an empty or denied LIST does not verify reads",
+        );
+    }
+    if let Some((namespace, table)) = table {
+        checks[3] = Check::unknown(
+            "CATALOG",
+            "SeaweedFS Iceberg REST endpoint is not configured",
+        );
+        checks[4] = Check::unknown(
+            "METADATA GET",
+            "Catalog metadata location has not been verified inside the requested S3 scope",
+        );
+        if let Ok(mut catalog) =
+            env(adapter.probe_catalog_endpoint_env.as_deref()).and_then(|s| endpoint(&s))
+        {
+            catalog
+                .path_segments_mut()
+                .map_err(|_| "Invalid catalog endpoint")?
+                .pop_if_empty()
+                .extend([
+                    "v1",
+                    bucket.as_str(),
+                    "namespaces",
+                    namespace,
+                    "tables",
+                    table,
+                ]);
+            let catalog_signer = Signer {
+                service: "s3tables",
+                ..signer
+            };
+            let started = Instant::now();
+            let (result, response) = measured(
+                "CATALOG",
+                budget.request("GET", &catalog, &catalog_signer),
+                started,
+                |r| {
+                    r.status == 200
+                        && serde_json::from_slice::<serde_json::Value>(&r.body)
+                            .ok()
+                            .and_then(|v| {
+                                v["metadata-location"]
+                                    .as_str()
+                                    .and_then(|s| metadata_key(s, &bucket, &prefix))
+                            })
+                            .is_some()
+                },
+            );
+            let metadata = response
+                .filter(|_| result.verdict == Verdict::Allow)
+                .and_then(|r| serde_json::from_slice::<serde_json::Value>(&r.body).ok())
+                .and_then(|v| {
+                    v["metadata-location"]
+                        .as_str()
+                        .and_then(|s| metadata_key(s, &bucket, &prefix))
+                });
+            checks[3] = result;
+            if let Some(metadata) = metadata {
+                let started = Instant::now();
+                checks[4] = measured(
+                    "METADATA GET",
+                    range_read(&mut budget, &base, &bucket, &metadata, &signer),
+                    started,
+                    range_valid,
+                )
+                .0;
+            }
+        }
+    }
+    Ok(checks)
 }
 fn list(
     budget: &mut Budget,
@@ -592,6 +939,8 @@ mod tests {
         }
         assert!(listing(b"<ListBucketResult/>", "demo", "team/").is_err());
         let r = Response {
+            length: None,
+            content_range: None,
             metadata: false,
             status: 403,
             code: None,
@@ -600,6 +949,8 @@ mod tests {
         assert_eq!(verdict_error(&r), Verdict::Unknown);
         assert_eq!(
             verdict_error(&Response {
+                length: None,
+                content_range: None,
                 metadata: false,
                 status: 403,
                 code: None,

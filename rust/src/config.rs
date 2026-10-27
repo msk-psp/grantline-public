@@ -104,6 +104,9 @@ pub struct Adapter {
     pub admin_url_env: Option<String>,
     #[serde(default)]
     pub endpoint_env: Option<String>,
+    /// Optional SeaweedFS Iceberg REST origin; never supplied by a browser request.
+    #[serde(default)]
+    pub probe_catalog_endpoint_env: Option<String>,
     #[serde(default)]
     pub ca_bundle_env: Option<String>,
     #[serde(default = "s3_region")]

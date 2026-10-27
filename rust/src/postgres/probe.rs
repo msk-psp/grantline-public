@@ -10,6 +10,34 @@ use std::{collections::BTreeMap, time::Duration};
 
 const HOW: &str = "server-evaluated (has_*_privilege), not a login";
 const LOGIN_HOW: &str = "subject TCP login + server-evaluated ACL (no data read or write)";
+
+/// Creation prerequisites are requested checks, not inferred from observed grants.
+pub fn creation_grants(system: &str, subject: &str, resource: &str) -> Result<Vec<Grant>> {
+    let (db, schema) = if let Some(db) = resource.strip_prefix("db:") {
+        (db, None)
+    } else if let Some(scope) = resource.strip_prefix("schema:") {
+        let (db, schema) = scope.split_once('.').ok_or("Use schema:database.schema")?;
+        (db, Some(schema))
+    } else {
+        return Err("Select db:database or schema:database.schema for creation checks".into());
+    };
+    let db_resource = format!("db:{db}");
+    let mut grants: Vec<_> = ["CONNECT", "CREATE"]
+        .into_iter()
+        .map(|privilege| Grant::new(system, subject, &db_resource, privilege))
+        .collect();
+    if schema.is_some() {
+        grants.extend(
+            ["USAGE", "CREATE"]
+                .into_iter()
+                .map(|privilege| Grant::new(system, subject, resource, privilege)),
+        );
+    }
+    for grant in &grants {
+        target(grant)?;
+    }
+    Ok(grants)
+}
 struct Target {
     db: Option<String>,
     sql: &'static str,
@@ -297,6 +325,35 @@ pub fn run(adapter: &Adapter, grants: &[Grant]) -> Vec<Probe> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn database_and_schema_creation_are_distinct_checks() {
+        let db = creation_grants("pg-staging", "alice", "db:demo").unwrap();
+        assert_eq!(db.len(), 2);
+        assert!(
+            db.iter()
+                .any(|g| g.resource == "db:demo" && g.privilege == "CREATE")
+        );
+        let schema = creation_grants("pg-staging", "alice", "schema:demo.registry").unwrap();
+        assert_eq!(schema.len(), 4);
+        assert!(
+            schema
+                .iter()
+                .any(|g| g.resource == "schema:demo.registry" && g.privilege == "USAGE")
+        );
+        assert!(
+            schema
+                .iter()
+                .any(|g| g.resource == "schema:demo.registry" && g.privilege == "CREATE")
+        );
+        for resource in [
+            "schema:demo.*",
+            "table:demo.registry.events",
+            "db:",
+            "schema:demo",
+        ] {
+            assert!(creation_grants("pg-staging", "alice", resource).is_err());
+        }
+    }
     #[test]
     fn group_limit_precedes_any_credential_lookup() {
         let adapter: Adapter = toml::from_str("type='postgres'").unwrap();

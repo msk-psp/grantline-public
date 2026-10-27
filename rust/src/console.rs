@@ -24,6 +24,9 @@ pub struct Config {
     pub assets: Option<String>,
     #[serde(default = "cache_ttl")]
     pub cache_ttl_seconds: u64,
+    /// Authentication subjects permitted to use configured target credentials.
+    #[serde(default)]
+    pub probe_operators: std::collections::BTreeSet<String>,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -32,11 +35,115 @@ impl Default for Config {
             auth: Default::default(),
             assets: None,
             cache_ttl_seconds: 60,
+            probe_operators: Default::default(),
         }
     }
 }
 fn cache_ttl() -> u64 {
     60
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProbeInput {
+    csrf: String,
+    system: String,
+    subject: String,
+    resource: String,
+    #[serde(default)]
+    object: String,
+    #[serde(default)]
+    table: String,
+    #[serde(default = "expect_allow")]
+    expected: String,
+}
+fn expect_allow() -> String {
+    "allow".into()
+}
+async fn effective_access(
+    State(s): State<Shared>,
+    headers: HeaderMap,
+    Json(f): Json<ProbeInput>,
+) -> Response {
+    let actor = match s.auth.write_actor(&headers, &f.csrf) {
+        Ok(actor) => actor,
+        Err(e) => return e.into_response(),
+    };
+    let Ok(loaded) = config::load(&s.path) else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Probe configuration unavailable",
+        )
+            .into_response();
+    };
+    if !s.live || !loaded.config.web.probe_operators.contains(&actor.subject) {
+        return (
+            StatusCode::FORBIDDEN,
+            "Live probes require an explicitly configured operator",
+        )
+            .into_response();
+    }
+    let Some(adapter) = loaded
+        .config
+        .adapters
+        .get(&f.system)
+        .filter(|a| matches!(a.typ(&f.system), "s3" | "postgres"))
+    else {
+        return (
+            StatusCode::BAD_REQUEST,
+            "Select a configured S3 or PostgreSQL service instance",
+        )
+            .into_response();
+    };
+    let postgres = adapter.typ(&f.system) == "postgres";
+    if !(if postgres {
+        adapter.probe_dsn_envs.contains_key(&f.subject)
+    } else {
+        adapter.probe_credentials.contains_key(&f.subject)
+    }) || !matches!(f.expected.as_str(), "allow" | "deny")
+        || [&f.system, &f.subject, &f.resource, &f.object, &f.table]
+            .iter()
+            .any(|s| s.len() > 1024 || s.chars().any(char::is_control))
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            "Invalid target subject or probe fields",
+        )
+            .into_response();
+    }
+    let adapter = adapter.clone();
+    match tokio::task::spawn_blocking(move || {
+        let _guard = s
+            .probe_lock
+            .try_lock()
+            .map_err(|_| "Another probe is running; retry after it completes".to_owned())?;
+        let checks = if postgres {
+            if !f.object.is_empty() || !f.table.is_empty() { return Err("Object and Iceberg fields require an S3 instance".into()); }
+            let grants = crate::postgres::probe::creation_grants(&f.system, &f.subject, &f.resource)?;
+            serde_json::Value::Array(crate::postgres::probe::run(&adapter, &grants).into_iter().map(|p| {
+                serde_json::json!({"step":format!("{} {}",p.resource,p.privilege),"resource":p.resource,"priv":p.privilege,
+                    "verdict":p.verdict,"status":null,"elapsed_ms":null,"how":p.how})
+            }).collect())
+        } else {
+            serde_json::to_value(crate::s3::probe::check(&adapter, &f.subject, &f.resource, Some(&f.object), Some(&f.table))?)
+                .map_err(|_| "Cannot serialize access checks".to_owned())?
+        };
+        Ok::<_, String>(
+            serde_json::json!({"system": f.system, "subject": f.subject, "resource": f.resource,
+            "table": f.table, "expected": f.expected, "operator": actor.subject,
+            "checked_at": chrono::Utc::now().to_rfc3339(), "checks": checks,
+            "data_rows_verified": false, "applied": false}),
+        )
+    })
+    .await
+    {
+        Ok(Ok(report)) => Json(report).into_response(),
+        Ok(Err(why)) => (StatusCode::BAD_REQUEST, why).into_response(),
+        Err(_) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Probe worker unavailable; access is unknown",
+        )
+            .into_response(),
+    }
 }
 pub struct App {
     cache: crate::cache::Cache<serde_json::Value>,
@@ -44,6 +151,7 @@ pub struct App {
     pub path: PathBuf,
     pub live: bool,
     pub assets: PathBuf,
+    probe_lock: std::sync::Mutex<()>,
     #[cfg(unix)]
     pub workflow: Option<Arc<crate::workflow::Workflow>>,
 }
@@ -259,7 +367,7 @@ async fn home(
         .unwrap_or("auto".into());
     let path = uri.path().trim_start_matches('/');
     let page = path.split('/').next().unwrap_or("").to_owned();
-    let needs_data = !matches!(page.as_str(), "approvals" | "act" | "history");
+    let needs_data = !matches!(page.as_str(), "approvals" | "act" | "history" | "verify");
     let loading = s.live && needs_data;
     let (data, mut error) = if loading || !needs_data {
         (grantline_ui::Data::default(), None)
@@ -344,6 +452,38 @@ async fn home(
             None
         };
     let bootstrap = grantline_ui::Bootstrap {
+        probe_subjects: config::load(&s.path)
+            .ok()
+            .filter(|l| {
+                s.live
+                    && actor.authenticated
+                    && l.config.web.probe_operators.contains(&actor.subject)
+            })
+            .map(|l| {
+                l.config
+                    .adapters
+                    .iter()
+                    .filter(|(name, a)| matches!(a.typ(name), "s3" | "postgres"))
+                    .filter(|(name, a)| {
+                        if a.typ(name) == "postgres" {
+                            !a.probe_dsn_envs.is_empty()
+                        } else {
+                            !a.probe_credentials.is_empty()
+                        }
+                    })
+                    .map(|(name, a)| {
+                        (
+                            name.clone(),
+                            if a.typ(name) == "postgres" {
+                                a.probe_dsn_envs.keys().cloned().collect()
+                            } else {
+                                a.probe_credentials.keys().cloned().collect()
+                            },
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
         history_comparison,
         days: q.get("days").cloned().unwrap_or_default(),
         subject: q.get("subject").cloned().unwrap_or_default(),
@@ -605,6 +745,7 @@ pub fn app(s: Shared) -> Router {
         .route("/auth/logout", post(logout))
         .route("/api/session", get(session))
         .route("/api/catalog", get(catalog))
+        .route("/api/probes", post(effective_access))
         .route("/static/{name}", get(assets))
         .route("/static/pkg/{name}", get(wasm_assets))
         .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024))
@@ -621,6 +762,7 @@ pub fn app(s: Shared) -> Router {
         "/approvals",
         "/approvals/{id}",
         "/act",
+        "/verify",
     ] {
         router = router.route(path, get(home));
     }
@@ -634,6 +776,26 @@ mod tests {
     use super::*;
     use http_body_util::BodyExt;
     use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn effective_access_api_requires_authentication_even_in_local_preview() {
+        let state = Arc::new(App {
+            auth: auth::Auth::new(Default::default(), "http://127.0.0.1:8420/", true).unwrap(),
+            path: PathBuf::new(),
+            live: true,
+            assets: PathBuf::new(),
+            cache: Default::default(),
+            probe_lock: Default::default(),
+            #[cfg(unix)]
+            workflow: None,
+        });
+        let response = app(state)
+            .oneshot(Request::builder().method("POST").uri("/api/probes")
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(r#"{"csrf":"x","system":"s3","subject":"alice","resource":"bucket:demo/team"}"#)).unwrap())
+            .await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
 
     #[tokio::test]
     async fn proxy_login_preserves_the_session_handoff_and_deep_link() {
@@ -651,6 +813,7 @@ mod tests {
             live: false,
             assets: PathBuf::new(),
             cache: Default::default(),
+            probe_lock: Default::default(),
             #[cfg(unix)]
             workflow: None,
         });
@@ -761,6 +924,7 @@ pub async fn serve(
         workflow,
         assets,
         cache: Default::default(),
+        probe_lock: Default::default(),
     });
     let ttl = config.config.web.cache_ttl_seconds.min(3600);
     if live && ttl > 0 {

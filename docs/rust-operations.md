@@ -75,6 +75,82 @@ a sidecar). Do not expose an unauthenticated proxy header listener on a network.
 Local preview is read-only and cannot impersonate an approver. The fictional
 `demo` role switch is a separate in-memory playground, not production login.
 
+## Administrator access verification
+
+The native `/verify` page tests **requested** S3/PostgreSQL scopes even when no observed
+grant explains them. This is separate from the CLI's existing HEAD-only `Read`
+probe. Network checks require `serve --live`, authenticated sessions and a
+private, explicit operator allowlist. An empty list (the default), local preview
+or a missing subject mapping cannot borrow reader/admin/AWS credentials.
+
+```toml
+[web]
+probe_operators = ["operator-subject"] # exact authenticated identity, not display name
+
+[adapters.objects-staging]
+type = "s3"
+endpoint_env = "PROBE_STAGING_S3_ENDPOINT"
+probe_region = "us-east-1"
+read_timeout_seconds = 10
+# Optional SeaweedFS Iceberg REST endpoint, signed using the same subject's key.
+probe_catalog_endpoint_env = "PROBE_STAGING_ICEBERG_ENDPOINT"
+
+[adapters.objects-staging.probe_credentials."example-user"]
+key_env = "PROBE_EXAMPLE_USER_KEY"
+secret_env = "PROBE_EXAMPLE_USER_SECRET"
+
+[adapters.pg-staging]
+type = "postgres"
+databases = ["example", "dev_example"]
+probe_dsn_envs = {"example-user" = "PROBE_EXAMPLE_USER_PG_DSN"}
+```
+
+Merge these entries with your existing adapter/observation/auth config; do not
+replace it. Operator names authorize credential use and must be reviewed like
+other administrative privileges. Bind keys to the correct subjects privately;
+the mapping is an operator assertion, not an STS identity proof. Browser requests
+cannot choose an endpoint URL or provide credentials. No objects or grants are
+created, changed or deleted. One check may run per process at a time.
+
+Choose the service instance for the intended environment and a mapped subject.
+Enter `bucket:example/team` (exact directory prefix); an optional full key such
+as `team/sample.txt` lets HEAD/GET run even when LIST is denied. LIST, HEAD and
+one-byte GET show independent verdicts and status/timing. No listed key or object
+content is returned. A valid empty-object GET also proves that object is readable.
+Missing objects, empty prefixes, expired/signature errors, redirects, malformed
+responses and service/transport failures remain unknown. A normal HEAD 403
+without explicit `AccessDenied` also remains unknown. GET must honor the byte
+range; a full-body response does not count as a successful sample.
+
+For a SeaweedFS table bucket, optionally enter `namespace/table`. A signed
+`GET /v1/{bucket}/namespaces/{namespace}/tables/{table}` uses service `s3tables`;
+metadata GET uses service `s3`. Only an in-scope `s3://` metadata location is
+followed through the configured S3 endpoint. REST-returned URLs, FileIO settings
+and vended credentials are never used as destinations/credentials. Other Iceberg
+catalog authentication schemes are outside this check.
+
+For PostgreSQL, `db:example` independently evaluates CONNECT and CREATE (new
+schema creation). `schema:example.registry` also checks USAGE and CREATE on the
+existing schema (table creation). Database CREATE is not a prerequisite for
+creating a table in an existing schema. The native fixed-query evaluator logs in
+with the mapped subject DSN and verifies both session/current user. It never
+falls back to the observer DSN. Missing objects, identity mismatches, login or
+evaluation failures stay unknown. These are read-only ACL evaluations, without
+executing DDL, proving tablespace/resource availability or changing defaults for
+future tables. Check each requested schema and database independently.
+
+Repeat the same inputs after the approved permission change and reload. Current
+and previous in-page reports show their own target, time and expected verdict.
+Select expected **deny** to test an explicit neighboring, out-of-scope path;
+provide a known object key to check its GET boundary without relying on LIST.
+Unknown is never a passed negative check. Results are ephemeral and not persisted
+as approval evidence. The existing access-request links do not apply permissions.
+
+These server-side samples do not execute application SQL, scan data rows/manifests, verify
+pg_duckdb credential forwarding or prove a user's desktop client/network works.
+Keep those checks separate. Update the native image and matching WASM bundle
+together; remove `probe_operators` to disable this feature immediately on restart.
+
 ## Slack and GitHub
 
 `approvals.identities` maps authenticated subjects to unique approval identities,
